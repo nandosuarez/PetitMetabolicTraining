@@ -94,6 +94,10 @@ const elements = {
   valorTotal: document.getElementById("valorTotal"),
   abono: document.getElementById("abono"),
   observaciones: document.getElementById("observaciones"),
+  assistantEditJustificationShell: document.getElementById(
+    "assistant-edit-justification-shell"
+  ),
+  editJustification: document.getElementById("edit-justification"),
   filterLine: document.getElementById("filter-line"),
   filterStatus: document.getElementById("filter-status"),
   filterQuery: document.getElementById("filter-query"),
@@ -709,7 +713,9 @@ function renderMovementsView() {
 
   if (isAssistantUser()) {
     elements.movementFeedback.textContent =
-      "Como asistente operativo solo ves movimientos registrados en las ultimas 24 horas.";
+      elements.movementId.value
+        ? "Como asistente operativo puedes ajustar movimientos visibles de las ultimas 24 horas, pero debes justificar el cambio."
+        : "Como asistente operativo solo ves movimientos registrados en las ultimas 24 horas.";
   }
 
   elements.movementMetrics.innerHTML = `
@@ -720,10 +726,16 @@ function renderMovementsView() {
   `;
 
   if (!filtered.length) {
+    const emptyMessage = isAssistantUser()
+      ? state.movements.length
+        ? "No hay movimientos recientes que coincidan con los filtros seleccionados."
+        : "No tienes movimientos registrados en las ultimas 24 horas para este perfil."
+      : "No hay movimientos para los filtros seleccionados.";
+
     elements.movementTable.innerHTML = `
       <tr>
         <td colspan="13" class="empty-state">
-          No hay movimientos para los filtros seleccionados.
+          ${emptyMessage}
         </td>
       </tr>
     `;
@@ -1143,6 +1155,7 @@ async function handleMovementSubmit(event) {
     valorTotal: Number(elements.valorTotal.value || 0),
     abono: Number(elements.abono.value || 0),
     observaciones: elements.observaciones.value.trim(),
+    justificacionEdicion: elements.editJustification.value.trim(),
   };
 
   const validation = validateMovement(payload);
@@ -1195,9 +1208,15 @@ async function handleMovementTableClick(event) {
     elements.valorTotal.value = String(movement.valorTotal);
     elements.abono.value = String(movement.abono);
     elements.observaciones.value = movement.observaciones;
+    if (isAssistantUser()) {
+      elements.assistantEditJustificationShell.classList.remove("is-hidden");
+      elements.editJustification.value = "";
+    }
     elements.movementFormTitle.textContent = "Editar movimiento";
     elements.movementFeedback.textContent =
-      "Estas editando un movimiento existente. Guarda para actualizarlo.";
+      isAssistantUser()
+        ? "Estas editando un movimiento reciente. Debes justificar por que haces el ajuste."
+        : "Estas editando un movimiento existente. Guarda para actualizarlo.";
     switchView("movimientos");
     elements.descripcion.focus();
     return;
@@ -1394,6 +1413,16 @@ function validateMovement(payload) {
     };
   }
 
+  if (shouldRequireAssistantEditJustification()) {
+    if ((payload.justificacionEdicion || "").length < 10) {
+      return {
+        valid: false,
+        message:
+          "Debes escribir una justificacion de al menos 10 caracteres para editar esta transaccion.",
+      };
+    }
+  }
+
   return { valid: true };
 }
 
@@ -1501,6 +1530,8 @@ function resetMovementForm() {
   if ((state.lists.mediosPago || []).length) {
     elements.medioPago.value = state.lists.mediosPago[0];
   }
+  elements.editJustification.value = "";
+  elements.assistantEditJustificationShell.classList.add("is-hidden");
   elements.movementFeedback.textContent = isAssistantUser()
     ? "Como asistente operativo solo ves movimientos registrados en las ultimas 24 horas."
     : "El estado de pago se valida contra valor total y abono.";
@@ -1533,6 +1564,10 @@ function getSortedMovements(items) {
 
     return String(b.fecha).localeCompare(String(a.fecha));
   });
+}
+
+function shouldRequireAssistantEditJustification() {
+  return isAssistantUser() && Boolean(elements.movementId.value);
 }
 
 function isBetween(date, start, end) {

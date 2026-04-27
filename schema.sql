@@ -95,6 +95,16 @@ create table if not exists app_sessions (
   last_seen_at timestamptz not null default now()
 );
 
+create table if not exists movement_edit_audits (
+  id bigserial primary key,
+  movement_id bigint not null references movements(id) on delete cascade,
+  edited_by_user_id bigint not null references app_users(id),
+  justification text not null,
+  before_snapshot jsonb not null,
+  after_snapshot jsonb not null,
+  created_at timestamptz not null default now()
+);
+
 insert into catalog_items (group_name, value, sort_order) values
   ('gimnasioCategorias', 'Membresias', 1),
   ('gimnasioCategorias', 'Inscripcion', 2),

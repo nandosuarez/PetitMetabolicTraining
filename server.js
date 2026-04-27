@@ -405,10 +405,30 @@ app.post("/api/movements", asyncHandler(async (req, res) => {
 }));
 
 app.put("/api/movements/:id", asyncHandler(async (req, res) => {
-  await assertMovementMutationAllowed(req.authUser, Number(req.params.id));
+  const movementId = Number(req.params.id);
+  await assertMovementMutationAllowed(req.authUser, movementId);
 
   const payload = normalizeMovementPayload(req.body);
-  validateMovementPayload(payload);
+  validateMovementPayload(payload, {
+    requireEditJustification:
+      req.authUser?.role === "asistente_operativo",
+  });
+
+  const existingMovementResult = await query(
+    `
+      select *
+      from movements
+      where id = $1
+      limit 1
+    `,
+    [movementId]
+  );
+
+  if (!existingMovementResult.rows.length) {
+    return res.status(404).json({ error: "Movimiento no encontrado." });
+  }
+
+  const previousSnapshot = mapMovementRow(existingMovementResult.rows[0]);
 
   const result = await query(
     `
@@ -435,7 +455,7 @@ app.put("/api/movements/:id", asyncHandler(async (req, res) => {
       returning *
     `,
     [
-      Number(req.params.id),
+      movementId,
       payload.linea,
       payload.fecha,
       payload.tipo,
@@ -459,7 +479,31 @@ app.put("/api/movements/:id", asyncHandler(async (req, res) => {
     return res.status(404).json({ error: "Movimiento no encontrado." });
   }
 
-  res.json(mapMovementRow(result.rows[0]));
+  const updatedMovement = mapMovementRow(result.rows[0]);
+
+  if (req.authUser?.role === "asistente_operativo") {
+    await query(
+      `
+        insert into movement_edit_audits (
+          movement_id,
+          edited_by_user_id,
+          justification,
+          before_snapshot,
+          after_snapshot
+        )
+        values ($1, $2, $3, $4::jsonb, $5::jsonb)
+      `,
+      [
+        movementId,
+        Number(req.authUser.id),
+        payload.justificacionEdicion,
+        JSON.stringify(previousSnapshot),
+        JSON.stringify(updatedMovement),
+      ]
+    );
+  }
+
+  res.json(updatedMovement);
 }));
 
 app.delete("/api/movements/:id", asyncHandler(async (req, res) => {
@@ -610,10 +654,11 @@ function normalizeMovementPayload(body) {
     mesNumero,
     mesNombre: monthNames[(mesNumero || 1) - 1] || "",
     observaciones: String(body.observaciones || "").trim(),
+    justificacionEdicion: String(body.justificacionEdicion || "").trim(),
   };
 }
 
-function validateMovementPayload(payload) {
+function validateMovementPayload(payload, options = {}) {
   if (!["Gimnasio", "Restaurante"].includes(payload.linea)) {
     throw httpError(400, "Linea de negocio invalida.");
   }
@@ -666,6 +711,16 @@ function validateMovementPayload(payload) {
       "El estado de pago no coincide con el valor total y el abono."
     );
   }
+
+  if (
+    options.requireEditJustification &&
+    String(payload.justificacionEdicion || "").length < 10
+  ) {
+    throw httpError(
+      400,
+      "Debes registrar una justificacion de al menos 10 caracteres para editar la transaccion."
+    );
+  }
 }
 
 function mapCatalogRows(rows) {
@@ -707,6 +762,7 @@ function mapMovementRow(row) {
     mesNumero: row.month_number,
     mesNombre: row.month_name,
     observaciones: row.notes || "",
+    creadoEn: row.created_at,
     actualizadoEn: row.updated_at,
   };
 }
