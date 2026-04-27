@@ -1,0 +1,18 @@
+{
+  "name": "petit-metabolic-training-admin",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Control administrativo y operativo para Petit Metabolic Training con Node y PostgreSQL.",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js",
+    "db:init": "node scripts/init-db.js",
+    "db:check": "node scripts/check-db.js",
+    "user:create": "node scripts/create-app-user.js"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "express": "^4.21.2",
+    "pg": "^8.13.1"
+  }
+}

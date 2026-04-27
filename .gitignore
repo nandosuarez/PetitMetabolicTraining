@@ -1,0 +1,7 @@
+node_modules/
+.env
+.edge-profile/
+.edge-symbol-check/
+*.log
+coverage/
+dist/

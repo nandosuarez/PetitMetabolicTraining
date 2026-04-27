@@ -1,0 +1,735 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Petit Metabolic Training | Control Administrativo</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div id="login-screen" class="login-shell">
+      <div class="login-card">
+        <div class="login-visual">
+          <div class="login-logo-shell">
+            <img
+              src="./assets/logo-bandera.jpeg"
+              alt="Logo Petit Metabolic Training"
+            />
+          </div>
+          <p class="eyebrow">Acceso seguro</p>
+          <h1>Ingreso administrativo</h1>
+          <p class="login-copy">
+            Entra con tu usuario y contraseña para gestionar la operación
+            administrativa y financiera de Petit Metabolic Training.
+          </p>
+        </div>
+
+        <form id="login-form" class="login-form">
+          <label>
+            Usuario
+            <input
+              id="login-username"
+              name="username"
+              type="text"
+              autocomplete="username"
+              placeholder="Tu usuario"
+              required
+            />
+          </label>
+
+          <label>
+            Contraseña
+            <input
+              id="login-password"
+              name="password"
+              type="password"
+              autocomplete="current-password"
+              placeholder="Tu contraseña"
+              required
+            />
+          </label>
+
+          <div id="login-feedback" class="login-feedback">
+            Ingresa tus credenciales para continuar.
+          </div>
+
+          <button class="primary-button login-submit" type="submit">
+            Entrar al panel
+          </button>
+        </form>
+      </div>
+    </div>
+
+    <div id="password-change-screen" class="login-shell is-hidden">
+      <div class="login-card password-change-card">
+        <div class="login-visual">
+          <div class="login-logo-shell">
+            <img
+              src="./assets/logo-bandera.jpeg"
+              alt="Logo Petit Metabolic Training"
+            />
+          </div>
+          <p class="eyebrow">Cambio obligatorio</p>
+          <h1>Actualiza tu contraseña</h1>
+          <p class="login-copy">
+            Tu acceso está usando una contraseña temporal. Antes de continuar,
+            define una nueva clave segura para proteger la operación del
+            gimnasio.
+          </p>
+          <div id="password-change-user" class="login-feedback">
+            Usuario autenticado
+          </div>
+        </div>
+
+        <form id="password-change-form" class="login-form">
+          <label>
+            Contraseña actual o temporal
+            <input
+              id="password-change-current"
+              name="currentPassword"
+              type="password"
+              autocomplete="current-password"
+              placeholder="Escribe la contraseña temporal"
+              required
+            />
+          </label>
+
+          <label>
+            Nueva contraseña
+            <input
+              id="password-change-new"
+              name="newPassword"
+              type="password"
+              autocomplete="new-password"
+              placeholder="Mínimo 10 caracteres"
+              required
+            />
+          </label>
+
+          <label>
+            Confirmar nueva contraseña
+            <input
+              id="password-change-confirm"
+              name="confirmPassword"
+              type="password"
+              autocomplete="new-password"
+              placeholder="Repite la nueva contraseña"
+              required
+            />
+          </label>
+
+          <div id="password-change-feedback" class="login-feedback">
+            Debes cambiar la contraseña temporal para entrar al panel.
+          </div>
+
+          <div class="form-actions">
+            <button class="primary-button login-submit" type="submit">
+              Guardar nueva contraseña
+            </button>
+            <button
+              id="password-change-logout"
+              class="ghost-button danger"
+              type="button"
+            >
+              Cerrar sesión
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <div id="app-shell" class="app-shell is-hidden">
+      <aside class="sidebar">
+        <div class="brand-panel">
+          <div class="brand-logo-card">
+            <img
+              src="./assets/logo-bandera.jpeg"
+              alt="Logo Petit Metabolic Training"
+            />
+          </div>
+        </div>
+
+        <nav class="nav">
+          <button class="nav-link active" data-view="dashboard">Panel gerencial</button>
+          <button class="nav-link" data-view="movimientos">Movimientos</button>
+          <button class="nav-link" data-view="diario">Informe diario</button>
+          <button class="nav-link" data-view="semanal">Informe semanal</button>
+          <button class="nav-link" data-view="mensual">Resumen mensual</button>
+          <button class="nav-link" data-view="cartera">Cartera clientes</button>
+          <button class="nav-link" data-view="listas">Listas maestras</button>
+          <button class="nav-link admin-only is-hidden" data-view="usuarios">Usuarios</button>
+        </nav>
+
+        <section class="sidebar-card">
+          <p class="section-kicker">Estado actual</p>
+          <div id="sidebar-metrics" class="sidebar-metrics"></div>
+        </section>
+      </aside>
+
+      <main class="main-content">
+        <header class="topbar">
+          <div>
+            <p class="eyebrow">Control administrativo</p>
+            <h2 id="view-title">Panel gerencial</h2>
+          </div>
+
+          <div class="topbar-actions">
+            <button id="quick-movement" class="ghost-button" type="button">
+              Nuevo movimiento
+            </button>
+            <button id="reset-data" class="ghost-button" type="button">
+              Recargar datos
+            </button>
+            <span id="session-user" class="session-pill is-hidden"></span>
+            <button id="logout-button" class="ghost-button danger" type="button">
+              Cerrar sesión
+            </button>
+            <span id="save-status" class="save-pill">Conectando a PostgreSQL...</span>
+          </div>
+        </header>
+
+        <section id="dashboard-view" class="view active">
+          <div class="hero-card" aria-hidden="true"></div>
+
+          <div id="dashboard-summary" class="stats-grid"></div>
+
+          <div class="content-grid two-up">
+            <section class="panel">
+              <div class="panel-head">
+                <div>
+                  <p class="section-kicker">Seguimiento</p>
+                  <h3>Alertas de cartera</h3>
+                </div>
+              </div>
+              <div id="dashboard-alerts" class="stack-list"></div>
+            </section>
+
+            <section class="panel">
+              <div class="panel-head">
+                <div>
+                  <p class="section-kicker">Actividad reciente</p>
+                  <h3>Últimos movimientos</h3>
+                </div>
+              </div>
+              <div id="dashboard-recent" class="stack-list"></div>
+            </section>
+          </div>
+
+          <section class="panel">
+            <div class="panel-head">
+              <div>
+                <p class="section-kicker">Caja real por mes</p>
+                <h3>Radar anual</h3>
+              </div>
+            </div>
+            <div id="dashboard-month-bars" class="month-bars"></div>
+          </section>
+        </section>
+
+        <section id="movimientos-view" class="view">
+          <div class="content-grid two-up align-start">
+            <section class="panel">
+              <div class="panel-head">
+                <div>
+                  <p class="section-kicker">Registro operativo</p>
+                  <h3 id="movement-form-title">Registrar movimiento</h3>
+                </div>
+              </div>
+
+              <form id="movement-form" class="form-grid">
+                <input id="movement-id" type="hidden" />
+
+                <label>
+                  Línea de negocio
+                  <select id="linea" name="linea" required>
+                    <option value="Gimnasio">Gimnasio</option>
+                    <option value="Restaurante">Restaurante</option>
+                  </select>
+                </label>
+
+                <label>
+                  Fecha
+                  <input id="fecha" name="fecha" type="date" required />
+                </label>
+
+                <label>
+                  Tipo
+                  <select id="tipo" name="tipo" required></select>
+                </label>
+
+                <label>
+                  Categoría
+                  <select id="categoria" name="categoria" required></select>
+                </label>
+
+                <label>
+                  Cliente
+                  <input
+                    id="cliente"
+                    name="cliente"
+                    type="text"
+                    placeholder="Nombre del cliente si aplica"
+                  />
+                </label>
+
+                <label class="span-2">
+                  Descripción
+                  <input
+                    id="descripcion"
+                    name="descripcion"
+                    type="text"
+                    placeholder="Detalle corto del ingreso o gasto"
+                    required
+                  />
+                </label>
+
+                <label>
+                  Estado de pago
+                  <select id="estadoPago" name="estadoPago" required></select>
+                </label>
+
+                <label>
+                  Medio de pago
+                  <select id="medioPago" name="medioPago" required></select>
+                </label>
+
+                <label>
+                  Valor total
+                  <input
+                    id="valorTotal"
+                    name="valorTotal"
+                    type="number"
+                    min="0"
+                    step="100"
+                    placeholder="0"
+                    required
+                  />
+                </label>
+
+                <label>
+                  Abono recibido / pagado
+                  <input
+                    id="abono"
+                    name="abono"
+                    type="number"
+                    min="0"
+                    step="100"
+                    placeholder="0"
+                    required
+                  />
+                </label>
+
+                <label class="span-2">
+                  Observaciones
+                  <textarea
+                    id="observaciones"
+                    name="observaciones"
+                    rows="3"
+                    placeholder="Notas operativas, acuerdos o aclaraciones"
+                  ></textarea>
+                </label>
+
+                <div class="form-note span-2" id="movement-feedback">
+                  El estado de pago se valida contra valor total y abono para
+                  mantener la misma lógica del Excel.
+                </div>
+
+                <div class="form-actions span-2">
+                  <button class="primary-button" type="submit">
+                    Guardar movimiento
+                  </button>
+                  <button id="cancel-edit" class="ghost-button" type="button">
+                    Cancelar edición
+                  </button>
+                </div>
+              </form>
+            </section>
+
+            <section class="panel">
+              <div class="panel-head">
+                <div>
+                  <p class="section-kicker">Filtros</p>
+                  <h3>Explorar movimientos</h3>
+                </div>
+              </div>
+
+              <div class="filter-grid">
+                <label>
+                  Línea
+                  <select id="filter-line">
+                    <option value="Todas">Todas</option>
+                    <option value="Gimnasio">Gimnasio</option>
+                    <option value="Restaurante">Restaurante</option>
+                  </select>
+                </label>
+
+                <label>
+                  Estado
+                  <select id="filter-status">
+                    <option value="Todos">Todos</option>
+                  </select>
+                </label>
+
+                <label class="span-2">
+                  Buscar
+                  <input
+                    id="filter-query"
+                    type="search"
+                    placeholder="Cliente, categoría, descripción..."
+                  />
+                </label>
+              </div>
+
+              <div id="movement-metrics" class="mini-stats"></div>
+            </section>
+          </div>
+
+          <section class="panel">
+            <div class="panel-head">
+              <div>
+                <p class="section-kicker">Libro operativo</p>
+                <h3>Movimientos registrados</h3>
+              </div>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Fecha</th>
+                    <th>Línea</th>
+                    <th>Tipo</th>
+                    <th>Categoría</th>
+                    <th>Cliente</th>
+                    <th>Descripción</th>
+                    <th>Estado</th>
+                    <th>Medio</th>
+                    <th>Total</th>
+                    <th>Abono</th>
+                    <th>Saldo</th>
+                    <th>Flujo</th>
+                    <th>Acciones</th>
+                  </tr>
+                </thead>
+                <tbody id="movements-table"></tbody>
+              </table>
+            </div>
+          </section>
+        </section>
+
+        <section id="diario-view" class="view">
+          <section class="panel">
+            <div class="panel-head">
+              <div>
+                <p class="section-kicker">Cierre diario</p>
+                <h3>Informe diario de gerencia</h3>
+              </div>
+              <label class="inline-label">
+                Fecha
+                <input id="daily-date" type="date" />
+              </label>
+            </div>
+
+            <div id="daily-metrics" class="report-grid"></div>
+          </section>
+
+          <section class="panel">
+            <div class="panel-head">
+              <div>
+                <p class="section-kicker">Seguimiento del día</p>
+                <h3>Alertas y observaciones</h3>
+              </div>
+            </div>
+            <textarea
+              id="daily-notes"
+              class="notes-box"
+              rows="6"
+              placeholder="Incidentes, novedades, acuerdos o alertas del día"
+            ></textarea>
+            <div class="form-actions">
+              <button id="save-daily-notes" class="primary-button" type="button">
+                Guardar observaciones
+              </button>
+            </div>
+          </section>
+        </section>
+
+        <section id="semanal-view" class="view">
+          <section class="panel">
+            <div class="panel-head">
+              <div>
+                <p class="section-kicker">Cierre semanal</p>
+                <h3>Informe semanal de gerencia</h3>
+              </div>
+            </div>
+
+            <div class="filter-grid">
+              <label>
+                Fecha inicio
+                <input id="weekly-start" type="date" />
+              </label>
+              <label>
+                Fecha fin
+                <input id="weekly-end" type="date" />
+              </label>
+            </div>
+
+            <div id="weekly-metrics" class="report-grid"></div>
+          </section>
+
+          <section class="panel">
+            <div class="panel-head">
+              <div>
+                <p class="section-kicker">Observaciones</p>
+                <h3>Acuerdos de la semana</h3>
+              </div>
+            </div>
+            <textarea
+              id="weekly-notes"
+              class="notes-box"
+              rows="6"
+              placeholder="Resumen de la semana, acuerdos y prioridades"
+            ></textarea>
+            <div class="form-actions">
+              <button id="save-weekly-notes" class="primary-button" type="button">
+                Guardar observaciones
+              </button>
+            </div>
+          </section>
+        </section>
+
+        <section id="mensual-view" class="view">
+          <section class="panel">
+            <div class="panel-head">
+              <div>
+                <p class="section-kicker">Análisis mensual</p>
+                <h3>Resumen mensual por línea de negocio</h3>
+              </div>
+              <label class="inline-label">
+                Año
+                <input id="monthly-year" type="number" min="2024" step="1" />
+              </label>
+            </div>
+
+            <div id="monthly-annual-cards" class="stats-grid"></div>
+
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Mes</th>
+                    <th>Ingresos Gimnasio</th>
+                    <th>Gastos Gimnasio</th>
+                    <th>Utilidad Gimnasio</th>
+                    <th>Ingresos Restaurante</th>
+                    <th>Gastos Restaurante</th>
+                    <th>Utilidad Restaurante</th>
+                    <th>Ingresos Totales</th>
+                    <th>Gastos Totales</th>
+                    <th>Utilidad Total</th>
+                  </tr>
+                </thead>
+                <tbody id="monthly-table"></tbody>
+              </table>
+            </div>
+          </section>
+        </section>
+
+        <section id="cartera-view" class="view">
+          <section class="panel">
+            <div class="panel-head">
+              <div>
+                <p class="section-kicker">Clientes con saldo</p>
+                <h3>Cartera de clientes</h3>
+              </div>
+            </div>
+            <div id="portfolio-summary" class="stats-grid"></div>
+
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Línea</th>
+                    <th>Fecha</th>
+                    <th>Cliente</th>
+                    <th>Categoría</th>
+                    <th>Descripción</th>
+                    <th>Estado</th>
+                    <th>Total</th>
+                    <th>Abono</th>
+                    <th>Saldo</th>
+                    <th>Medio</th>
+                    <th>Observaciones</th>
+                  </tr>
+                </thead>
+                <tbody id="portfolio-table"></tbody>
+              </table>
+            </div>
+          </section>
+        </section>
+
+        <section id="listas-view" class="view">
+          <section class="panel">
+            <div class="panel-head">
+              <div>
+                <p class="section-kicker">Catálogos base</p>
+                <h3>Listas maestras editables</h3>
+              </div>
+            </div>
+
+            <div class="content-grid three-up">
+              <div class="list-editor-card">
+                <h4>Categorías gimnasio</h4>
+                <form class="inline-form" data-list-form="gimnasioCategorias">
+                  <input name="value" type="text" placeholder="Agregar categoría" required />
+                  <button class="small-button" type="submit">Agregar</button>
+                </form>
+                <div id="list-gimnasioCategorias" class="chips-wrap"></div>
+              </div>
+
+              <div class="list-editor-card">
+                <h4>Categorías restaurante</h4>
+                <form class="inline-form" data-list-form="restauranteCategorias">
+                  <input name="value" type="text" placeholder="Agregar categoría" required />
+                  <button class="small-button" type="submit">Agregar</button>
+                </form>
+                <div id="list-restauranteCategorias" class="chips-wrap"></div>
+              </div>
+
+              <div class="list-editor-card">
+                <h4>Medios de pago</h4>
+                <form class="inline-form" data-list-form="mediosPago">
+                  <input name="value" type="text" placeholder="Agregar medio" required />
+                  <button class="small-button" type="submit">Agregar</button>
+                </form>
+                <div id="list-mediosPago" class="chips-wrap"></div>
+              </div>
+
+              <div class="list-editor-card">
+                <h4>Estados de pago</h4>
+                <form class="inline-form" data-list-form="estadosPago">
+                  <input name="value" type="text" placeholder="Agregar estado" required />
+                  <button class="small-button" type="submit">Agregar</button>
+                </form>
+                <div id="list-estadosPago" class="chips-wrap"></div>
+              </div>
+
+              <div class="list-editor-card">
+                <h4>Tipos</h4>
+                <form class="inline-form" data-list-form="tipos">
+                  <input name="value" type="text" placeholder="Agregar tipo" required />
+                  <button class="small-button" type="submit">Agregar</button>
+                </form>
+                <div id="list-tipos" class="chips-wrap"></div>
+              </div>
+            </div>
+          </section>
+        </section>
+
+        <section id="usuarios-view" class="view">
+          <div class="content-grid two-up align-start">
+            <section class="panel">
+              <div class="panel-head">
+                <div>
+                  <p class="section-kicker">Accesos del sistema</p>
+                  <h3>Crear usuario</h3>
+                </div>
+              </div>
+
+              <form id="user-form" class="form-grid">
+                <label>
+                  Nombre visible
+                  <input
+                    id="user-full-name"
+                    name="fullName"
+                    type="text"
+                    placeholder="Nombre del colaborador"
+                  />
+                </label>
+
+                <label>
+                  Usuario
+                  <input
+                    id="user-username"
+                    name="username"
+                    type="text"
+                    autocomplete="off"
+                    placeholder="usuario.petitt"
+                    required
+                  />
+                </label>
+
+                <label>
+                  Perfil
+                  <select id="user-role" name="role" required>
+                    <option value="administrador">Administrador</option>
+                    <option value="asistente_operativo">Asistente operativo</option>
+                  </select>
+                </label>
+
+                <label>
+                  Contraseña temporal
+                  <input
+                    id="user-password"
+                    name="password"
+                    type="password"
+                    autocomplete="new-password"
+                    placeholder="Minimo 10 caracteres"
+                    required
+                  />
+                </label>
+
+                <div id="user-feedback" class="form-note span-2">
+                  Solo el perfil administrador puede crear o inactivar usuarios.
+                </div>
+
+                <div class="form-actions span-2">
+                  <button class="primary-button" type="submit">
+                    Crear usuario
+                  </button>
+                </div>
+              </form>
+            </section>
+
+            <section class="panel">
+              <div class="panel-head">
+                <div>
+                  <p class="section-kicker">Resumen</p>
+                  <h3>Estado de accesos</h3>
+                </div>
+              </div>
+              <div id="users-metrics" class="mini-stats"></div>
+            </section>
+          </div>
+
+          <section class="panel">
+            <div class="panel-head">
+              <div>
+                <p class="section-kicker">Consulta</p>
+                <h3>Usuarios registrados</h3>
+              </div>
+            </div>
+
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Usuario</th>
+                    <th>Nombre</th>
+                    <th>Perfil</th>
+                    <th>Estado</th>
+                    <th>Creado</th>
+                    <th>Actualizado</th>
+                    <th>Acciones</th>
+                  </tr>
+                </thead>
+                <tbody id="users-table"></tbody>
+              </table>
+            </div>
+          </section>
+        </section>
+      </main>
+    </div>
+
+    <script src="./app.js"></script>
+  </body>
+</html>
