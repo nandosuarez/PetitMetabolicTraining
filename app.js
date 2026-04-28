@@ -116,7 +116,6 @@ const elements = {
   monthlyYear: document.getElementById("monthly-year"),
   monthlyAnnualCards: document.getElementById("monthly-annual-cards"),
   monthlyTable: document.getElementById("monthly-table"),
-  clientOptions: document.getElementById("client-options"),
   clientForm: document.getElementById("client-form"),
   clientName: document.getElementById("client-name"),
   clientDocument: document.getElementById("client-document"),
@@ -731,7 +730,11 @@ function renderMovementsView() {
     elements.movementFeedback.textContent =
       elements.movementId.value
         ? "Como asistente operativo puedes ajustar movimientos visibles de las ultimas 24 horas, pero debes justificar el cambio."
-        : "Como asistente operativo solo ves movimientos registrados en las ultimas 24 horas.";
+        : `Como asistente operativo estas viendo ${state.movements.length} movimientos registrados en las ultimas 24 horas.`;
+  } else {
+    elements.movementFeedback.textContent = elements.movementId.value
+      ? "Estas editando un movimiento existente. Guarda para actualizarlo."
+      : `Se cargaron ${state.movements.length} movimientos registrados en el sistema.`;
   }
 
   elements.movementMetrics.innerHTML = `
@@ -1345,7 +1348,7 @@ async function handleMovementTableClick(event) {
     elements.fecha.value = movement.fecha;
     elements.tipo.value = movement.tipo;
     elements.categoria.value = movement.categoria;
-    elements.cliente.value = movement.cliente;
+    setClientSelection(movement.cliente);
     elements.descripcion.value = movement.descripcion;
     elements.estadoPago.value = movement.estadoPago;
     elements.medioPago.value = movement.medioPago;
@@ -1593,13 +1596,36 @@ function fillSelect(select, values) {
     .join("");
 }
 
-function fillClientOptions() {
+function fillClientOptions(selectedValue = elements.cliente.value || "") {
   const activeClients = (state.clients || []).filter((item) => item.isActive);
-  elements.clientOptions.innerHTML = activeClients
-    .map(
-      (client) => `<option value="${escapeHtml(client.fullName)}"></option>`
-    )
-    .join("");
+  const currentValue = String(selectedValue || "").trim();
+  const activeNames = activeClients.map((item) => item.fullName);
+  const options = ['<option value="">Sin cliente</option>'];
+
+  activeNames.forEach((fullName) => {
+    options.push(
+      `<option value="${escapeHtml(fullName)}">${escapeHtml(fullName)}</option>`
+    );
+  });
+
+  if (currentValue && !activeNames.includes(currentValue)) {
+    options.push(
+      `<option value="${escapeHtml(currentValue)}">${escapeHtml(
+        `${currentValue} (histórico)`
+      )}</option>`
+    );
+  }
+
+  elements.cliente.innerHTML = options.join("");
+  elements.cliente.value = currentValue;
+  if (elements.cliente.value !== currentValue) {
+    elements.cliente.value = "";
+  }
+}
+
+function setClientSelection(value) {
+  const cleanValue = String(value || "").trim();
+  fillClientOptions(cleanValue);
 }
 
 function buildMonthlyRows(year) {
@@ -1673,6 +1699,7 @@ function resetMovementForm() {
   elements.movementFormTitle.textContent = "Registrar movimiento";
   elements.fecha.value = getCurrentIsoDate();
   elements.linea.value = "Gimnasio";
+  setClientSelection("");
   syncCategoryOptions();
   if ((state.lists.tipos || []).length) {
     elements.tipo.value = state.lists.tipos[0];
