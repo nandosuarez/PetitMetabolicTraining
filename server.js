@@ -2,7 +2,7 @@ require("dotenv").config();
 
 const express = require("express");
 const path = require("path");
-const { query, checkConnection } = require("./server/db");
+const { query, withClient, checkConnection } = require("./server/db");
 const {
   clearSessionCookie,
   countActiveAdminUsers,
@@ -51,6 +51,11 @@ const catalogGroups = new Set([
   "restauranteCategorias",
   "tipos",
   "mediosPago",
+  "estadosPago",
+]);
+
+const protectedCatalogGroups = new Set([
+  "tipos",
   "estadosPago",
 ]);
 
@@ -381,11 +386,20 @@ app.patch(
 app.get("/api/bootstrap", asyncHandler(async (req, res) => {
   const isAssistantOperative = req.authUser?.role === "asistente_operativo";
 
-  const [catalogResult, movementResult, portfolioResult, notesResult, clientResult] =
+  const [
+    catalogResult,
+    movementResult,
+    boxMovementResult,
+    portfolioResult,
+    notesResult,
+    clientResult,
+    collectionResult,
+    transferResult,
+  ] =
     await Promise.all([
     query(
       `
-        select group_name, value
+        select id, group_name, value, sort_order, is_active, created_at, updated_at
         from catalog_items
         order by group_name asc, sort_order asc, value asc
       `
@@ -395,6 +409,13 @@ app.get("/api/bootstrap", asyncHandler(async (req, res) => {
         select *
         from movements
         ${isAssistantOperative ? "where created_at >= now() - interval '24 hours'" : ""}
+        order by movement_date desc, updated_at desc, id desc
+      `
+    ),
+    query(
+      `
+        select *
+        from movements
         order by movement_date desc, updated_at desc, id desc
       `
     ),
@@ -422,13 +443,41 @@ app.get("/api/bootstrap", asyncHandler(async (req, res) => {
         order by is_active desc, full_name asc, id asc
       `
     ),
+    query(
+      `
+        select
+          mc.*,
+          coalesce(nullif(u.full_name, ''), u.username) as registered_by_name,
+          u.username as registered_by_username
+        from movement_collections mc
+        join app_users u
+          on u.id = mc.registered_by_user_id
+        order by mc.collection_date desc, mc.created_at desc, mc.id desc
+      `
+    ),
+    query(
+      `
+        select
+          bt.*,
+          coalesce(nullif(u.full_name, ''), u.username) as registered_by_name,
+          u.username as registered_by_username
+        from box_transfers bt
+        join app_users u
+          on u.id = bt.registered_by_user_id
+        order by bt.transfer_date desc, bt.created_at desc, bt.id desc
+      `
+    ),
   ]);
 
   res.json({
     lists: mapCatalogRows(catalogResult.rows),
+    catalogItems: mapCatalogItemRows(catalogResult.rows),
     movements: movementResult.rows.map(mapMovementRow),
+    boxMovements: boxMovementResult.rows.map(mapMovementRow),
     portfolioMovements: portfolioResult.rows.map(mapMovementRow),
     clients: clientResult.rows.map(mapClientRow),
+    collections: collectionResult.rows.map(mapCollectionRow),
+    boxTransfers: transferResult.rows.map(mapBoxTransferRow),
     notes: mapNotesRows(notesResult.rows),
   });
 }));
@@ -511,6 +560,31 @@ app.put("/api/movements/:id", asyncHandler(async (req, res) => {
   }
 
   const previousSnapshot = mapMovementRow(existingMovementResult.rows[0]);
+  const collectionsResult = await query(
+    `
+      select coalesce(sum(amount), 0) as collected_amount
+      from movement_collections
+      where movement_id = $1
+    `,
+    [movementId]
+  );
+  const collectedAmount = Number(
+    collectionsResult.rows[0]?.collected_amount || 0
+  );
+
+  if (collectedAmount > 0 && payload.tipo !== "Ingreso") {
+    return res.status(400).json({
+      error:
+        "No puedes cambiar este movimiento a una salida porque ya tiene cobros registrados en cartera.",
+    });
+  }
+
+  if (payload.abono < collectedAmount) {
+    return res.status(400).json({
+      error:
+        "El abono no puede ser menor al valor ya registrado en cobros de cartera.",
+    });
+  }
 
   const result = await query(
     `
@@ -603,6 +677,192 @@ app.delete("/api/movements/:id", asyncHandler(async (req, res) => {
   res.status(204).send();
 }));
 
+app.post("/api/movements/:id/collections", asyncHandler(async (req, res) => {
+  const movementId = Number(req.params.id);
+
+  if (!Number.isInteger(movementId) || movementId <= 0) {
+    return res.status(400).json({ error: "Movimiento invalido." });
+  }
+
+  const payload = normalizeCollectionPayload(req.body);
+  validateCollectionPayload(payload);
+
+  const movementResult = await query(
+    `
+      select *
+      from movements
+      where id = $1
+      limit 1
+    `,
+    [movementId]
+  );
+
+  if (!movementResult.rows.length) {
+    return res.status(404).json({ error: "Movimiento no encontrado." });
+  }
+
+  const movementRow = movementResult.rows[0];
+  const movement = mapMovementRow(movementRow);
+  const pendingBalance = Number(movement.saldoPendiente || 0);
+
+  if (movement.tipo !== "Ingreso") {
+    return res.status(400).json({
+      error: "Solo puedes registrar cobros sobre ingresos que esten en cartera.",
+    });
+  }
+
+  if (!(pendingBalance > 0)) {
+    return res.status(400).json({
+      error: "El movimiento seleccionado ya no tiene saldo pendiente.",
+    });
+  }
+
+  if (payload.amount > pendingBalance) {
+    return res.status(400).json({
+      error: "El cobro no puede ser mayor que el saldo pendiente.",
+    });
+  }
+
+  const paymentMethodResult = await query(
+    `
+      select 1
+      from catalog_items
+      where group_name = 'mediosPago'
+        and value = $1
+        and is_active = true
+      limit 1
+    `,
+    [payload.paymentMethod]
+  );
+
+  if (!paymentMethodResult.rows.length) {
+    return res.status(400).json({
+      error: "La caja seleccionada para el cobro no existe o esta inactiva.",
+    });
+  }
+
+  const nextPaidAmount = Number(movement.abono || 0) + payload.amount;
+  const totalAmount = Number(movement.valorTotal || 0);
+  const nextBalance = Math.max(totalAmount - nextPaidAmount, 0);
+  const nextStatus = resolvePaymentStatus(nextPaidAmount, totalAmount);
+  const nextCashFlow = movement.tipo === "Ingreso" ? nextPaidAmount : nextPaidAmount * -1;
+
+  const collectionResult = await query(
+    `
+      insert into movement_collections (
+        movement_id,
+        collection_date,
+        amount,
+        payment_method,
+        notes,
+        registered_by_user_id
+      )
+      values ($1, $2, $3, $4, $5, $6)
+      returning *
+    `,
+    [
+      movementId,
+      payload.collectionDate,
+      payload.amount,
+      payload.paymentMethod,
+      payload.notes,
+      Number(req.authUser.id),
+    ]
+  );
+
+  const updatedMovementResult = await query(
+    `
+      update movements
+      set
+        paid_amount = $2,
+        balance_due = $3,
+        payment_status = $4,
+        cash_flow = $5,
+        updated_at = now()
+      where id = $1
+      returning *
+    `,
+    [
+      movementId,
+      nextPaidAmount,
+      nextBalance,
+      nextStatus,
+      nextCashFlow,
+    ]
+  );
+
+  res.status(201).json({
+    collection: mapCollectionRow({
+      ...collectionResult.rows[0],
+      registered_by_name:
+        req.authUser.fullName || req.authUser.username || "Sistema",
+      registered_by_username: req.authUser.username || "",
+    }),
+    movement: mapMovementRow(updatedMovementResult.rows[0]),
+  });
+}));
+
+app.post("/api/box-transfers", asyncHandler(async (req, res) => {
+  const payload = normalizeBoxTransferPayload(req.body);
+  validateBoxTransferPayload(payload);
+
+  const transferRow = await withClient(async (client) => {
+    const methods = await listActivePaymentMethodsFromClient(client);
+
+    if (!methods.includes(payload.sourcePaymentMethod)) {
+      throw httpError(400, "La caja de origen no existe o esta inactiva.");
+    }
+
+    if (!methods.includes(payload.targetPaymentMethod)) {
+      throw httpError(400, "La caja destino no existe o esta inactiva.");
+    }
+
+    const balances = await calculatePaymentBoxBalancesFromClient(client);
+    const sourceBalance = Number(balances[payload.sourcePaymentMethod] || 0);
+
+    if (sourceBalance < payload.amount) {
+      throw httpError(
+        400,
+        `La caja ${payload.sourcePaymentMethod} no tiene saldo suficiente para mover ${payload.amount}.`
+      );
+    }
+
+    const result = await client.query(
+      `
+        insert into box_transfers (
+          transfer_date,
+          source_payment_method,
+          target_payment_method,
+          amount,
+          notes,
+          registered_by_user_id
+        )
+        values ($1, $2, $3, $4, $5, $6)
+        returning *
+      `,
+      [
+        payload.transferDate,
+        payload.sourcePaymentMethod,
+        payload.targetPaymentMethod,
+        payload.amount,
+        payload.notes,
+        Number(req.authUser.id),
+      ]
+    );
+
+    return result.rows[0];
+  });
+
+  res.status(201).json(
+    mapBoxTransferRow({
+      ...transferRow,
+      registered_by_name:
+        req.authUser.fullName || req.authUser.username || "Sistema",
+      registered_by_username: req.authUser.username || "",
+    })
+  );
+}));
+
 app.post("/api/notes", requireAdmin, asyncHandler(async (req, res) => {
   const noteType = String(req.body.noteType || "").trim();
   const noteKey = String(req.body.noteKey || "").trim();
@@ -641,44 +901,137 @@ app.post("/api/catalogs/:group/items", requireAdmin, asyncHandler(async (req, re
     return res.status(400).json({ error: "Grupo de catalogo invalido." });
   }
 
+  if (protectedCatalogGroups.has(group)) {
+    return res.status(400).json({
+      error:
+        "Este catalogo es estructural del sistema. No se pueden agregar nuevos valores desde la interfaz.",
+    });
+  }
+
   if (!value) {
     return res.status(400).json({ error: "El valor es obligatorio." });
   }
 
-  await query(
+  const result = await query(
     `
-      insert into catalog_items (group_name, value, sort_order)
+      insert into catalog_items (group_name, value, sort_order, is_active, updated_at)
       values (
         $1,
         $2,
-        coalesce((select max(sort_order) + 1 from catalog_items where group_name = $1), 1)
+        coalesce((select max(sort_order) + 1 from catalog_items where group_name = $1), 1),
+        true,
+        now()
       )
-      on conflict (group_name, value) do nothing
+      on conflict (group_name, value)
+      do update set
+        is_active = true,
+        updated_at = now()
+      returning *
     `,
     [group, value]
   );
 
-  res.status(201).json({ ok: true });
+  res.status(201).json(mapCatalogItemRow(result.rows[0]));
 }));
 
-app.delete("/api/catalogs/:group/items", requireAdmin, asyncHandler(async (req, res) => {
+app.patch("/api/catalogs/:group/items/:id", requireAdmin, asyncHandler(async (req, res) => {
   const group = String(req.params.group || "");
-  const value = String(req.query.value || "").trim();
+  const itemId = Number(req.params.id);
+  const hasValue = Object.prototype.hasOwnProperty.call(req.body || {}, "value");
+  const hasActive = Object.prototype.hasOwnProperty.call(req.body || {}, "isActive");
+  const nextValue = hasValue ? String(req.body.value || "").trim() : null;
+  const nextActive = hasActive ? Boolean(req.body.isActive) : null;
 
   if (!catalogGroups.has(group)) {
     return res.status(400).json({ error: "Grupo de catalogo invalido." });
   }
 
-  if (!value) {
-    return res.status(400).json({ error: "El valor es obligatorio." });
+  if (!Number.isInteger(itemId) || itemId <= 0) {
+    return res.status(400).json({ error: "Item de catalogo invalido." });
   }
 
-  await query(
-    "delete from catalog_items where group_name = $1 and value = $2",
-    [group, value]
-  );
+  if (!hasValue && !hasActive) {
+    return res.status(400).json({
+      error: "Debes enviar un nuevo nombre o un cambio de estado.",
+    });
+  }
 
-  res.status(204).send();
+  if (protectedCatalogGroups.has(group)) {
+    return res.status(400).json({
+      error:
+        "Este catalogo es estructural del sistema. No se puede editar ni inactivar desde la interfaz.",
+    });
+  }
+
+  if (hasValue && !nextValue) {
+    return res.status(400).json({ error: "El nombre del item es obligatorio." });
+  }
+
+  try {
+    const updatedItem = await withClient(async (client) => {
+      await client.query("begin");
+
+      try {
+        const currentResult = await client.query(
+          `
+            select *
+            from catalog_items
+            where id = $1 and group_name = $2
+            limit 1
+          `,
+          [itemId, group]
+        );
+
+        if (!currentResult.rows.length) {
+          throw httpError(404, "Item de catalogo no encontrado.");
+        }
+
+        const currentRow = currentResult.rows[0];
+        const currentValue = String(currentRow.value || "");
+        const finalValue = hasValue ? nextValue : currentValue;
+        const finalActive = hasActive ? nextActive : Boolean(currentRow.is_active);
+
+        const result = await client.query(
+          `
+            update catalog_items
+            set
+              value = $3,
+              is_active = $4,
+              updated_at = now()
+            where id = $1 and group_name = $2
+            returning *
+          `,
+          [itemId, group, finalValue, finalActive]
+        );
+
+        if (hasValue && finalValue !== currentValue) {
+          await syncCatalogValueRename(client, group, currentValue, finalValue);
+        }
+
+        await client.query("commit");
+        return result.rows[0];
+      } catch (error) {
+        await client.query("rollback");
+        throw error;
+      }
+    });
+
+    res.json(mapCatalogItemRow(updatedItem));
+  } catch (error) {
+    if (error?.code === "23505") {
+      return res.status(409).json({
+        error: "Ya existe un item con ese nombre dentro de esta lista.",
+      });
+    }
+
+    throw error;
+  }
+}));
+
+app.delete("/api/catalogs/:group/items", requireAdmin, asyncHandler(async (_req, res) => {
+  res.status(405).json({
+    error: "Los items del catalogo ya no se eliminan. Debes inactivarlos.",
+  });
 }));
 
 app.get("*", (_req, res) => {
@@ -763,6 +1116,25 @@ function normalizeMovementPayload(body) {
   };
 }
 
+function normalizeCollectionPayload(body) {
+  return {
+    collectionDate: String(body.collectionDate || "").trim(),
+    amount: Number(body.amount || 0),
+    paymentMethod: String(body.paymentMethod || "").trim(),
+    notes: String(body.notes || "").trim(),
+  };
+}
+
+function normalizeBoxTransferPayload(body) {
+  return {
+    transferDate: String(body.transferDate || "").trim(),
+    sourcePaymentMethod: String(body.sourcePaymentMethod || "").trim(),
+    targetPaymentMethod: String(body.targetPaymentMethod || "").trim(),
+    amount: Number(body.amount || 0),
+    notes: String(body.notes || "").trim(),
+  };
+}
+
 function validateMovementPayload(payload, options = {}) {
   if (!["Gimnasio", "Restaurante"].includes(payload.linea)) {
     throw httpError(400, "Linea de negocio invalida.");
@@ -772,7 +1144,7 @@ function validateMovementPayload(payload, options = {}) {
     throw httpError(400, "La fecha es obligatoria.");
   }
 
-  if (!["Ingreso", "Gasto"].includes(payload.tipo)) {
+  if (!["Ingreso", "Gasto", "Costo"].includes(payload.tipo)) {
     throw httpError(400, "Tipo de movimiento invalido.");
   }
 
@@ -828,24 +1200,271 @@ function validateMovementPayload(payload, options = {}) {
   }
 }
 
+function validateCollectionPayload(payload) {
+  if (!payload.collectionDate) {
+    throw httpError(400, "La fecha del cobro es obligatoria.");
+  }
+
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(payload.collectionDate)) {
+    throw httpError(400, "La fecha del cobro no tiene un formato valido.");
+  }
+
+  if (!Number.isFinite(payload.amount) || !(payload.amount > 0)) {
+    throw httpError(400, "El valor del cobro debe ser mayor a cero.");
+  }
+
+  if (!payload.paymentMethod) {
+    throw httpError(400, "El medio de pago del cobro es obligatorio.");
+  }
+}
+
+function validateBoxTransferPayload(payload) {
+  if (!payload.transferDate) {
+    throw httpError(400, "La fecha del movimiento entre cajas es obligatoria.");
+  }
+
+  if (!payload.sourcePaymentMethod) {
+    throw httpError(400, "Selecciona la caja de origen.");
+  }
+
+  if (!payload.targetPaymentMethod) {
+    throw httpError(400, "Selecciona la caja de destino.");
+  }
+
+  if (payload.sourcePaymentMethod === payload.targetPaymentMethod) {
+    throw httpError(400, "La caja de origen y la de destino deben ser diferentes.");
+  }
+
+  if (!(payload.amount > 0)) {
+    throw httpError(400, "El valor a mover debe ser mayor que cero.");
+  }
+}
+
 function mapCatalogRows(rows) {
-  const lists = {
+  const lists = createEmptyCatalogMap();
+
+  rows
+    .filter((row) => Boolean(row.is_active))
+    .forEach((row) => {
+      if (!lists[row.group_name]) {
+        lists[row.group_name] = [];
+      }
+
+      lists[row.group_name].push(row.value);
+    });
+
+  return lists;
+}
+
+function mapCatalogItemRows(rows) {
+  const groupedItems = createEmptyCatalogMap();
+
+  rows.forEach((row) => {
+    if (!groupedItems[row.group_name]) {
+      groupedItems[row.group_name] = [];
+    }
+
+    groupedItems[row.group_name].push(mapCatalogItemRow(row));
+  });
+
+  return groupedItems;
+}
+
+function mapCatalogItemRow(row) {
+  return {
+    id: Number(row.id),
+    group: row.group_name,
+    value: row.value,
+    sortOrder: Number(row.sort_order || 0),
+    isActive: Boolean(row.is_active),
+    createdAt: row.created_at || null,
+    updatedAt: row.updated_at || null,
+  };
+}
+
+function createEmptyCatalogMap() {
+  return {
     gimnasioCategorias: [],
     restauranteCategorias: [],
     tipos: [],
     mediosPago: [],
     estadosPago: [],
   };
+}
 
-  rows.forEach((row) => {
-    if (!lists[row.group_name]) {
-      lists[row.group_name] = [];
+async function listActivePaymentMethodsFromClient(client) {
+  const result = await client.query(
+    `
+      select value
+      from catalog_items
+      where group_name = 'mediosPago'
+        and is_active = true
+      order by sort_order asc, value asc
+    `
+  );
+
+  return result.rows.map((row) => row.value);
+}
+
+async function calculatePaymentBoxBalancesFromClient(client) {
+  const [movementsResult, collectionsResult, transfersResult] = await Promise.all([
+    client.query(
+      `
+        select id, movement_type, payment_method, paid_amount
+        from movements
+        where paid_amount > 0
+      `
+    ),
+    client.query(
+      `
+        select movement_id, amount, payment_method
+        from movement_collections
+      `
+    ),
+    client.query(
+      `
+        select source_payment_method, target_payment_method, amount
+        from box_transfers
+      `
+    ),
+  ]);
+
+  const collectionTotalsByMovement = new Map();
+  const balances = {};
+
+  collectionsResult.rows.forEach((row) => {
+    const movementId = String(row.movement_id);
+    const amount = Number(row.amount || 0);
+    const paymentMethod = String(row.payment_method || "").trim();
+
+    collectionTotalsByMovement.set(
+      movementId,
+      Number(collectionTotalsByMovement.get(movementId) || 0) + amount
+    );
+
+    if (paymentMethod) {
+      balances[paymentMethod] = Number(balances[paymentMethod] || 0) + amount;
     }
-
-    lists[row.group_name].push(row.value);
   });
 
-  return lists;
+  movementsResult.rows.forEach((row) => {
+    const paymentMethod = String(row.payment_method || "").trim();
+    const paidAmount = Number(row.paid_amount || 0);
+
+    if (!paymentMethod || !(paidAmount > 0)) {
+      return;
+    }
+
+    const collectedAmount = Number(
+      collectionTotalsByMovement.get(String(row.id)) || 0
+    );
+    const directAmount =
+      row.movement_type === "Ingreso"
+        ? Math.max(paidAmount - collectedAmount, 0)
+        : paidAmount;
+
+    if (!(directAmount > 0)) {
+      return;
+    }
+
+    const signedAmount =
+      row.movement_type === "Ingreso" ? directAmount : directAmount * -1;
+
+    balances[paymentMethod] = Number(balances[paymentMethod] || 0) + signedAmount;
+  });
+
+  transfersResult.rows.forEach((row) => {
+    const amount = Number(row.amount || 0);
+    const sourceMethod = String(row.source_payment_method || "").trim();
+    const targetMethod = String(row.target_payment_method || "").trim();
+
+    if (sourceMethod) {
+      balances[sourceMethod] = Number(balances[sourceMethod] || 0) - amount;
+    }
+
+    if (targetMethod) {
+      balances[targetMethod] = Number(balances[targetMethod] || 0) + amount;
+    }
+  });
+
+  return balances;
+}
+
+async function syncCatalogValueRename(client, group, previousValue, nextValue) {
+  if (!previousValue || !nextValue || previousValue === nextValue) {
+    return;
+  }
+
+  if (group === "gimnasioCategorias") {
+    await client.query(
+      `
+        update movements
+        set
+          category = $2,
+          updated_at = now()
+        where business_line = 'Gimnasio'
+          and category = $1
+      `,
+      [previousValue, nextValue]
+    );
+    return;
+  }
+
+  if (group === "restauranteCategorias") {
+    await client.query(
+      `
+        update movements
+        set
+          category = $2,
+          updated_at = now()
+        where business_line = 'Restaurante'
+          and category = $1
+      `,
+      [previousValue, nextValue]
+    );
+    return;
+  }
+
+  if (group === "mediosPago") {
+    await Promise.all([
+      client.query(
+        `
+          update movements
+          set
+            payment_method = $2,
+            updated_at = now()
+          where payment_method = $1
+        `,
+        [previousValue, nextValue]
+      ),
+      client.query(
+        `
+          update movement_collections
+          set payment_method = $2
+          where payment_method = $1
+        `,
+        [previousValue, nextValue]
+      ),
+      client.query(
+        `
+          update box_transfers
+          set
+            source_payment_method = $2
+          where source_payment_method = $1
+        `,
+        [previousValue, nextValue]
+      ),
+      client.query(
+        `
+          update box_transfers
+          set
+            target_payment_method = $2
+          where target_payment_method = $1
+        `,
+        [previousValue, nextValue]
+      ),
+    ]);
+  }
 }
 
 function mapClientRow(row) {
@@ -862,11 +1481,36 @@ function mapClientRow(row) {
   };
 }
 
+function normalizeDateOnly(value) {
+  if (!value) {
+    return "";
+  }
+
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    return value.toISOString().slice(0, 10);
+  }
+
+  const rawValue = String(value).trim();
+  const rawMatch = rawValue.match(/^(\d{4}-\d{2}-\d{2})/);
+  if (rawMatch) {
+    return rawMatch[1];
+  }
+
+  const parsed = new Date(rawValue);
+  if (Number.isNaN(parsed.getTime())) {
+    return rawValue;
+  }
+
+  return parsed.toISOString().slice(0, 10);
+}
+
 function mapMovementRow(row) {
+  const fecha = normalizeDateOnly(row.movement_date);
+
   return {
     id: row.id,
     linea: row.business_line,
-    fecha: row.movement_date,
+    fecha,
     tipo: row.movement_type,
     categoria: row.category,
     cliente: row.client_name || "",
@@ -877,13 +1521,57 @@ function mapMovementRow(row) {
     abono: Number(row.paid_amount),
     saldoPendiente: Number(row.balance_due),
     flujoNeto: Number(row.cash_flow),
-    ano: row.year,
-    mesNumero: row.month_number,
+    ano: Number(row.year),
+    mesNumero: Number(row.month_number),
     mesNombre: row.month_name,
     observaciones: row.notes || "",
     creadoEn: row.created_at,
     actualizadoEn: row.updated_at,
   };
+}
+
+function mapCollectionRow(row) {
+  return {
+    id: row.id,
+    movementId: row.movement_id,
+    collectionDate: normalizeDateOnly(row.collection_date),
+    amount: Number(row.amount),
+    paymentMethod: row.payment_method,
+    notes: row.notes || "",
+    registeredBy:
+      row.registered_by_name ||
+      row.registered_by_username ||
+      "Sistema",
+    createdAt: row.created_at || null,
+  };
+}
+
+function mapBoxTransferRow(row) {
+  return {
+    id: row.id,
+    transferDate: normalizeDateOnly(row.transfer_date),
+    sourcePaymentMethod: row.source_payment_method,
+    targetPaymentMethod: row.target_payment_method,
+    amount: Number(row.amount),
+    notes: row.notes || "",
+    registeredBy:
+      row.registered_by_name ||
+      row.registered_by_username ||
+      "Sistema",
+    createdAt: row.created_at || null,
+  };
+}
+
+function resolvePaymentStatus(paidAmount, totalAmount) {
+  if (paidAmount <= 0) {
+    return "Pendiente";
+  }
+
+  if (paidAmount >= totalAmount) {
+    return "Pagado";
+  }
+
+  return "Parcial";
 }
 
 function mapNotesRows(rows) {

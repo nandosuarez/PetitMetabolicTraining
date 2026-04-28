@@ -152,10 +152,11 @@
         <nav class="nav">
           <button class="nav-link active" data-view="dashboard">Panel gerencial</button>
           <button class="nav-link" data-view="movimientos">Movimientos</button>
+          <button class="nav-link" data-view="cajas">Cajas</button>
           <button class="nav-link" data-view="diario">Informe diario</button>
           <button class="nav-link" data-view="semanal">Informe semanal</button>
           <button class="nav-link" data-view="mensual">Resumen mensual</button>
-          <button class="nav-link" data-view="cartera">Cartera clientes</button>
+          <button class="nav-link" data-view="cartera">Clientes</button>
           <button class="nav-link" data-view="listas">Listas maestras</button>
           <button class="nav-link admin-only is-hidden" data-view="usuarios">Usuarios</button>
         </nav>
@@ -165,12 +166,34 @@
           <div id="sidebar-metrics" class="sidebar-metrics"></div>
         </section>
       </aside>
+      <button
+        id="sidebar-backdrop"
+        class="sidebar-backdrop"
+        type="button"
+        aria-label="Cerrar menu lateral"
+      ></button>
 
       <main class="main-content">
         <header class="topbar">
-          <div>
-            <p class="eyebrow">Control administrativo</p>
-            <h2 id="view-title">Panel gerencial</h2>
+          <div class="topbar-main">
+            <button
+              id="sidebar-toggle"
+              class="sidebar-toggle"
+              type="button"
+              aria-label="Abrir menu lateral"
+              aria-expanded="false"
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                <path d="M4 7h16"></path>
+                <path d="M4 12h16"></path>
+                <path d="M4 17h16"></path>
+              </svg>
+              <span class="sidebar-toggle-text">Menu</span>
+            </button>
+            <div>
+              <p class="eyebrow">Control administrativo</p>
+              <h2 id="view-title">Panel gerencial</h2>
+            </div>
           </div>
 
           <div class="topbar-actions">
@@ -284,7 +307,7 @@
                 </label>
 
                 <label>
-                  Medio de pago
+                  Caja / medio de pago
                   <select id="medioPago" name="medioPago" required></select>
                 </label>
 
@@ -404,7 +427,7 @@
               </div>
             </div>
             <div class="table-wrap">
-              <table>
+              <table class="stack-table">
                 <thead>
                   <tr>
                     <th>Fecha</th>
@@ -414,7 +437,7 @@
                     <th>Cliente</th>
                     <th>Descripción</th>
                     <th>Estado</th>
-                    <th>Medio</th>
+                    <th>Caja</th>
                     <th>Total</th>
                     <th>Abono</th>
                     <th>Saldo</th>
@@ -442,6 +465,16 @@
             </div>
 
             <div id="daily-metrics" class="report-grid"></div>
+          </section>
+
+          <section class="panel">
+            <div class="panel-head">
+              <div>
+                <p class="section-kicker">Disponibilidad por caja</p>
+                <h3>Cajas del día</h3>
+              </div>
+            </div>
+            <div id="daily-box-report" class="stats-grid"></div>
           </section>
 
           <section class="panel">
@@ -491,6 +524,16 @@
           <section class="panel">
             <div class="panel-head">
               <div>
+                <p class="section-kicker">Disponibilidad por caja</p>
+                <h3>Cajas de la semana</h3>
+              </div>
+            </div>
+            <div id="weekly-box-report" class="stats-grid"></div>
+          </section>
+
+          <section class="panel">
+            <div class="panel-head">
+              <div>
                 <p class="section-kicker">Observaciones</p>
                 <h3>Acuerdos de la semana</h3>
               </div>
@@ -524,6 +567,16 @@
 
             <div id="monthly-annual-cards" class="stats-grid"></div>
 
+            <section class="panel panel-nested">
+              <div class="panel-head">
+                <div>
+                  <p class="section-kicker">Disponibilidad por caja</p>
+                  <h3>Cajas del año consultado</h3>
+                </div>
+              </div>
+              <div id="monthly-box-report" class="stats-grid"></div>
+            </section>
+
             <div class="table-wrap">
               <table>
                 <thead>
@@ -546,148 +599,444 @@
           </section>
         </section>
 
-        <section id="cartera-view" class="view">
-          <div class="content-grid two-up align-start">
+        <section id="cajas-view" class="view">
+          <section class="panel">
+            <div class="panel-head">
+              <div>
+                <p class="section-kicker">Navegación</p>
+                <h3>Menú de cajas</h3>
+              </div>
+            </div>
+            <div class="client-menu" role="tablist" aria-label="Menú de cajas">
+              <button
+                class="client-menu-button active"
+                type="button"
+                data-box-panel="resumen"
+              >
+                Resumen
+              </button>
+              <button
+                class="client-menu-button"
+                type="button"
+                data-box-panel="traslados"
+              >
+                Traslados
+              </button>
+              <button
+                class="client-menu-button"
+                type="button"
+                data-box-panel="movimientos"
+              >
+                Movimientos
+              </button>
+            </div>
+          </section>
+
+          <div id="box-panel-resumen" class="box-panel active">
+            <div id="boxes-summary" class="stats-grid"></div>
+
+            <div class="content-grid two-up align-start">
+              <section class="panel">
+                <div class="panel-head">
+                  <div>
+                    <p class="section-kicker">Lectura rápida</p>
+                    <h3>Estado actual de las cajas</h3>
+                  </div>
+                </div>
+
+                <div id="box-insights" class="mini-stats compact-mini-stats"></div>
+              </section>
+            </div>
+          </div>
+
+          <div id="box-panel-traslados" class="box-panel is-hidden">
             <section class="panel">
               <div class="panel-head">
                 <div>
-                  <p class="section-kicker">Administración</p>
-                  <h3>Crear cliente</h3>
+                  <p class="section-kicker">Movimiento interno</p>
+                  <h3>Transferir dinero entre cajas</h3>
                 </div>
               </div>
 
-              <form id="client-form" class="form-grid">
+              <form id="box-transfer-form" class="form-grid">
                 <label>
-                  Nombre completo
+                  Fecha
+                  <input id="box-transfer-date" name="transferDate" type="date" required />
+                </label>
+
+                <label>
+                  Caja origen
+                  <select id="box-transfer-source" name="sourcePaymentMethod" required></select>
+                </label>
+
+                <label>
+                  Caja destino
+                  <select id="box-transfer-target" name="targetPaymentMethod" required></select>
+                </label>
+
+                <label>
+                  Valor a mover
                   <input
-                    id="client-name"
-                    name="fullName"
-                    type="text"
-                    placeholder="Nombre del cliente"
+                    id="box-transfer-amount"
+                    name="amount"
+                    type="number"
+                    min="0"
+                    step="100"
+                    placeholder="0"
                     required
                   />
                 </label>
 
-                <label>
-                  Documento
-                  <input
-                    id="client-document"
-                    name="documentNumber"
-                    type="text"
-                    placeholder="Cédula o documento"
-                  />
-                </label>
-
-                <label>
-                  Teléfono
-                  <input
-                    id="client-phone"
-                    name="phone"
-                    type="text"
-                    placeholder="Celular o WhatsApp"
-                  />
-                </label>
-
-                <label>
-                  Correo
-                  <input
-                    id="client-email"
-                    name="email"
-                    type="email"
-                    placeholder="cliente@correo.com"
-                  />
-                </label>
-
                 <label class="span-2">
-                  Notas
+                  Justificación / detalle
                   <textarea
-                    id="client-notes"
+                    id="box-transfer-notes"
                     name="notes"
                     rows="3"
-                    placeholder="Observaciones comerciales, restricciones o datos útiles"
+                    placeholder="Ejemplo: traslado operativo de recaudo digital a Daviplata"
                   ></textarea>
                 </label>
 
-                <div id="client-feedback" class="form-note span-2">
-                  Aquí puedes registrar la base de clientes para luego usarla en movimientos y cartera.
+                <div id="box-transfer-feedback" class="form-note span-2">
+                  Este movimiento resta saldo de la caja origen, suma a la caja destino y queda trazado en el historial.
                 </div>
 
                 <div class="form-actions span-2">
                   <button class="primary-button" type="submit">
-                    Guardar cliente
+                    Registrar traslado
                   </button>
                 </div>
               </form>
             </section>
+          </div>
+
+          <div id="box-panel-movimientos" class="box-panel is-hidden">
+            <section class="panel">
+              <div class="panel-head">
+                <div>
+                  <p class="section-kicker">Consulta operativa</p>
+                  <h3>Movimientos de cajas</h3>
+                </div>
+              </div>
+
+              <div class="filter-grid">
+                <label>
+                  Caja
+                  <select id="box-filter">
+                    <option value="Todas">Todas</option>
+                  </select>
+                </label>
+
+                <label class="span-2">
+                  Buscar
+                  <input
+                    id="box-query"
+                    type="search"
+                    placeholder="Caja, detalle, cliente, categoría o referencia"
+                    autocomplete="off"
+                  />
+                </label>
+              </div>
+
+              <div id="box-filter-summary" class="mini-stats"></div>
+
+              <div class="table-wrap">
+                <table class="stack-table">
+                  <thead>
+                    <tr>
+                      <th>Fecha</th>
+                      <th>Caja</th>
+                      <th>Tipo</th>
+                      <th>Referencia</th>
+                      <th>Detalle</th>
+                      <th>Registrado por</th>
+                      <th>Entrada</th>
+                      <th>Salida</th>
+                    </tr>
+                  </thead>
+                  <tbody id="box-ledger-table"></tbody>
+                </table>
+              </div>
+            </section>
+          </div>
+        </section>
+
+        <section id="cartera-view" class="view">
+          <section class="panel">
+            <div class="panel-head">
+              <div>
+                <p class="section-kicker">Navegación</p>
+                <h3>Menú de clientes</h3>
+              </div>
+            </div>
+            <div class="client-menu" role="tablist" aria-label="Menú de clientes">
+              <button
+                class="client-menu-button active"
+                type="button"
+                data-client-panel="base"
+              >
+                Base de clientes
+              </button>
+              <button
+                class="client-menu-button"
+                type="button"
+                data-client-panel="cobros"
+              >
+                Cobros
+              </button>
+              <button
+                class="client-menu-button"
+                type="button"
+                data-client-panel="cartera"
+              >
+                Cartera pendiente
+              </button>
+            </div>
+          </section>
+
+          <div id="client-panel-base" class="client-panel active">
+            <div class="content-grid two-up align-start">
+              <section class="panel">
+                <div class="panel-head">
+                  <div>
+                    <p class="section-kicker">Administración</p>
+                    <h3>Crear cliente</h3>
+                  </div>
+                </div>
+
+                <form id="client-form" class="form-grid">
+                  <label>
+                    Nombre completo
+                    <input
+                      id="client-name"
+                      name="fullName"
+                      type="text"
+                      placeholder="Nombre del cliente"
+                      required
+                    />
+                  </label>
+
+                  <label>
+                    Documento
+                    <input
+                      id="client-document"
+                      name="documentNumber"
+                      type="text"
+                      placeholder="Cédula o documento"
+                    />
+                  </label>
+
+                  <label>
+                    Teléfono
+                    <input
+                      id="client-phone"
+                      name="phone"
+                      type="text"
+                      placeholder="Celular o WhatsApp"
+                    />
+                  </label>
+
+                  <label>
+                    Correo
+                    <input
+                      id="client-email"
+                      name="email"
+                      type="email"
+                      placeholder="cliente@correo.com"
+                    />
+                  </label>
+
+                  <label class="span-2">
+                    Notas
+                    <textarea
+                      id="client-notes"
+                      name="notes"
+                      rows="3"
+                      placeholder="Observaciones comerciales, restricciones o datos útiles"
+                    ></textarea>
+                  </label>
+
+                  <div id="client-feedback" class="form-note span-2">
+                    Aquí puedes registrar la base de clientes para luego usarla en movimientos y cartera.
+                  </div>
+
+                  <div class="form-actions span-2">
+                    <button class="primary-button" type="submit">
+                      Guardar cliente
+                    </button>
+                  </div>
+                </form>
+              </section>
+
+              <section class="panel">
+                <div class="panel-head">
+                  <div>
+                    <p class="section-kicker">Resumen</p>
+                    <h3>Estado de clientes</h3>
+                  </div>
+                </div>
+                <div id="clients-metrics" class="mini-stats"></div>
+              </section>
+            </div>
 
             <section class="panel">
               <div class="panel-head">
                 <div>
-                  <p class="section-kicker">Resumen</p>
-                  <h3>Estado de clientes</h3>
+                  <p class="section-kicker">Consulta</p>
+                  <h3>Clientes registrados</h3>
                 </div>
               </div>
-              <div id="clients-metrics" class="mini-stats"></div>
+
+              <div class="table-wrap">
+                <table class="stack-table">
+                  <thead>
+                    <tr>
+                      <th>Nombre</th>
+                      <th>Documento</th>
+                      <th>Teléfono</th>
+                      <th>Correo</th>
+                      <th>Estado</th>
+                      <th>Creado</th>
+                      <th>Notas</th>
+                      <th>Acciones</th>
+                    </tr>
+                  </thead>
+                  <tbody id="clients-table"></tbody>
+                </table>
+              </div>
             </section>
           </div>
 
-          <section class="panel">
-            <div class="panel-head">
-              <div>
-                <p class="section-kicker">Consulta</p>
-                <h3>Clientes registrados</h3>
+          <div id="client-panel-cobros" class="client-panel is-hidden">
+            <div class="content-grid two-up align-start">
+              <section class="panel">
+                <div class="panel-head">
+                  <div>
+                    <p class="section-kicker">Gestión de cartera</p>
+                    <h3>Registrar cobro</h3>
+                  </div>
+                </div>
+
+                <form id="collection-form" class="form-grid">
+                  <input id="collection-movement-id" type="hidden" />
+
+                  <div id="collection-context" class="collection-context span-2">
+                    Selecciona un movimiento pendiente en la tabla de cartera para registrar un cobro.
+                  </div>
+
+                  <div id="collection-balance" class="collection-balance span-2"></div>
+
+                  <label>
+                    Fecha del cobro
+                    <input id="collection-date" name="collectionDate" type="date" required />
+                  </label>
+
+                  <label>
+                    Valor recibido
+                    <input
+                      id="collection-amount"
+                      name="amount"
+                      type="number"
+                      min="0"
+                      step="100"
+                      placeholder="0"
+                      required
+                    />
+                  </label>
+
+                  <label>
+                    Caja / medio de pago
+                    <select id="collection-method" name="paymentMethod" required></select>
+                  </label>
+
+                  <label class="span-2">
+                    Observación del cobro
+                    <textarea
+                      id="collection-notes"
+                      name="notes"
+                      rows="3"
+                      placeholder="Ejemplo: cliente completa cuota de abril o realiza abono parcial"
+                    ></textarea>
+                  </label>
+
+                  <div id="collection-feedback" class="form-note span-2">
+                    El cobro actualiza el saldo pendiente y guarda el historial del pago.
+                  </div>
+
+                  <div class="form-actions span-2">
+                    <button class="primary-button" type="submit">
+                      Registrar cobro
+                    </button>
+                    <button
+                      id="cancel-collection"
+                      class="ghost-button"
+                      type="button"
+                    >
+                      Limpiar selección
+                    </button>
+                  </div>
+                </form>
+              </section>
+
+              <section class="panel">
+                <div class="panel-head">
+                  <div>
+                    <p class="section-kicker">Trazabilidad</p>
+                    <h3>Historial del cobro seleccionado</h3>
+                  </div>
+                </div>
+
+                <div id="collection-history" class="stack-list">
+                  <div class="empty-state">
+                    Aquí aparecerán los cobros del movimiento que selecciones.
+                  </div>
+                </div>
+              </section>
+            </div>
+          </div>
+
+          <div id="client-panel-cartera" class="client-panel is-hidden">
+            <section class="panel">
+              <div class="panel-head">
+                <div>
+                  <p class="section-kicker">Clientes con saldo</p>
+                  <h3>Cartera de clientes</h3>
+                </div>
+                <label class="inline-label portfolio-search">
+                  Buscar en cartera
+                  <input
+                    id="portfolio-query"
+                    type="search"
+                    placeholder="Cliente, descripcion, categoria o linea"
+                    autocomplete="off"
+                  />
+                </label>
               </div>
-            </div>
+              <div id="portfolio-summary" class="stats-grid"></div>
 
-            <div class="table-wrap">
-              <table>
-                <thead>
-                  <tr>
-                    <th>Nombre</th>
-                    <th>Documento</th>
-                    <th>Teléfono</th>
-                    <th>Correo</th>
-                    <th>Estado</th>
-                    <th>Creado</th>
-                    <th>Notas</th>
-                    <th>Acciones</th>
-                  </tr>
-                </thead>
-                <tbody id="clients-table"></tbody>
-              </table>
-            </div>
-          </section>
-
-          <section class="panel">
-            <div class="panel-head">
-              <div>
-                <p class="section-kicker">Clientes con saldo</p>
-                <h3>Cartera de clientes</h3>
+              <div class="table-wrap">
+                <table class="stack-table">
+                  <thead>
+                    <tr>
+                      <th>Línea</th>
+                      <th>Fecha</th>
+                      <th>Cliente</th>
+                      <th>Categoría</th>
+                      <th>Descripción</th>
+                      <th>Estado</th>
+                      <th>Total</th>
+                      <th>Abono</th>
+                      <th>Saldo</th>
+                      <th>Caja</th>
+                      <th>Observaciones</th>
+                      <th>Acciones</th>
+                    </tr>
+                  </thead>
+                  <tbody id="portfolio-table"></tbody>
+                </table>
               </div>
-            </div>
-            <div id="portfolio-summary" class="stats-grid"></div>
-
-            <div class="table-wrap">
-              <table>
-                <thead>
-                  <tr>
-                    <th>Línea</th>
-                    <th>Fecha</th>
-                    <th>Cliente</th>
-                    <th>Categoría</th>
-                    <th>Descripción</th>
-                    <th>Estado</th>
-                    <th>Total</th>
-                    <th>Abono</th>
-                    <th>Saldo</th>
-                    <th>Medio</th>
-                    <th>Observaciones</th>
-                  </tr>
-                </thead>
-                <tbody id="portfolio-table"></tbody>
-              </table>
-            </div>
-          </section>
+            </section>
+          </div>
         </section>
 
         <section id="listas-view" class="view">
@@ -719,7 +1068,7 @@
               </div>
 
               <div class="list-editor-card">
-                <h4>Medios de pago</h4>
+                <h4>Cajas / medios de pago</h4>
                 <form class="inline-form" data-list-form="mediosPago">
                   <input name="value" type="text" placeholder="Agregar medio" required />
                   <button class="small-button" type="submit">Agregar</button>
@@ -833,7 +1182,7 @@
             </div>
 
             <div class="table-wrap">
-              <table>
+              <table class="stack-table">
                 <thead>
                   <tr>
                     <th>Usuario</th>

@@ -3,15 +3,23 @@ create table if not exists catalog_items (
   group_name text not null,
   value text not null,
   sort_order integer not null default 1,
+  is_active boolean not null default true,
   created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
   unique (group_name, value)
 );
+
+alter table catalog_items
+  add column if not exists is_active boolean not null default true;
+
+alter table catalog_items
+  add column if not exists updated_at timestamptz not null default now();
 
 create table if not exists movements (
   id bigserial primary key,
   business_line text not null check (business_line in ('Gimnasio', 'Restaurante')),
   movement_date date not null,
-  movement_type text not null check (movement_type in ('Ingreso', 'Gasto')),
+  movement_type text not null check (movement_type in ('Ingreso', 'Gasto', 'Costo')),
   category text not null,
   client_name text,
   description text not null,
@@ -117,6 +125,36 @@ create table if not exists movement_edit_audits (
   created_at timestamptz not null default now()
 );
 
+create table if not exists movement_collections (
+  id bigserial primary key,
+  movement_id bigint not null references movements(id) on delete cascade,
+  collection_date date not null,
+  amount numeric(14, 2) not null check (amount > 0),
+  payment_method text not null,
+  notes text,
+  registered_by_user_id bigint not null references app_users(id),
+  created_at timestamptz not null default now()
+);
+
+alter table movements
+  drop constraint if exists movements_movement_type_check;
+
+alter table movements
+  add constraint movements_movement_type_check
+  check (movement_type in ('Ingreso', 'Gasto', 'Costo'));
+
+create table if not exists box_transfers (
+  id bigserial primary key,
+  transfer_date date not null,
+  source_payment_method text not null,
+  target_payment_method text not null,
+  amount numeric(14, 2) not null check (amount > 0),
+  notes text,
+  registered_by_user_id bigint not null references app_users(id),
+  created_at timestamptz not null default now(),
+  check (source_payment_method <> target_payment_method)
+);
+
 insert into catalog_items (group_name, value, sort_order) values
   ('gimnasioCategorias', 'Membresias', 1),
   ('gimnasioCategorias', 'Inscripcion', 2),
@@ -150,6 +188,7 @@ insert into catalog_items (group_name, value, sort_order) values
   ('restauranteCategorias', 'Otros', 15),
   ('tipos', 'Ingreso', 1),
   ('tipos', 'Gasto', 2),
+  ('tipos', 'Costo', 3),
   ('mediosPago', 'Efectivo', 1),
   ('mediosPago', 'Transferencia', 2),
   ('mediosPago', 'Datafono', 3),
@@ -160,3 +199,11 @@ insert into catalog_items (group_name, value, sort_order) values
   ('estadosPago', 'Parcial', 2),
   ('estadosPago', 'Pendiente', 3)
 on conflict (group_name, value) do nothing;
+
+update catalog_items
+set
+  is_active = true,
+  sort_order = 3,
+  updated_at = now()
+where group_name = 'tipos'
+  and value = 'Costo';
