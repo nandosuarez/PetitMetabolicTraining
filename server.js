@@ -304,10 +304,84 @@ app.post(
   })
 );
 
+app.get("/api/clients", asyncHandler(async (_req, res) => {
+  const clients = await listClients();
+  res.json({
+    clients,
+  });
+}));
+
+app.post("/api/clients", asyncHandler(async (req, res) => {
+  const payload = normalizeClientPayload(req.body);
+  validateClientPayload(payload);
+
+  const existingClient = await findClientByName(payload.fullName);
+  if (existingClient) {
+    return res.status(409).json({
+      error: "Ya existe un cliente registrado con ese nombre.",
+    });
+  }
+
+  const result = await query(
+    `
+      insert into clients (
+        full_name,
+        document_number,
+        phone,
+        email,
+        notes,
+        is_active
+      )
+      values ($1, $2, $3, $4, $5, true)
+      returning *
+    `,
+    [
+      payload.fullName,
+      payload.documentNumber,
+      payload.phone,
+      payload.email,
+      payload.notes,
+    ]
+  );
+
+  res.status(201).json(mapClientRow(result.rows[0]));
+}));
+
+app.patch(
+  "/api/clients/:id/status",
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const clientId = Number(req.params.id);
+    const isActive = Boolean(req.body.isActive);
+
+    if (!Number.isInteger(clientId) || clientId <= 0) {
+      return res.status(400).json({ error: "Cliente invalido." });
+    }
+
+    const result = await query(
+      `
+        update clients
+        set
+          is_active = $2,
+          updated_at = now()
+        where id = $1
+        returning *
+      `,
+      [clientId, isActive]
+    );
+
+    if (!result.rows.length) {
+      return res.status(404).json({ error: "Cliente no encontrado." });
+    }
+
+    res.json(mapClientRow(result.rows[0]));
+  })
+);
+
 app.get("/api/bootstrap", asyncHandler(async (req, res) => {
   const isAssistantOperative = req.authUser?.role === "asistente_operativo";
 
-  const [catalogResult, movementResult, portfolioResult, notesResult] =
+  const [catalogResult, movementResult, portfolioResult, notesResult, clientResult] =
     await Promise.all([
     query(
       `
@@ -341,12 +415,20 @@ app.get("/api/bootstrap", asyncHandler(async (req, res) => {
             order by note_type asc, note_key asc
           `
         ),
+    query(
+      `
+        select *
+        from clients
+        order by is_active desc, full_name asc, id asc
+      `
+    ),
   ]);
 
   res.json({
     lists: mapCatalogRows(catalogResult.rows),
     movements: movementResult.rows.map(mapMovementRow),
     portfolioMovements: portfolioResult.rows.map(mapMovementRow),
+    clients: clientResult.rows.map(mapClientRow),
     notes: mapNotesRows(notesResult.rows),
   });
 }));
@@ -612,6 +694,16 @@ function normalizeUserPayload(body) {
   };
 }
 
+function normalizeClientPayload(body) {
+  return {
+    fullName: String(body.fullName || "").trim(),
+    documentNumber: String(body.documentNumber || "").trim(),
+    phone: String(body.phone || "").trim(),
+    email: String(body.email || "").trim(),
+    notes: String(body.notes || "").trim(),
+  };
+}
+
 function validateUserCreationPayload(payload) {
   if (!payload.username) {
     throw httpError(400, "El usuario es obligatorio.");
@@ -626,6 +718,19 @@ function validateUserCreationPayload(payload) {
       400,
       "La contraseña debe tener al menos 10 caracteres."
     );
+  }
+}
+
+function validateClientPayload(payload) {
+  if (!payload.fullName) {
+    throw httpError(400, "El nombre del cliente es obligatorio.");
+  }
+
+  if (
+    payload.email &&
+    !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(payload.email)
+  ) {
+    throw httpError(400, "El correo del cliente no es valido.");
   }
 }
 
@@ -743,6 +848,20 @@ function mapCatalogRows(rows) {
   return lists;
 }
 
+function mapClientRow(row) {
+  return {
+    id: row.id,
+    fullName: row.full_name,
+    documentNumber: row.document_number || "",
+    phone: row.phone || "",
+    email: row.email || "",
+    notes: row.notes || "",
+    isActive: Boolean(row.is_active),
+    createdAt: row.created_at || null,
+    updatedAt: row.updated_at || null,
+  };
+}
+
 function mapMovementRow(row) {
   return {
     id: row.id,
@@ -828,10 +947,36 @@ async function assertMovementMutationAllowed(user, movementId) {
   );
 }
 
+async function listClients() {
+  const result = await query(
+    `
+      select *
+      from clients
+      order by is_active desc, full_name asc, id asc
+    `
+  );
+
+  return result.rows.map(mapClientRow);
+}
+
+async function findClientByName(fullName) {
+  const result = await query(
+    `
+      select *
+      from clients
+      where lower(full_name) = lower($1)
+      limit 1
+    `,
+    [String(fullName || "").trim()]
+  );
+
+  return result.rows[0] ? mapClientRow(result.rows[0]) : null;
+}
+
 function requireAdmin(req, res, next) {
   if (req.authUser?.role !== "administrador") {
     return res.status(403).json({
-      error: "Solo el perfil administrador puede gestionar usuarios.",
+      error: "Solo el perfil administrador puede realizar esta operacion.",
     });
   }
 

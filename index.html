@@ -268,8 +268,10 @@
                     id="cliente"
                     name="cliente"
                     type="text"
+                    list="client-options"
                     placeholder="Nombre del cliente si aplica"
                   />
+                  <datalist id="client-options"></datalist>
                 </label>
 
                 <label class="span-2">
@@ -552,6 +554,117 @@
         </section>
 
         <section id="cartera-view" class="view">
+          <div class="content-grid two-up align-start">
+            <section class="panel">
+              <div class="panel-head">
+                <div>
+                  <p class="section-kicker">Administración</p>
+                  <h3>Crear cliente</h3>
+                </div>
+              </div>
+
+              <form id="client-form" class="form-grid">
+                <label>
+                  Nombre completo
+                  <input
+                    id="client-name"
+                    name="fullName"
+                    type="text"
+                    placeholder="Nombre del cliente"
+                    required
+                  />
+                </label>
+
+                <label>
+                  Documento
+                  <input
+                    id="client-document"
+                    name="documentNumber"
+                    type="text"
+                    placeholder="Cédula o documento"
+                  />
+                </label>
+
+                <label>
+                  Teléfono
+                  <input
+                    id="client-phone"
+                    name="phone"
+                    type="text"
+                    placeholder="Celular o WhatsApp"
+                  />
+                </label>
+
+                <label>
+                  Correo
+                  <input
+                    id="client-email"
+                    name="email"
+                    type="email"
+                    placeholder="cliente@correo.com"
+                  />
+                </label>
+
+                <label class="span-2">
+                  Notas
+                  <textarea
+                    id="client-notes"
+                    name="notes"
+                    rows="3"
+                    placeholder="Observaciones comerciales, restricciones o datos útiles"
+                  ></textarea>
+                </label>
+
+                <div id="client-feedback" class="form-note span-2">
+                  Aquí puedes registrar la base de clientes para luego usarla en movimientos y cartera.
+                </div>
+
+                <div class="form-actions span-2">
+                  <button class="primary-button" type="submit">
+                    Guardar cliente
+                  </button>
+                </div>
+              </form>
+            </section>
+
+            <section class="panel">
+              <div class="panel-head">
+                <div>
+                  <p class="section-kicker">Resumen</p>
+                  <h3>Estado de clientes</h3>
+                </div>
+              </div>
+              <div id="clients-metrics" class="mini-stats"></div>
+            </section>
+          </div>
+
+          <section class="panel">
+            <div class="panel-head">
+              <div>
+                <p class="section-kicker">Consulta</p>
+                <h3>Clientes registrados</h3>
+              </div>
+            </div>
+
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Nombre</th>
+                    <th>Documento</th>
+                    <th>Teléfono</th>
+                    <th>Correo</th>
+                    <th>Estado</th>
+                    <th>Creado</th>
+                    <th>Notas</th>
+                    <th>Acciones</th>
+                  </tr>
+                </thead>
+                <tbody id="clients-table"></tbody>
+              </table>
+            </div>
+          </section>
+
           <section class="panel">
             <div class="panel-head">
               <div>

@@ -45,6 +45,18 @@ create table if not exists report_notes (
   unique (note_type, note_key)
 );
 
+create table if not exists clients (
+  id bigserial primary key,
+  full_name text not null,
+  document_number text,
+  phone text,
+  email text,
+  notes text,
+  is_active boolean not null default true,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
 create table if not exists app_users (
   id bigserial primary key,
   username text not null unique,

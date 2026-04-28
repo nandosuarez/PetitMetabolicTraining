@@ -8,6 +8,7 @@ const emptyState = {
   },
   movements: [],
   portfolioMovements: [],
+  clients: [],
   users: [],
   notes: {
     daily: {},
@@ -115,6 +116,16 @@ const elements = {
   monthlyYear: document.getElementById("monthly-year"),
   monthlyAnnualCards: document.getElementById("monthly-annual-cards"),
   monthlyTable: document.getElementById("monthly-table"),
+  clientOptions: document.getElementById("client-options"),
+  clientForm: document.getElementById("client-form"),
+  clientName: document.getElementById("client-name"),
+  clientDocument: document.getElementById("client-document"),
+  clientPhone: document.getElementById("client-phone"),
+  clientEmail: document.getElementById("client-email"),
+  clientNotes: document.getElementById("client-notes"),
+  clientFeedback: document.getElementById("client-feedback"),
+  clientsMetrics: document.getElementById("clients-metrics"),
+  clientsTable: document.getElementById("clients-table"),
   portfolioSummary: document.getElementById("portfolio-summary"),
   portfolioTable: document.getElementById("portfolio-table"),
   userForm: document.getElementById("user-form"),
@@ -174,6 +185,8 @@ function bindEvents() {
   elements.saveDailyNotes.addEventListener("click", saveDailyNote);
   elements.saveWeeklyNotes.addEventListener("click", saveWeeklyNote);
   elements.movementTable.addEventListener("click", handleMovementTableClick);
+  elements.clientForm.addEventListener("submit", handleClientSubmit);
+  elements.clientsTable.addEventListener("click", handleClientsTableClick);
   elements.userForm.addEventListener("submit", handleUserSubmit);
   elements.usersTable.addEventListener("click", handleUsersTableClick);
 
@@ -355,6 +368,7 @@ async function loadBootstrap() {
       portfolioMovements: Array.isArray(data.portfolioMovements)
         ? data.portfolioMovements
         : [],
+      clients: Array.isArray(data.clients) ? data.clients : [],
       users: Array.isArray(usersPayload?.users) ? usersPayload.users : [],
       notes: {
         daily: data.notes?.daily || {},
@@ -367,6 +381,7 @@ async function loadBootstrap() {
     if (!elements.movementId.value) {
       resetMovementForm();
     }
+    resetClientForm();
     resetUserForm();
     renderAll();
     setStatus(`PostgreSQL conectado · ${formatClockTime(new Date())}`);
@@ -534,6 +549,7 @@ function hydrateStaticOptions() {
   fillSelect(elements.estadoPago, state.lists.estadosPago);
   fillSelect(elements.medioPago, state.lists.mediosPago);
   fillSelect(elements.filterStatus, ["Todos", ...state.lists.estadosPago]);
+  fillClientOptions();
   syncCategoryOptions();
 
   if (state.lists.tipos.includes(previousType)) {
@@ -847,6 +863,8 @@ function renderMonthlyView() {
 }
 
 function renderPortfolioView() {
+  renderClientsAdmin();
+
   const portfolio = getSortedMovements(getPortfolioMovements());
   const gym = portfolio.filter((item) => item.linea === "Gimnasio");
   const restaurant = portfolio.filter((item) => item.linea === "Restaurante");
@@ -898,6 +916,64 @@ function renderPortfolioView() {
         </tr>
       `
     )
+    .join("");
+}
+
+function renderClientsAdmin() {
+  const clients = Array.isArray(state.clients) ? state.clients : [];
+  const activeClients = clients.filter((item) => item.isActive);
+
+  elements.clientsMetrics.innerHTML = `
+    <div class="mini-stat"><span>Total clientes</span><strong>${clients.length}</strong></div>
+    <div class="mini-stat"><span>Activos</span><strong>${activeClients.length}</strong></div>
+    <div class="mini-stat"><span>Inactivos</span><strong>${Math.max(clients.length - activeClients.length, 0)}</strong></div>
+    <div class="mini-stat"><span>Con saldo pendiente</span><strong>${getPortfolioMovements().filter((item) => item.cliente).length}</strong></div>
+  `;
+
+  if (!clients.length) {
+    elements.clientsTable.innerHTML = `
+      <tr>
+        <td colspan="8" class="empty-state">
+          Aún no hay clientes registrados.
+        </td>
+      </tr>
+    `;
+    return;
+  }
+
+  elements.clientsTable.innerHTML = clients
+    .map((client) => {
+      const nextActive = client.isActive ? "false" : "true";
+      const buttonLabel = client.isActive ? "Inactivar" : "Activar";
+
+      return `
+        <tr>
+          <td>${escapeHtml(client.fullName)}</td>
+          <td>${client.documentNumber ? escapeHtml(client.documentNumber) : "<span class='muted'>Sin documento</span>"}</td>
+          <td>${client.phone ? escapeHtml(client.phone) : "<span class='muted'>Sin teléfono</span>"}</td>
+          <td>${client.email ? escapeHtml(client.email) : "<span class='muted'>Sin correo</span>"}</td>
+          <td><span class="status-pill ${client.isActive ? "user-status-active" : "user-status-inactive"}">${client.isActive ? "Activo" : "Inactivo"}</span></td>
+          <td>${formatDateTime(client.createdAt)}</td>
+          <td>${client.notes ? escapeHtml(client.notes) : "<span class='muted'>Sin notas</span>"}</td>
+          <td>
+            ${
+              isAdminUser()
+                ? `
+                  <button
+                    class="table-button ${client.isActive ? "danger" : ""}"
+                    type="button"
+                    data-client-status-id="${client.id}"
+                    data-client-next-active="${nextActive}"
+                  >
+                    ${buttonLabel}
+                  </button>
+                `
+                : "<span class='muted'>Solo consulta</span>"
+            }
+          </td>
+        </tr>
+      `;
+    })
     .join("");
 }
 
@@ -1185,6 +1261,74 @@ async function handleMovementSubmit(event) {
   }
 }
 
+async function handleClientSubmit(event) {
+  event.preventDefault();
+
+  const payload = {
+    fullName: elements.clientName.value.trim(),
+    documentNumber: elements.clientDocument.value.trim(),
+    phone: elements.clientPhone.value.trim(),
+    email: elements.clientEmail.value.trim(),
+    notes: elements.clientNotes.value.trim(),
+  };
+
+  if (!payload.fullName) {
+    elements.clientFeedback.textContent =
+      "El nombre del cliente es obligatorio.";
+    return;
+  }
+
+  try {
+    await apiRequest("/api/clients", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+    resetClientForm();
+    await loadBootstrap();
+    switchView("cartera");
+    elements.clientFeedback.textContent =
+      "Cliente registrado correctamente.";
+  } catch (error) {
+    elements.clientFeedback.textContent = error.message;
+  }
+}
+
+async function handleClientsTableClick(event) {
+  const clientId = event.target.dataset.clientStatusId;
+  const nextActive = event.target.dataset.clientNextActive;
+
+  if (!clientId || !nextActive) {
+    return;
+  }
+
+  const activate = nextActive === "true";
+  const confirmed = window.confirm(
+    activate
+      ? "¿Deseas activar este cliente?"
+      : "¿Deseas inactivar este cliente?"
+  );
+
+  if (!confirmed) {
+    return;
+  }
+
+  try {
+    await apiRequest(`/api/clients/${clientId}/status`, {
+      method: "PATCH",
+      body: JSON.stringify({
+        isActive: activate,
+      }),
+    });
+    await loadBootstrap();
+    switchView("cartera");
+    elements.clientFeedback.textContent = activate
+      ? "Cliente activado correctamente."
+      : "Cliente inactivado correctamente.";
+  } catch (error) {
+    elements.clientFeedback.textContent = error.message;
+  }
+}
+
 async function handleMovementTableClick(event) {
   const editId = event.target.dataset.editId;
   const deleteId = event.target.dataset.deleteId;
@@ -1449,6 +1593,15 @@ function fillSelect(select, values) {
     .join("");
 }
 
+function fillClientOptions() {
+  const activeClients = (state.clients || []).filter((item) => item.isActive);
+  elements.clientOptions.innerHTML = activeClients
+    .map(
+      (client) => `<option value="${escapeHtml(client.fullName)}"></option>`
+    )
+    .join("");
+}
+
 function buildMonthlyRows(year) {
   return monthNames.map((mes, index) => {
     const monthMovements = state.movements.filter(
@@ -1546,6 +1699,16 @@ function resetUserForm() {
   elements.userRole.value = "asistente_operativo";
   elements.userFeedback.textContent =
     "Solo el perfil administrador puede crear, inactivar y reasignar contraseñas temporales.";
+}
+
+function resetClientForm() {
+  if (!elements.clientForm) {
+    return;
+  }
+
+  elements.clientForm.reset();
+  elements.clientFeedback.textContent =
+    "Aqui puedes registrar la base de clientes para luego usarla en movimientos y cartera.";
 }
 
 function statusClass(status) {
