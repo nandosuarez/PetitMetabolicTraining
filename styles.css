@@ -731,6 +731,32 @@ button {
   min-width: 150px;
 }
 
+.check-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: rgba(255, 255, 255, 0.78);
+}
+
+.check-card input[type="checkbox"] {
+  inline-size: 18px;
+  block-size: 18px;
+  margin-top: 2px;
+}
+
+.check-card span {
+  display: grid;
+  gap: 4px;
+}
+
+.check-card small {
+  color: var(--muted);
+  line-height: 1.5;
+}
+
 .portfolio-search {
   width: min(100%, 340px);
 }
@@ -1394,6 +1420,10 @@ button:disabled {
   .form-grid,
   .filter-grid {
     grid-template-columns: 1fr;
+  }
+
+  .check-card {
+    padding: 12px 14px;
   }
 
   .span-2 {

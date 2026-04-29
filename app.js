@@ -62,6 +62,7 @@ let activeBoxPanel = "resumen";
 let selectedCollectionMovementId = null;
 let isSidebarOpen = false;
 const COMPACT_SIDEBAR_BREAKPOINT = 1180;
+let lastImportReport = null;
 let authState = {
   authenticated: false,
   user: null,
@@ -96,6 +97,7 @@ const elements = {
     cartera: document.getElementById("cartera-view"),
     listas: document.getElementById("listas-view"),
     usuarios: document.getElementById("usuarios-view"),
+    importar: document.getElementById("importar-view"),
   },
   adminOnly: [...document.querySelectorAll(".admin-only")],
   viewTitle: document.getElementById("view-title"),
@@ -169,12 +171,15 @@ const elements = {
     movimientos: document.getElementById("box-panel-movimientos"),
   },
   clientForm: document.getElementById("client-form"),
+  clientId: document.getElementById("client-id"),
+  clientFormTitle: document.getElementById("client-form-title"),
   clientName: document.getElementById("client-name"),
   clientDocument: document.getElementById("client-document"),
   clientPhone: document.getElementById("client-phone"),
   clientEmail: document.getElementById("client-email"),
   clientNotes: document.getElementById("client-notes"),
   clientFeedback: document.getElementById("client-feedback"),
+  cancelClientEdit: document.getElementById("cancel-client-edit"),
   clientsMetrics: document.getElementById("clients-metrics"),
   clientsTable: document.getElementById("clients-table"),
   portfolioQuery: document.getElementById("portfolio-query"),
@@ -205,6 +210,13 @@ const elements = {
   userFeedback: document.getElementById("user-feedback"),
   usersMetrics: document.getElementById("users-metrics"),
   usersTable: document.getElementById("users-table"),
+  excelImportForm: document.getElementById("excel-import-form"),
+  excelImportFile: document.getElementById("excel-import-file"),
+  excelImportLists: document.getElementById("excel-import-lists"),
+  excelImportMovements: document.getElementById("excel-import-movements"),
+  excelImportClients: document.getElementById("excel-import-clients"),
+  excelImportFeedback: document.getElementById("excel-import-feedback"),
+  excelImportSummary: document.getElementById("excel-import-summary"),
 };
 
 init();
@@ -254,6 +266,8 @@ function bindEvents() {
   elements.linea.addEventListener("change", syncCategoryOptions);
   elements.movementForm.addEventListener("submit", handleMovementSubmit);
   elements.cancelEdit.addEventListener("click", resetMovementForm);
+  addListener(elements.valorTotal, "input", syncComputedPaymentStatus);
+  addListener(elements.abono, "input", syncComputedPaymentStatus);
   addListener(elements.boxTransferForm, "submit", handleBoxTransferSubmit);
 
   [elements.filterLine, elements.filterStatus, elements.filterQuery].forEach(
@@ -272,6 +286,7 @@ function bindEvents() {
   elements.saveWeeklyNotes.addEventListener("click", saveWeeklyNote);
   addListener(elements.movementTable, "click", handleMovementTableClick);
   addListener(elements.clientForm, "submit", handleClientSubmit);
+  addListener(elements.cancelClientEdit, "click", resetClientForm);
   addListener(elements.clientsTable, "click", handleClientsTableClick);
   addListener(elements.portfolioQuery, "input", renderPortfolioView);
   addListener(elements.portfolioTable, "click", handlePortfolioTableClick);
@@ -279,6 +294,7 @@ function bindEvents() {
   addListener(elements.cancelCollection, "click", resetCollectionSelection);
   addListener(elements.userForm, "submit", handleUserSubmit);
   addListener(elements.usersTable, "click", handleUsersTableClick);
+  addListener(elements.excelImportForm, "submit", handleExcelImportSubmit);
 
   document
     .querySelectorAll("[data-list-form]")
@@ -653,6 +669,7 @@ function getAllowedViews() {
       "cartera",
       "listas",
       "usuarios",
+      "importar",
     ];
   }
 
@@ -801,6 +818,8 @@ function hydrateStaticOptions() {
   if (["Todos", ...state.lists.estadosPago].includes(previousStatus)) {
     elements.filterStatus.value = previousStatus;
   }
+
+  syncComputedPaymentStatus();
 }
 
 function switchView(view, options = {}) {
@@ -840,6 +859,7 @@ function switchView(view, options = {}) {
     cartera: "Clientes",
     listas: "Listas maestras",
     usuarios: "Usuarios",
+    importar: "Importar Excel",
   };
 
   elements.viewTitle.textContent = titles[view] || "Control administrativo";
@@ -945,6 +965,7 @@ function renderAll() {
   renderPortfolioView();
   renderListsView();
   renderUsersView();
+  renderImportView();
   applyStackTableLabels(elements.appShell);
 }
 
@@ -1632,7 +1653,7 @@ function renderClientsAdmin() {
   elements.clientsTable.innerHTML = clients
     .map((client) => {
       const nextActive = client.isActive ? "false" : "true";
-      const buttonLabel = client.isActive ? "Inactivar" : "Activar";
+      const statusTitle = client.isActive ? "Inactivar cliente" : "Activar cliente";
 
       return `
         <tr>
@@ -1644,20 +1665,39 @@ function renderClientsAdmin() {
           <td>${formatDateTime(client.createdAt)}</td>
           <td>${client.notes ? escapeHtml(client.notes) : "<span class='muted'>Sin notas</span>"}</td>
           <td>
-            ${
-              isAdminUser()
-                ? `
-                  <button
-                    class="table-button ${client.isActive ? "danger" : ""}"
-                    type="button"
-                    data-client-status-id="${client.id}"
-                    data-client-next-active="${nextActive}"
-                  >
-                    ${buttonLabel}
-                  </button>
-                `
-                : "<span class='muted'>Solo consulta</span>"
-            }
+            <div class="row-actions">
+              <button
+                class="table-button icon-button"
+                type="button"
+                data-client-edit-id="${client.id}"
+                title="Editar cliente"
+                aria-label="Editar cliente"
+              >
+                <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                  <path d="M4 20h4l10-10-4-4L4 16v4Z"></path>
+                  <path d="m12 6 4 4"></path>
+                </svg>
+              </button>
+              ${
+                isAdminUser()
+                  ? `
+                    <button
+                      class="table-button ${client.isActive ? "danger" : ""} icon-button"
+                      type="button"
+                      data-client-status-id="${client.id}"
+                      data-client-next-active="${nextActive}"
+                      title="${statusTitle}"
+                      aria-label="${statusTitle}"
+                    >
+                      <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                        <path d="M12 3v7"></path>
+                        <path d="M7.8 5.8A9 9 0 1 0 16.2 5.8"></path>
+                      </svg>
+                    </button>
+                  `
+                  : ""
+              }
+            </div>
           </td>
         </tr>
       `;
@@ -1842,6 +1882,132 @@ function renderUsersView() {
   applyStackTableLabels(elements.appShell);
 }
 
+function renderImportView() {
+  if (!elements.excelImportSummary || !elements.excelImportFeedback) {
+    return;
+  }
+
+  if (!isAdminUser()) {
+    elements.excelImportSummary.innerHTML = `
+      <div class="empty-state">
+        Solo el perfil administrador puede usar la carga de Excel.
+      </div>
+    `;
+    return;
+  }
+
+  if (!lastImportReport) {
+    elements.excelImportSummary.innerHTML = `
+      <div class="empty-state">
+        Aquí verás cuántas listas, movimientos y clientes fueron importados o reutilizados.
+      </div>
+    `;
+    return;
+  }
+
+  const warnings = Array.isArray(lastImportReport.warnings)
+    ? lastImportReport.warnings
+    : [];
+
+  elements.excelImportSummary.innerHTML = `
+    <article class="list-item">
+      <strong>${escapeHtml(lastImportReport.fileName || "Archivo importado")}</strong>
+      <small>${escapeHtml(lastImportReport.message || "Carga completada.")}</small>
+    </article>
+    <div class="mini-stats compact-mini-stats">
+      <div class="mini-stat"><span>Listas nuevas</span><strong>${Number(lastImportReport.catalogInserted || 0)}</strong></div>
+      <div class="mini-stat"><span>Listas reactivadas</span><strong>${Number(lastImportReport.catalogReactivated || 0)}</strong></div>
+      <div class="mini-stat"><span>Movimientos importados</span><strong>${Number(lastImportReport.movementsInserted || 0)}</strong></div>
+      <div class="mini-stat"><span>Movimientos omitidos</span><strong>${Number(lastImportReport.movementsSkipped || 0)}</strong></div>
+      <div class="mini-stat"><span>Clientes nuevos</span><strong>${Number(lastImportReport.clientsInserted || 0)}</strong></div>
+      <div class="mini-stat"><span>Clientes reutilizados</span><strong>${Number(lastImportReport.clientsMatched || 0)}</strong></div>
+    </div>
+    ${
+      warnings.length
+        ? `
+          <div class="stack-list">
+            ${warnings
+              .map(
+                (warning) => `
+                  <article class="list-item">
+                    <strong>Advertencia</strong>
+                    <small>${escapeHtml(warning)}</small>
+                  </article>
+                `
+              )
+              .join("")}
+          </div>
+        `
+        : ""
+    }
+  `;
+}
+
+async function handleExcelImportSubmit(event) {
+  event.preventDefault();
+
+  if (!isAdminUser()) {
+    elements.excelImportFeedback.textContent =
+      "Solo el perfil administrador puede ejecutar esta carga.";
+    return;
+  }
+
+  const file = elements.excelImportFile?.files?.[0];
+  if (!file) {
+    elements.excelImportFeedback.textContent =
+      "Selecciona un archivo Excel antes de importar.";
+    return;
+  }
+
+  const importLists = Boolean(elements.excelImportLists?.checked);
+  const importMovements = Boolean(elements.excelImportMovements?.checked);
+  const importClients = Boolean(elements.excelImportClients?.checked);
+
+  if (!importLists && !importMovements && !importClients) {
+    elements.excelImportFeedback.textContent =
+      "Activa al menos una opción de importación.";
+    return;
+  }
+
+  elements.excelImportFeedback.textContent =
+    "Leyendo archivo y preparando la carga del Excel...";
+
+  try {
+    const fileBuffer = await file.arrayBuffer();
+    const base64 = arrayBufferToBase64(fileBuffer);
+    const result = await apiRequest("/api/import/excel", {
+      method: "POST",
+      body: JSON.stringify({
+        fileName: file.name,
+        fileDataBase64: base64,
+        importLists,
+        importMovements,
+        importClients,
+      }),
+    });
+
+    lastImportReport = result;
+    elements.excelImportForm.reset();
+    if (elements.excelImportLists) {
+      elements.excelImportLists.checked = true;
+    }
+    if (elements.excelImportMovements) {
+      elements.excelImportMovements.checked = true;
+    }
+    if (elements.excelImportClients) {
+      elements.excelImportClients.checked = true;
+    }
+    elements.excelImportFeedback.textContent =
+      result.message || "La carga del Excel terminó correctamente.";
+
+    await loadBootstrap();
+    switchView("importar");
+  } catch (error) {
+    elements.excelImportFeedback.textContent =
+      error.message || "No se pudo cargar el archivo Excel.";
+  }
+}
+
 function renderReportCards(movements) {
   const gym = movements.filter((item) => item.linea === "Gimnasio");
   const restaurant = movements.filter((item) => item.linea === "Restaurante");
@@ -1979,13 +2145,13 @@ async function handleMovementSubmit(event) {
     categoria: elements.categoria.value,
     cliente: elements.cliente.value.trim(),
     descripcion: elements.descripcion.value.trim(),
-    estadoPago: elements.estadoPago.value,
     medioPago: elements.medioPago.value,
     valorTotal: Number(elements.valorTotal.value || 0),
     abono: Number(elements.abono.value || 0),
     observaciones: elements.observaciones.value.trim(),
     justificacionEdicion: elements.editJustification.value.trim(),
   };
+  payload.estadoPago = derivePaymentStatus(payload.valorTotal, payload.abono);
 
   const validation = validateMovement(payload);
   if (!validation.valid) {
@@ -2069,6 +2235,7 @@ async function handleBoxTransferSubmit(event) {
 async function handleClientSubmit(event) {
   event.preventDefault();
 
+  const clientId = Number(elements.clientId.value || 0);
   const payload = {
     fullName: elements.clientName.value.trim(),
     documentNumber: elements.clientDocument.value.trim(),
@@ -2084,26 +2251,64 @@ async function handleClientSubmit(event) {
   }
 
   try {
-    await apiRequest("/api/clients", {
-      method: "POST",
-      body: JSON.stringify(payload),
-    });
+    if (clientId > 0) {
+      await apiRequest(`/api/clients/${clientId}`, {
+        method: "PUT",
+        body: JSON.stringify(payload),
+      });
+    } else {
+      await apiRequest("/api/clients", {
+        method: "POST",
+        body: JSON.stringify(payload),
+      });
+    }
     resetClientForm();
     await loadBootstrap();
     switchView("cartera", {
       clientPanel: "base",
     });
     elements.clientFeedback.textContent =
-      "Cliente registrado correctamente.";
+      clientId > 0
+        ? "Cliente actualizado correctamente."
+        : "Cliente registrado correctamente.";
   } catch (error) {
     elements.clientFeedback.textContent = error.message;
   }
 }
 
 async function handleClientsTableClick(event) {
+  const editButton = event.target.closest("[data-client-edit-id]");
   const statusButton = event.target.closest("[data-client-status-id]");
+  const editClientId = editButton?.dataset.clientEditId;
   const clientId = statusButton?.dataset.clientStatusId;
   const nextActive = statusButton?.dataset.clientNextActive;
+
+  if (editClientId) {
+    const client = (state.clients || []).find(
+      (item) => String(item.id) === String(editClientId)
+    );
+
+    if (!client) {
+      elements.clientFeedback.textContent =
+        "No encontré el cliente que quieres editar.";
+      return;
+    }
+
+    elements.clientId.value = String(client.id);
+    elements.clientFormTitle.textContent = "Editar cliente";
+    elements.clientName.value = client.fullName || "";
+    elements.clientDocument.value = client.documentNumber || "";
+    elements.clientPhone.value = client.phone || "";
+    elements.clientEmail.value = client.email || "";
+    elements.clientNotes.value = client.notes || "";
+    elements.clientFeedback.textContent =
+      "Actualiza los datos del cliente y guarda para aplicar el cambio.";
+    switchView("cartera", {
+      clientPanel: "base",
+    });
+    elements.clientName.focus();
+    return;
+  }
 
   if (!clientId || !nextActive) {
     return;
@@ -2220,11 +2425,11 @@ async function handleMovementTableClick(event) {
     elements.categoria.value = movement.categoria;
     setClientSelection(movement.cliente);
     elements.descripcion.value = movement.descripcion;
-    elements.estadoPago.value = movement.estadoPago;
     elements.medioPago.value = movement.medioPago;
     elements.valorTotal.value = String(movement.valorTotal);
     elements.abono.value = String(movement.abono);
     elements.observaciones.value = movement.observaciones;
+    syncComputedPaymentStatus();
     if (isAssistantUser()) {
       elements.assistantEditJustificationShell.classList.remove("is-hidden");
       elements.editJustification.value = "";
@@ -2866,17 +3071,10 @@ function validateMovement(payload) {
     };
   }
 
-  const rules = {
-    Pagado: payload.abono === payload.valorTotal,
-    Parcial: payload.abono > 0 && payload.abono < payload.valorTotal,
-    Pendiente: payload.abono === 0,
-  };
-
-  if (!rules[payload.estadoPago]) {
+  if (!derivePaymentStatus(payload.valorTotal, payload.abono)) {
     return {
       valid: false,
-      message:
-        "El estado de pago no coincide con el valor total y el abono.",
+      message: "No se pudo calcular el estado de pago del movimiento.",
     };
   }
 
@@ -2946,6 +3144,48 @@ function syncCategoryOptions(options = {}) {
   if (getAvailableSelectValues(elements.categoria).includes(previous)) {
     elements.categoria.value = previous;
   }
+}
+
+function syncComputedPaymentStatus() {
+  if (!elements.estadoPago) {
+    return;
+  }
+
+  const computedStatus = derivePaymentStatus(
+    Number(elements.valorTotal?.value || 0),
+    Number(elements.abono?.value || 0)
+  );
+  const availableStatuses = [
+    ...(state.lists.estadosPago || []),
+    "Pendiente",
+    "Parcial",
+    "Pagado",
+  ];
+
+  fillSelect(elements.estadoPago, [...new Set(availableStatuses)], {
+    includeValue: computedStatus || "Pendiente",
+  });
+  elements.estadoPago.value = computedStatus || "Pendiente";
+  elements.estadoPago.disabled = true;
+}
+
+function derivePaymentStatus(valorTotal, abono) {
+  const total = Number(valorTotal || 0);
+  const paid = Number(abono || 0);
+
+  if (!(total > 0)) {
+    return "";
+  }
+
+  if (paid <= 0) {
+    return "Pendiente";
+  }
+
+  if (paid >= total) {
+    return "Pagado";
+  }
+
+  return "Parcial";
 }
 
 function fillSelect(select, values, options = {}) {
@@ -3145,17 +3385,15 @@ function resetMovementForm() {
   if ((state.lists.tipos || []).length) {
     elements.tipo.value = state.lists.tipos[0];
   }
-  if ((state.lists.estadosPago || []).length) {
-    elements.estadoPago.value = state.lists.estadosPago[0];
-  }
   if ((state.lists.mediosPago || []).length) {
     elements.medioPago.value = state.lists.mediosPago[0];
   }
+  syncComputedPaymentStatus();
   elements.editJustification.value = "";
   elements.assistantEditJustificationShell.classList.add("is-hidden");
   elements.movementFeedback.textContent = isAssistantUser()
     ? "Como asistente operativo solo ves movimientos registrados en las ultimas 24 horas."
-    : "El estado de pago se valida contra valor total y abono.";
+    : "El estado de pago se calcula automaticamente segun el valor total y el abono.";
 }
 
 function resetBoxTransferForm() {
@@ -3194,8 +3432,10 @@ function resetClientForm() {
   }
 
   elements.clientForm.reset();
+  elements.clientId.value = "";
+  elements.clientFormTitle.textContent = "Crear cliente";
   elements.clientFeedback.textContent =
-    "Aqui puedes registrar la base de clientes para luego usarla en movimientos y cartera.";
+    "Aqui puedes registrar y actualizar la base de clientes para luego usarla en movimientos y cartera.";
 }
 
 function resetCollectionSelection() {
@@ -3287,11 +3527,15 @@ function weeklyKey(start, end) {
 }
 
 function formatCurrency(value) {
+  const numericValue = Number(value || 0);
+  const hasDecimals = Math.round(Math.abs(numericValue) * 100) % 100 !== 0;
+
   return new Intl.NumberFormat("es-CO", {
     style: "currency",
     currency: "COP",
-    maximumFractionDigits: 0,
-  }).format(Number(value || 0));
+    minimumFractionDigits: hasDecimals ? 2 : 0,
+    maximumFractionDigits: 2,
+  }).format(numericValue);
 }
 
 function getPortfolioSearchQuery() {
@@ -3423,6 +3667,19 @@ function formatClockTime(date) {
     hour: "2-digit",
     minute: "2-digit",
   }).format(date);
+}
+
+function arrayBufferToBase64(buffer) {
+  let binary = "";
+  const bytes = new Uint8Array(buffer);
+  const chunkSize = 0x8000;
+
+  for (let index = 0; index < bytes.length; index += chunkSize) {
+    const chunk = bytes.subarray(index, index + chunkSize);
+    binary += String.fromCharCode(...chunk);
+  }
+
+  return btoa(binary);
 }
 
 function sum(items, key) {

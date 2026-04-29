@@ -2,6 +2,7 @@ require("dotenv").config();
 
 const express = require("express");
 const path = require("path");
+const XLSX = require("xlsx");
 const { query, withClient, checkConnection } = require("./server/db");
 const {
   clearSessionCookie,
@@ -59,7 +60,7 @@ const protectedCatalogGroups = new Set([
   "estadosPago",
 ]);
 
-app.use(express.json({ limit: "1mb" }));
+app.use(express.json({ limit: "10mb" }));
 app.use(express.static(rootDir));
 
 app.get("/api/health", asyncHandler(async (_req, res) => {
@@ -352,6 +353,78 @@ app.post("/api/clients", asyncHandler(async (req, res) => {
   res.status(201).json(mapClientRow(result.rows[0]));
 }));
 
+app.put("/api/clients/:id", asyncHandler(async (req, res) => {
+  const clientId = Number(req.params.id);
+  const payload = normalizeClientPayload(req.body);
+  validateClientPayload(payload);
+
+  if (!Number.isInteger(clientId) || clientId <= 0) {
+    return res.status(400).json({ error: "Cliente invalido." });
+  }
+
+  const existingClient = await findClientByName(payload.fullName, {
+    excludeId: clientId,
+  });
+  if (existingClient) {
+    return res.status(409).json({
+      error: "Ya existe un cliente registrado con ese nombre.",
+    });
+  }
+
+  const updatedClient = await withClient(async (client) => {
+    await client.query("begin");
+
+    try {
+      const currentResult = await client.query(
+        `
+          select *
+          from clients
+          where id = $1
+          limit 1
+        `,
+        [clientId]
+      );
+
+      if (!currentResult.rows.length) {
+        throw httpError(404, "Cliente no encontrado.");
+      }
+
+      const currentClient = currentResult.rows[0];
+      const result = await client.query(
+        `
+          update clients
+          set
+            full_name = $2,
+            document_number = $3,
+            phone = $4,
+            email = $5,
+            notes = $6,
+            updated_at = now()
+          where id = $1
+          returning *
+        `,
+        [
+          clientId,
+          payload.fullName,
+          payload.documentNumber,
+          payload.phone,
+          payload.email,
+          payload.notes,
+        ]
+      );
+
+      await syncClientNameRename(client, currentClient.full_name, payload.fullName);
+      await client.query("commit");
+      return result.rows[0];
+    } catch (error) {
+      await client.query("rollback");
+      throw error;
+    }
+  });
+
+  res.json(mapClientRow(updatedClient));
+}));
+
 app.patch(
   "/api/clients/:id/status",
   requireAdmin,
@@ -480,6 +553,14 @@ app.get("/api/bootstrap", asyncHandler(async (req, res) => {
     boxTransfers: transferResult.rows.map(mapBoxTransferRow),
     notes: mapNotesRows(notesResult.rows),
   });
+}));
+
+app.post("/api/import/excel", requireAdmin, asyncHandler(async (req, res) => {
+  const payload = normalizeExcelImportPayload(req.body);
+  validateExcelImportPayload(payload);
+
+  const report = await importExcelWorkbook(payload);
+  res.status(201).json(report);
 }));
 
 app.post("/api/movements", asyncHandler(async (req, res) => {
@@ -1094,6 +1175,7 @@ function normalizeMovementPayload(body) {
   const abono = Number(body.abono || 0);
   const saldoPendiente = Math.max(valorTotal - abono, 0);
   const tipo = String(body.tipo || "").trim();
+  const estadoPago = derivePaymentStatus(valorTotal, abono);
 
   return {
     linea: String(body.linea || "").trim(),
@@ -1102,7 +1184,7 @@ function normalizeMovementPayload(body) {
     categoria: String(body.categoria || "").trim(),
     cliente: String(body.cliente || "").trim(),
     descripcion: String(body.descripcion || "").trim(),
-    estadoPago: String(body.estadoPago || "").trim(),
+    estadoPago,
     medioPago: String(body.medioPago || "").trim(),
     valorTotal,
     abono,
@@ -1114,6 +1196,25 @@ function normalizeMovementPayload(body) {
     observaciones: String(body.observaciones || "").trim(),
     justificacionEdicion: String(body.justificacionEdicion || "").trim(),
   };
+}
+
+function derivePaymentStatus(valorTotal, abono) {
+  const total = Number(valorTotal || 0);
+  const paid = Number(abono || 0);
+
+  if (!(total > 0)) {
+    return "";
+  }
+
+  if (paid <= 0) {
+    return "Pendiente";
+  }
+
+  if (paid >= total) {
+    return "Pagado";
+  }
+
+  return "Parcial";
 }
 
 function normalizeCollectionPayload(body) {
@@ -1132,6 +1233,16 @@ function normalizeBoxTransferPayload(body) {
     targetPaymentMethod: String(body.targetPaymentMethod || "").trim(),
     amount: Number(body.amount || 0),
     notes: String(body.notes || "").trim(),
+  };
+}
+
+function normalizeExcelImportPayload(body) {
+  return {
+    fileName: String(body.fileName || "").trim(),
+    fileDataBase64: String(body.fileDataBase64 || "").trim(),
+    importLists: body.importLists !== false,
+    importMovements: body.importMovements !== false,
+    importClients: body.importClients !== false,
   };
 }
 
@@ -1156,10 +1267,6 @@ function validateMovementPayload(payload, options = {}) {
     throw httpError(400, "La descripcion es obligatoria.");
   }
 
-  if (!["Pagado", "Parcial", "Pendiente"].includes(payload.estadoPago)) {
-    throw httpError(400, "Estado de pago invalido.");
-  }
-
   if (!payload.medioPago) {
     throw httpError(400, "El medio de pago es obligatorio.");
   }
@@ -1176,13 +1283,12 @@ function validateMovementPayload(payload, options = {}) {
     throw httpError(400, "El abono no puede ser mayor que el valor total.");
   }
 
-  const statusRules = {
-    Pagado: payload.abono === payload.valorTotal,
-    Parcial: payload.abono > 0 && payload.abono < payload.valorTotal,
-    Pendiente: payload.abono === 0,
-  };
+  const expectedStatus = derivePaymentStatus(payload.valorTotal, payload.abono);
+  if (!["Pagado", "Parcial", "Pendiente"].includes(expectedStatus)) {
+    throw httpError(400, "No se pudo calcular el estado de pago del movimiento.");
+  }
 
-  if (!statusRules[payload.estadoPago]) {
+  if (payload.estadoPago !== expectedStatus) {
     throw httpError(
       400,
       "El estado de pago no coincide con el valor total y el abono."
@@ -1238,6 +1344,711 @@ function validateBoxTransferPayload(payload) {
   if (!(payload.amount > 0)) {
     throw httpError(400, "El valor a mover debe ser mayor que cero.");
   }
+}
+
+function validateExcelImportPayload(payload) {
+  if (!payload.fileDataBase64) {
+    throw httpError(400, "Debes adjuntar el archivo Excel a importar.");
+  }
+
+  if (!payload.fileName) {
+    throw httpError(400, "El archivo debe conservar su nombre para la trazabilidad.");
+  }
+
+  if (!payload.importLists && !payload.importMovements && !payload.importClients) {
+    throw httpError(400, "Selecciona al menos un bloque de datos para importar.");
+  }
+}
+
+async function importExcelWorkbook(payload) {
+  const warnings = [];
+  let workbook;
+
+  try {
+    const buffer = Buffer.from(payload.fileDataBase64, "base64");
+    workbook = XLSX.read(buffer, {
+      type: "buffer",
+      cellDates: true,
+      raw: true,
+    });
+  } catch (_error) {
+    throw httpError(400, "No se pudo leer el archivo Excel. Verifica que sea un .xlsx o .xls válido.");
+  }
+
+  const parsedWorkbook = parseWorkbookForImport(workbook, warnings);
+
+  if (
+    payload.importMovements &&
+    !parsedWorkbook.movements.length &&
+    !parsedWorkbook.catalogEntries.length
+  ) {
+    throw httpError(
+      400,
+      "No encontré movimientos ni listas utilizables dentro del Excel."
+    );
+  }
+
+  return withClient(async (client) => {
+    await client.query("begin");
+
+    try {
+      const catalogState = await loadCatalogState(client);
+      const clientState = await loadClientState(client);
+      const movementKeys = await loadMovementKeys(client);
+
+      const report = {
+        fileName: payload.fileName,
+        message: "La carga del Excel terminó correctamente.",
+        catalogInserted: 0,
+        catalogReactivated: 0,
+        movementsInserted: 0,
+        movementsSkipped: 0,
+        clientsInserted: 0,
+        clientsMatched: 0,
+        warnings,
+      };
+
+      const requiredCatalogEntries = [
+        ...(payload.importLists ? parsedWorkbook.catalogEntries : []),
+        ...(payload.importMovements
+          ? buildCatalogEntriesFromImportedMovements(parsedWorkbook.movements)
+          : []),
+      ];
+
+      if (requiredCatalogEntries.length) {
+        const catalogReport = await upsertCatalogEntries(
+          client,
+          catalogState,
+          requiredCatalogEntries
+        );
+        report.catalogInserted += catalogReport.inserted;
+        report.catalogReactivated += catalogReport.reactivated;
+      }
+
+      if (payload.importClients) {
+        const clientReport = await createMissingClientsFromImport(
+          client,
+          clientState,
+          parsedWorkbook.clientNames
+        );
+        report.clientsInserted += clientReport.inserted;
+        report.clientsMatched += clientReport.matched;
+      }
+
+      if (payload.importMovements) {
+        const movementReport = await insertImportedMovements(
+          client,
+          parsedWorkbook.movements,
+          catalogState,
+          clientState,
+          movementKeys,
+          warnings
+        );
+        report.movementsInserted += movementReport.inserted;
+        report.movementsSkipped += movementReport.skipped;
+      }
+
+      await client.query("commit");
+      return report;
+    } catch (error) {
+      await client.query("rollback");
+      throw error;
+    }
+  });
+}
+
+function parseWorkbookForImport(workbook, warnings) {
+  const catalogEntries = extractCatalogEntries(workbook, warnings);
+  const gymMovements = extractMovementsFromWorkbookSheet(
+    workbook,
+    "Gimnasio",
+    "Gimnasio",
+    warnings
+  );
+  const restaurantMovements = extractMovementsFromWorkbookSheet(
+    workbook,
+    "Restaurante",
+    "Restaurante",
+    warnings
+  );
+  const movements = [...gymMovements, ...restaurantMovements];
+  const clientNames = [...new Set(
+    movements
+      .map((item) => item.cliente)
+      .filter(Boolean)
+      .map((item) => String(item).trim())
+  )];
+
+  return {
+    catalogEntries,
+    movements,
+    clientNames,
+  };
+}
+
+function extractCatalogEntries(workbook, warnings) {
+  const sheet = workbook.Sheets?.Listas;
+  if (!sheet) {
+    warnings.push("La hoja 'Listas' no existe; se omitió la carga de listas maestras.");
+    return [];
+  }
+
+  const rows = XLSX.utils.sheet_to_json(sheet, {
+    header: 1,
+    defval: "",
+    raw: true,
+  });
+
+  const definitions = [
+    { group: "gimnasioCategorias", columnIndex: 0 },
+    { group: "restauranteCategorias", columnIndex: 1 },
+    { group: "tipos", columnIndex: 2 },
+    { group: "mediosPago", columnIndex: 3 },
+    { group: "estadosPago", columnIndex: 5 },
+  ];
+
+  const entries = [];
+  definitions.forEach((definition) => {
+    let sortOrder = 1;
+    rows.slice(1).forEach((row) => {
+      const value = cleanExcelText(row[definition.columnIndex]);
+      if (!value) {
+        return;
+      }
+
+      entries.push({
+        group: definition.group,
+        value,
+        sortOrder,
+      });
+      sortOrder += 1;
+    });
+  });
+
+  return uniqueCatalogEntries(entries);
+}
+
+function extractMovementsFromWorkbookSheet(workbook, sheetName, businessLine, warnings) {
+  const sheet = workbook.Sheets?.[sheetName];
+  if (!sheet) {
+    warnings.push(`La hoja '${sheetName}' no existe; se omitieron esos movimientos.`);
+    return [];
+  }
+
+  const rows = XLSX.utils.sheet_to_json(sheet, {
+    header: 1,
+    defval: "",
+    raw: true,
+  });
+
+  const headerRowIndex = rows.findIndex((row) => {
+    const first = normalizeComparableText(row?.[0]);
+    const second = normalizeComparableText(row?.[1]);
+    const third = normalizeComparableText(row?.[2]);
+    return first === "fecha" && second === "tipo" && third === "categoria";
+  });
+
+  if (headerRowIndex < 0) {
+    warnings.push(`No encontré la fila de encabezados en la hoja '${sheetName}'.`);
+    return [];
+  }
+
+  const movements = [];
+  rows.slice(headerRowIndex + 1).forEach((row, index) => {
+    if (isExcelMovementRowEmpty(row)) {
+      return;
+    }
+
+    const totalAmount = toPositiveAmount(row[7]);
+    const movementType = normalizeImportedMovementType(row[1]);
+    const category = cleanExcelText(row[2]);
+    const movementDate = excelCellToIsoDate(row[0]);
+
+    if (!movementDate || !movementType || !category || !(totalAmount > 0)) {
+      return;
+    }
+
+    let paidAmount = toAmount(row[8]);
+    if (paidAmount < 0) {
+      paidAmount = 0;
+    }
+    if (paidAmount > totalAmount) {
+      warnings.push(
+        `${sheetName} fila ${headerRowIndex + index + 2}: el abono superaba el total y fue ajustado al valor total.`
+      );
+      paidAmount = totalAmount;
+    }
+
+    const paymentStatus = resolveImportedPaymentStatus(row[5], totalAmount, paidAmount);
+    const paymentMethod = cleanExcelText(row[6]) || "Otro";
+    const description =
+      cleanExcelText(row[4]) || `${movementType} ${category}`.trim();
+
+    movements.push({
+      linea: businessLine,
+      fecha: movementDate,
+      tipo: movementType,
+      categoria: category,
+      cliente: cleanExcelText(row[3]),
+      descripcion: description,
+      estadoPago: paymentStatus,
+      medioPago: paymentMethod,
+      valorTotal: totalAmount,
+      abono: paidAmount,
+      observaciones: "",
+    });
+  });
+
+  return movements;
+}
+
+function isExcelMovementRowEmpty(row) {
+  return !Array.isArray(row) || row.every((cell) => !cleanExcelText(cell) && !Number(cell));
+}
+
+function normalizeImportedMovementType(value) {
+  const normalized = normalizeComparableText(value);
+  if (normalized === "ingreso") {
+    return "Ingreso";
+  }
+  if (normalized === "gasto") {
+    return "Gasto";
+  }
+  if (normalized === "costo") {
+    return "Costo";
+  }
+  return "";
+}
+
+function resolveImportedPaymentStatus(rawValue, totalAmount, paidAmount) {
+  const normalized = normalizeComparableText(rawValue);
+
+  if (paidAmount >= totalAmount && totalAmount > 0) {
+    return "Pagado";
+  }
+
+  if (paidAmount > 0 && paidAmount < totalAmount) {
+    return "Parcial";
+  }
+
+  if (normalized === "pagado") {
+    return "Pagado";
+  }
+
+  if (normalized === "parcial") {
+    return paidAmount > 0 && paidAmount < totalAmount ? "Parcial" : "Pendiente";
+  }
+
+  return "Pendiente";
+}
+
+function buildCatalogEntriesFromImportedMovements(movements) {
+  const entries = [];
+
+  movements.forEach((movement) => {
+    entries.push({
+      group: movement.linea === "Gimnasio"
+        ? "gimnasioCategorias"
+        : "restauranteCategorias",
+      value: movement.categoria,
+      sortOrder: 999,
+    });
+    entries.push({
+      group: "tipos",
+      value: movement.tipo,
+      sortOrder: 999,
+    });
+    entries.push({
+      group: "mediosPago",
+      value: movement.medioPago,
+      sortOrder: 999,
+    });
+    entries.push({
+      group: "estadosPago",
+      value: movement.estadoPago,
+      sortOrder: 999,
+    });
+  });
+
+  return uniqueCatalogEntries(entries);
+}
+
+function uniqueCatalogEntries(entries) {
+  const seen = new Set();
+  const uniqueEntries = [];
+
+  entries.forEach((entry) => {
+    const value = cleanExcelText(entry.value);
+    if (!entry.group || !value) {
+      return;
+    }
+
+    const key = `${entry.group}::${normalizeComparableText(value)}`;
+    if (seen.has(key)) {
+      return;
+    }
+
+    seen.add(key);
+    uniqueEntries.push({
+      group: entry.group,
+      value,
+      sortOrder: Number(entry.sortOrder || 999),
+    });
+  });
+
+  return uniqueEntries;
+}
+
+async function loadCatalogState(client) {
+  const result = await client.query(
+    `
+      select id, group_name, value, sort_order, is_active
+      from catalog_items
+      order by group_name asc, sort_order asc, value asc
+    `
+  );
+
+  const state = new Map();
+  result.rows.forEach((row) => {
+    const group = row.group_name;
+    const groupMap = state.get(group) || new Map();
+    groupMap.set(normalizeComparableText(row.value), {
+      id: Number(row.id),
+      value: row.value,
+      isActive: Boolean(row.is_active),
+      sortOrder: Number(row.sort_order || 999),
+    });
+    state.set(group, groupMap);
+  });
+
+  return state;
+}
+
+async function upsertCatalogEntries(client, catalogState, entries) {
+  let inserted = 0;
+  let reactivated = 0;
+
+  for (const entry of entries) {
+    const groupMap = catalogState.get(entry.group) || new Map();
+    const normalizedKey = normalizeComparableText(entry.value);
+    const existing = groupMap.get(normalizedKey);
+
+    if (existing) {
+      if (!existing.isActive) {
+        await client.query(
+          `
+            update catalog_items
+            set is_active = true, updated_at = now()
+            where id = $1
+          `,
+          [existing.id]
+        );
+        existing.isActive = true;
+        reactivated += 1;
+      }
+      continue;
+    }
+
+    const result = await client.query(
+      `
+        insert into catalog_items (group_name, value, sort_order, is_active, updated_at)
+        values ($1, $2, $3, true, now())
+        returning id, group_name, value, sort_order, is_active
+      `,
+      [entry.group, entry.value, entry.sortOrder]
+    );
+
+    const row = result.rows[0];
+    groupMap.set(normalizeComparableText(row.value), {
+      id: Number(row.id),
+      value: row.value,
+      isActive: Boolean(row.is_active),
+      sortOrder: Number(row.sort_order || 999),
+    });
+    catalogState.set(entry.group, groupMap);
+    inserted += 1;
+  }
+
+  return { inserted, reactivated };
+}
+
+async function loadClientState(client) {
+  const result = await client.query(
+    `
+      select id, full_name, is_active
+      from clients
+      order by id asc
+    `
+  );
+
+  const state = new Map();
+  result.rows.forEach((row) => {
+    state.set(normalizeComparableText(row.full_name), {
+      id: Number(row.id),
+      fullName: row.full_name,
+      isActive: Boolean(row.is_active),
+    });
+  });
+
+  return state;
+}
+
+async function createMissingClientsFromImport(client, clientState, clientNames) {
+  let inserted = 0;
+  let matched = 0;
+
+  for (const clientName of clientNames) {
+    const cleanName = cleanExcelText(clientName);
+    if (!cleanName) {
+      continue;
+    }
+
+    const normalizedName = normalizeComparableText(cleanName);
+    if (clientState.has(normalizedName)) {
+      matched += 1;
+      continue;
+    }
+
+    const result = await client.query(
+      `
+        insert into clients (
+          full_name,
+          document_number,
+          phone,
+          email,
+          notes,
+          is_active
+        )
+        values ($1, '', '', '', $2, true)
+        returning id, full_name, is_active
+      `,
+      [cleanName, "Importado desde Excel"]
+    );
+
+    clientState.set(normalizedName, {
+      id: Number(result.rows[0].id),
+      fullName: result.rows[0].full_name,
+      isActive: Boolean(result.rows[0].is_active),
+    });
+    inserted += 1;
+  }
+
+  return { inserted, matched };
+}
+
+async function loadMovementKeys(client) {
+  const result = await client.query(
+    `
+      select
+        business_line,
+        movement_date,
+        movement_type,
+        category,
+        client_name,
+        description,
+        payment_status,
+        payment_method,
+        total_amount,
+        paid_amount
+      from movements
+    `
+  );
+
+  return new Set(result.rows.map((row) => buildMovementKey({
+    linea: row.business_line,
+    fecha: normalizeDateOnly(row.movement_date),
+    tipo: row.movement_type,
+    categoria: row.category,
+    cliente: row.client_name || "",
+    descripcion: row.description,
+    estadoPago: row.payment_status,
+    medioPago: row.payment_method,
+    valorTotal: Number(row.total_amount || 0),
+    abono: Number(row.paid_amount || 0),
+  })));
+}
+
+async function insertImportedMovements(
+  client,
+  movements,
+  catalogState,
+  clientState,
+  movementKeys,
+  warnings
+) {
+  let inserted = 0;
+  let skipped = 0;
+
+  for (const movement of movements) {
+    const canonicalMovement = resolveImportedMovementAgainstCatalogs(
+      movement,
+      catalogState,
+      clientState
+    );
+    const payload = normalizeMovementPayload(canonicalMovement);
+    validateMovementPayload(payload);
+
+    const movementKey = buildMovementKey(payload);
+    if (movementKeys.has(movementKey)) {
+      skipped += 1;
+      continue;
+    }
+
+    await client.query(
+      `
+        insert into movements (
+          business_line,
+          movement_date,
+          movement_type,
+          category,
+          client_name,
+          description,
+          payment_status,
+          payment_method,
+          total_amount,
+          paid_amount,
+          balance_due,
+          cash_flow,
+          year,
+          month_number,
+          month_name,
+          notes
+        )
+        values (
+          $1, $2, $3, $4, $5, $6, $7, $8,
+          $9, $10, $11, $12, $13, $14, $15, $16
+        )
+      `,
+      [
+        payload.linea,
+        payload.fecha,
+        payload.tipo,
+        payload.categoria,
+        payload.cliente,
+        payload.descripcion,
+        payload.estadoPago,
+        payload.medioPago,
+        payload.valorTotal,
+        payload.abono,
+        payload.saldoPendiente,
+        payload.flujoNeto,
+        payload.ano,
+        payload.mesNumero,
+        payload.mesNombre,
+        payload.observaciones,
+      ]
+    );
+
+    movementKeys.add(movementKey);
+    inserted += 1;
+  }
+
+  if (!inserted && movements.length) {
+    warnings.push(
+      "Todos los movimientos detectados ya existían en la base o fueron omitidos por duplicado."
+    );
+  }
+
+  return { inserted, skipped };
+}
+
+function resolveImportedMovementAgainstCatalogs(movement, catalogState, clientState) {
+  const categoryGroup =
+    movement.linea === "Gimnasio" ? "gimnasioCategorias" : "restauranteCategorias";
+  const clientMatch = clientState.get(normalizeComparableText(movement.cliente || ""));
+
+  return {
+    ...movement,
+    categoria: resolveCatalogValue(categoryGroup, movement.categoria, catalogState),
+    tipo: resolveCatalogValue("tipos", movement.tipo, catalogState),
+    medioPago: resolveCatalogValue("mediosPago", movement.medioPago || "Otro", catalogState),
+    estadoPago: resolveCatalogValue("estadosPago", movement.estadoPago, catalogState),
+    cliente: clientMatch?.fullName || cleanExcelText(movement.cliente),
+  };
+}
+
+function resolveCatalogValue(group, rawValue, catalogState) {
+  const groupMap = catalogState.get(group);
+  const normalizedKey = normalizeComparableText(rawValue);
+  if (!groupMap || !groupMap.has(normalizedKey)) {
+    return cleanExcelText(rawValue);
+  }
+
+  return groupMap.get(normalizedKey).value;
+}
+
+function buildMovementKey(movement) {
+  return [
+    cleanExcelText(movement.linea),
+    normalizeDateOnly(movement.fecha),
+    cleanExcelText(movement.tipo),
+    normalizeComparableText(movement.categoria),
+    normalizeComparableText(movement.cliente),
+    normalizeComparableText(movement.descripcion),
+    cleanExcelText(movement.estadoPago),
+    normalizeComparableText(movement.medioPago),
+    Number(movement.valorTotal || 0).toFixed(2),
+    Number(movement.abono || 0).toFixed(2),
+  ].join("::");
+}
+
+function excelCellToIsoDate(value) {
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    return value.toISOString().slice(0, 10);
+  }
+
+  if (typeof value === "number") {
+    const parsed = XLSX.SSF.parse_date_code(value);
+    if (!parsed) {
+      return "";
+    }
+
+    return `${String(parsed.y).padStart(4, "0")}-${String(parsed.m).padStart(2, "0")}-${String(parsed.d).padStart(2, "0")}`;
+  }
+
+  const text = cleanExcelText(value);
+  if (!text) {
+    return "";
+  }
+
+  const parsed = new Date(text);
+  if (Number.isNaN(parsed.getTime())) {
+    return "";
+  }
+
+  return parsed.toISOString().slice(0, 10);
+}
+
+function toPositiveAmount(value) {
+  const amount = toAmount(value);
+  return amount > 0 ? amount : 0;
+}
+
+function toAmount(value) {
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? value : 0;
+  }
+
+  const cleanValue = String(value || "")
+    .replace(/[^\d,.-]/g, "")
+    .replace(/\.(?=.*\.)/g, "")
+    .replace(",", ".");
+
+  const parsed = Number(cleanValue);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function cleanExcelText(value) {
+  return String(value ?? "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function normalizeComparableText(value) {
+  return cleanExcelText(value)
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
 }
 
 function mapCatalogRows(rows) {
@@ -1467,6 +2278,23 @@ async function syncCatalogValueRename(client, group, previousValue, nextValue) {
   }
 }
 
+async function syncClientNameRename(client, previousValue, nextValue) {
+  if (!previousValue || !nextValue || previousValue === nextValue) {
+    return;
+  }
+
+  await client.query(
+    `
+      update movements
+      set
+        client_name = $2,
+        updated_at = now()
+      where lower(trim(client_name)) = lower(trim($1))
+    `,
+    [previousValue, nextValue]
+  );
+}
+
 function mapClientRow(row) {
   return {
     id: row.id,
@@ -1647,15 +2475,17 @@ async function listClients() {
   return result.rows.map(mapClientRow);
 }
 
-async function findClientByName(fullName) {
+async function findClientByName(fullName, options = {}) {
+  const excludeId = Number(options.excludeId || 0);
   const result = await query(
     `
       select *
       from clients
       where lower(full_name) = lower($1)
+        and ($2::bigint <= 0 or id <> $2::bigint)
       limit 1
     `,
-    [String(fullName || "").trim()]
+    [String(fullName || "").trim(), excludeId]
   );
 
   return result.rows[0] ? mapClientRow(result.rows[0]) : null;
