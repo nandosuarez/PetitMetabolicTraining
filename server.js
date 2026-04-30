@@ -2,6 +2,7 @@ require("dotenv").config();
 
 const express = require("express");
 const path = require("path");
+const officeCrypto = require("officecrypto-tool");
 const XLSX = require("xlsx");
 const { query, withClient, checkConnection } = require("./server/db");
 const {
@@ -58,6 +59,13 @@ const catalogGroups = new Set([
 const protectedCatalogGroups = new Set([
   "tipos",
   "estadosPago",
+]);
+
+const programmingExerciseFamilies = new Set([
+  "multiarticular_tren_inferior",
+  "multiarticular_tren_superior",
+  "aislado_por_musculo",
+  "hyrox_oficial",
 ]);
 
 app.use(express.json({ limit: "10mb" }));
@@ -456,6 +464,293 @@ app.patch(
   })
 );
 
+app.post(
+  "/api/programming/exercises",
+  requireProgrammingAccess,
+  asyncHandler(async (req, res) => {
+    const payload = normalizeProgrammingExercisePayload(req.body);
+    validateProgrammingExercisePayload(payload);
+
+    await assertProgrammingExerciseNameAvailable(payload.name);
+
+    const result = await query(
+      `
+        insert into programming_exercises (
+          name,
+          family,
+          category,
+          primary_muscle,
+          movement_pattern,
+          equipment,
+          coaching_notes,
+          is_active
+        )
+        values ($1, $2, $3, $4, $5, $6, $7, true)
+        returning *
+      `,
+      [
+        payload.name,
+        payload.family,
+        payload.category,
+        payload.primaryMuscle,
+        payload.movementPattern,
+        payload.equipment,
+        payload.coachingNotes,
+      ]
+    );
+
+    res.status(201).json(mapProgrammingExerciseRow(result.rows[0]));
+  })
+);
+
+app.put(
+  "/api/programming/exercises/:id",
+  requireProgrammingAccess,
+  asyncHandler(async (req, res) => {
+    const exerciseId = Number(req.params.id);
+    const payload = normalizeProgrammingExercisePayload(req.body);
+    validateProgrammingExercisePayload(payload);
+
+    if (!Number.isInteger(exerciseId) || exerciseId <= 0) {
+      return res.status(400).json({ error: "Ejercicio invalido." });
+    }
+
+    await assertProgrammingExerciseNameAvailable(payload.name, {
+      excludeId: exerciseId,
+    });
+
+    const result = await query(
+      `
+        update programming_exercises
+        set
+          name = $2,
+          family = $3,
+          category = $4,
+          primary_muscle = $5,
+          movement_pattern = $6,
+          equipment = $7,
+          coaching_notes = $8,
+          updated_at = now()
+        where id = $1
+        returning *
+      `,
+      [
+        exerciseId,
+        payload.name,
+        payload.family,
+        payload.category,
+        payload.primaryMuscle,
+        payload.movementPattern,
+        payload.equipment,
+        payload.coachingNotes,
+      ]
+    );
+
+    if (!result.rows.length) {
+      return res.status(404).json({ error: "Ejercicio no encontrado." });
+    }
+
+    res.json(mapProgrammingExerciseRow(result.rows[0]));
+  })
+);
+
+app.patch(
+  "/api/programming/exercises/:id/active",
+  requireProgrammingAccess,
+  asyncHandler(async (req, res) => {
+    const exerciseId = Number(req.params.id);
+    const isActive = Boolean(req.body.isActive);
+
+    if (!Number.isInteger(exerciseId) || exerciseId <= 0) {
+      return res.status(400).json({ error: "Ejercicio invalido." });
+    }
+
+    const result = await query(
+      `
+        update programming_exercises
+        set
+          is_active = $2,
+          updated_at = now()
+        where id = $1
+        returning *
+      `,
+      [exerciseId, isActive]
+    );
+
+    if (!result.rows.length) {
+      return res.status(404).json({ error: "Ejercicio no encontrado." });
+    }
+
+    res.json(mapProgrammingExerciseRow(result.rows[0]));
+  })
+);
+
+app.post(
+  "/api/programming/programs",
+  requireProgrammingAccess,
+  asyncHandler(async (req, res) => {
+    const payload = normalizeClassProgramPayload(req.body);
+    validateClassProgramPayload(payload);
+    await assertProgrammingReferencesExist(payload);
+
+    const userId = Number(req.authUser?.id || 0);
+    let programId = 0;
+
+    await withClient(async (client) => {
+      await client.query("begin");
+
+      try {
+        const result = await client.query(
+          `
+            insert into class_programs (
+              class_date,
+              title,
+              class_group,
+              focus_area,
+              method_id,
+              duration_minutes,
+              objective,
+              general_notes,
+              is_active,
+              created_by_user_id,
+              updated_by_user_id
+            )
+            values ($1, $2, $3, $4, $5, $6, $7, $8, true, $9, $9)
+            returning id
+          `,
+          [
+            payload.classDate,
+            payload.title,
+            payload.classGroup,
+            payload.focusArea,
+            payload.methodId,
+            payload.durationMinutes,
+            payload.objective,
+            payload.generalNotes,
+            userId,
+          ]
+        );
+
+        programId = Number(result.rows[0]?.id || 0);
+        await replaceClassProgramItems(client, programId, payload.items);
+        await client.query("commit");
+      } catch (error) {
+        await client.query("rollback");
+        throw error;
+      }
+    });
+
+    const program = await readClassProgramById(programId);
+    res.status(201).json(program);
+  })
+);
+
+app.put(
+  "/api/programming/programs/:id",
+  requireProgrammingAccess,
+  asyncHandler(async (req, res) => {
+    const programId = Number(req.params.id);
+    const payload = normalizeClassProgramPayload(req.body);
+    validateClassProgramPayload(payload);
+    await assertProgrammingReferencesExist(payload);
+
+    if (!Number.isInteger(programId) || programId <= 0) {
+      return res.status(400).json({ error: "Programación invalida." });
+    }
+
+    const userId = Number(req.authUser?.id || 0);
+    let updated = false;
+
+    await withClient(async (client) => {
+      await client.query("begin");
+
+      try {
+        const result = await client.query(
+          `
+            update class_programs
+            set
+              class_date = $2,
+              title = $3,
+              class_group = $4,
+              focus_area = $5,
+              method_id = $6,
+              duration_minutes = $7,
+              objective = $8,
+              general_notes = $9,
+              updated_by_user_id = $10,
+              updated_at = now()
+            where id = $1
+            returning id
+          `,
+          [
+            programId,
+            payload.classDate,
+            payload.title,
+            payload.classGroup,
+            payload.focusArea,
+            payload.methodId,
+            payload.durationMinutes,
+            payload.objective,
+            payload.generalNotes,
+            userId,
+          ]
+        );
+
+        if (!result.rows.length) {
+          throw httpError(404, "Programación no encontrada.");
+        }
+
+        await replaceClassProgramItems(client, programId, payload.items);
+        await client.query("commit");
+        updated = true;
+      } catch (error) {
+        await client.query("rollback");
+        throw error;
+      }
+    });
+
+    if (!updated) {
+      return res.status(404).json({ error: "Programación no encontrada." });
+    }
+
+    const program = await readClassProgramById(programId);
+    res.json(program);
+  })
+);
+
+app.patch(
+  "/api/programming/programs/:id/active",
+  requireProgrammingAccess,
+  asyncHandler(async (req, res) => {
+    const programId = Number(req.params.id);
+    const isActive = Boolean(req.body.isActive);
+
+    if (!Number.isInteger(programId) || programId <= 0) {
+      return res.status(400).json({ error: "Programación invalida." });
+    }
+
+    const result = await query(
+      `
+        update class_programs
+        set
+          is_active = $2,
+          updated_by_user_id = $3,
+          updated_at = now()
+        where id = $1
+        returning id
+      `,
+      [programId, isActive, Number(req.authUser?.id || 0)]
+    );
+
+    if (!result.rows.length) {
+      return res.status(404).json({ error: "Programación no encontrada." });
+    }
+
+    const program = await readClassProgramById(programId);
+    res.json(program);
+  })
+);
+
 app.get("/api/bootstrap", asyncHandler(async (req, res) => {
   const isAssistantOperative = req.authUser?.role === "asistente_operativo";
 
@@ -468,6 +763,9 @@ app.get("/api/bootstrap", asyncHandler(async (req, res) => {
     clientResult,
     collectionResult,
     transferResult,
+    programmingMethods,
+    programmingExercises,
+    classPrograms,
   ] =
     await Promise.all([
     query(
@@ -540,6 +838,9 @@ app.get("/api/bootstrap", asyncHandler(async (req, res) => {
         order by bt.transfer_date desc, bt.created_at desc, bt.id desc
       `
     ),
+    listProgrammingMethods(),
+    listProgrammingExercises(),
+    listClassPrograms(),
   ]);
 
   res.json({
@@ -551,6 +852,9 @@ app.get("/api/bootstrap", asyncHandler(async (req, res) => {
     clients: clientResult.rows.map(mapClientRow),
     collections: collectionResult.rows.map(mapCollectionRow),
     boxTransfers: transferResult.rows.map(mapBoxTransferRow),
+    programmingMethods,
+    programmingExercises,
+    classPrograms,
     notes: mapNotesRows(notesResult.rows),
   });
 }));
@@ -562,6 +866,18 @@ app.post("/api/import/excel", requireAdmin, asyncHandler(async (req, res) => {
   const report = await importExcelWorkbook(payload);
   res.status(201).json(report);
 }));
+
+app.post(
+  "/api/import/clients-users-workbook",
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const payload = normalizeUsersClientsImportPayload(req.body);
+    validateUsersClientsImportPayload(payload);
+
+    const report = await importUsersWorkbookClients(payload);
+    res.status(201).json(report);
+  })
+);
 
 app.post("/api/movements", asyncHandler(async (req, res) => {
   const payload = normalizeMovementPayload(req.body);
@@ -1246,6 +1562,126 @@ function normalizeExcelImportPayload(body) {
   };
 }
 
+function normalizeUsersClientsImportPayload(body) {
+  return {
+    fileName: String(body.fileName || "").trim(),
+    fileDataBase64: String(body.fileDataBase64 || "").trim(),
+    password: String(body.password || ""),
+  };
+}
+
+function normalizeProgrammingExercisePayload(body) {
+  return {
+    name: String(body.name || "").trim(),
+    family: String(body.family || "").trim(),
+    category: String(body.category || "").trim(),
+    primaryMuscle: String(body.primaryMuscle || "").trim(),
+    movementPattern: String(body.movementPattern || "").trim(),
+    equipment: String(body.equipment || "").trim(),
+    coachingNotes: String(body.coachingNotes || "").trim(),
+  };
+}
+
+function normalizeClassProgramPayload(body) {
+  const rawItems = Array.isArray(body.items) ? body.items : [];
+
+  return {
+    classDate: String(body.classDate || "").trim(),
+    title: String(body.title || "").trim(),
+    classGroup: String(body.classGroup || "").trim(),
+    focusArea: String(body.focusArea || "").trim(),
+    methodId: Number(body.methodId || 0),
+    durationMinutes: Number(body.durationMinutes || 0),
+    objective: String(body.objective || "").trim(),
+    generalNotes: String(body.generalNotes || "").trim(),
+    items: rawItems.map((item, index) => ({
+      sortOrder: index + 1,
+      blockName: String(item?.blockName || "").trim(),
+      exerciseId: Number(item?.exerciseId || 0),
+      methodId: item?.methodId ? Number(item.methodId) : null,
+      prescription: String(item?.prescription || "").trim(),
+      repetitionText: String(item?.repetitionText || "").trim(),
+      weightText: String(item?.weightText || "").trim(),
+      conditionNotes: String(item?.conditionNotes || "").trim(),
+      coachNotes: String(item?.coachNotes || "").trim(),
+    })),
+  };
+}
+
+function validateProgrammingExercisePayload(payload) {
+  if (!payload.name) {
+    throw httpError(400, "El nombre del ejercicio es obligatorio.");
+  }
+
+  if (!programmingExerciseFamilies.has(payload.family)) {
+    throw httpError(400, "La familia del ejercicio no es valida.");
+  }
+
+  if (!payload.category) {
+    throw httpError(400, "La categoría del ejercicio es obligatoria.");
+  }
+
+  if (!payload.primaryMuscle) {
+    throw httpError(400, "El músculo principal es obligatorio.");
+  }
+}
+
+function validateClassProgramPayload(payload) {
+  if (!payload.classDate) {
+    throw httpError(400, "La fecha de la clase es obligatoria.");
+  }
+
+  if (!payload.title) {
+    throw httpError(400, "El nombre de la clase es obligatorio.");
+  }
+
+  if (!Number.isInteger(payload.methodId) || payload.methodId <= 0) {
+    throw httpError(400, "Selecciona un método principal válido.");
+  }
+
+  if (
+    !Number.isInteger(payload.durationMinutes) ||
+    payload.durationMinutes <= 0 ||
+    payload.durationMinutes > 240
+  ) {
+    throw httpError(400, "La duración debe estar entre 1 y 240 minutos.");
+  }
+
+  if (!Array.isArray(payload.items) || !payload.items.length) {
+    throw httpError(400, "Agrega al menos un ejercicio a la clase.");
+  }
+
+  payload.items.forEach((item, index) => {
+    if (!item.blockName) {
+      throw httpError(
+        400,
+        `El bloque del ejercicio ${index + 1} es obligatorio.`
+      );
+    }
+
+    if (!Number.isInteger(item.exerciseId) || item.exerciseId <= 0) {
+      throw httpError(
+        400,
+        `Selecciona un ejercicio válido en la fila ${index + 1}.`
+      );
+    }
+
+    if (item.methodId !== null && (!Number.isInteger(item.methodId) || item.methodId <= 0)) {
+      throw httpError(
+        400,
+        `El método puntual del ejercicio ${index + 1} no es válido.`
+      );
+    }
+
+    if (!item.prescription) {
+      throw httpError(
+        400,
+        `La dosificación del ejercicio ${index + 1} es obligatoria.`
+      );
+    }
+  });
+}
+
 function validateMovementPayload(payload, options = {}) {
   if (!["Gimnasio", "Restaurante"].includes(payload.linea)) {
     throw httpError(400, "Linea de negocio invalida.");
@@ -1360,6 +1796,23 @@ function validateExcelImportPayload(payload) {
   }
 }
 
+function validateUsersClientsImportPayload(payload) {
+  if (!payload.fileDataBase64) {
+    throw httpError(400, "Debes adjuntar el archivo Excel de usuarios.");
+  }
+
+  if (!payload.fileName) {
+    throw httpError(
+      400,
+      "El archivo debe conservar su nombre para la trazabilidad."
+    );
+  }
+
+  if (!payload.password) {
+    throw httpError(400, "Debes escribir la contraseña del archivo.");
+  }
+}
+
 async function importExcelWorkbook(payload) {
   const warnings = [];
   let workbook;
@@ -1455,6 +1908,290 @@ async function importExcelWorkbook(payload) {
       throw error;
     }
   });
+}
+
+async function importUsersWorkbookClients(payload) {
+  let workbook;
+
+  try {
+    const encryptedBuffer = Buffer.from(payload.fileDataBase64, "base64");
+    const decryptedBuffer = await officeCrypto.decrypt(encryptedBuffer, {
+      password: payload.password,
+    });
+    workbook = XLSX.read(decryptedBuffer, {
+      type: "buffer",
+      cellDates: true,
+      raw: true,
+    });
+  } catch (_error) {
+    throw httpError(
+      400,
+      "No pude abrir el archivo protegido. Revisa la contraseña y que el Excel sea válido."
+    );
+  }
+
+  const parsedClients = parseUsersWorkbookClients(workbook);
+
+  if (!parsedClients.length) {
+    throw httpError(
+      400,
+      "No encontré clientes activos con pago hasta vigente dentro del archivo."
+    );
+  }
+
+  return withClient(async (client) => {
+    await client.query("begin");
+
+    try {
+      const clientState = await loadDetailedClientState(client);
+      const report = {
+        fileName: payload.fileName,
+        message:
+          "La carga de clientes terminó correctamente desde el archivo de usuarios.",
+        considered: parsedClients.length,
+        inserted: 0,
+        updated: 0,
+        matchedByDocument: 0,
+        matchedByName: 0,
+        totalClients: 0,
+      };
+
+      for (const clientPayload of parsedClients) {
+        const normalizedName = normalizeComparableText(clientPayload.fullName);
+        const normalizedDocument = normalizeComparableText(
+          clientPayload.documentNumber
+        );
+
+        let existingId = null;
+        if (
+          normalizedDocument &&
+          clientState.byDocument.has(normalizedDocument)
+        ) {
+          existingId = clientState.byDocument.get(normalizedDocument);
+          report.matchedByDocument += 1;
+        } else if (normalizedName && clientState.byName.has(normalizedName)) {
+          existingId = clientState.byName.get(normalizedName);
+          report.matchedByName += 1;
+        }
+
+        if (existingId) {
+          const current = clientState.byId.get(existingId);
+          const result = await client.query(
+            `
+              update clients
+              set
+                full_name = $2,
+                document_number = $3,
+                phone = $4,
+                email = $5,
+                notes = $6,
+                is_active = true,
+                updated_at = now()
+              where id = $1
+              returning *
+            `,
+            [
+              existingId,
+              clientPayload.fullName,
+              clientPayload.documentNumber || current.documentNumber || "",
+              clientPayload.phone || current.phone || "",
+              clientPayload.email || current.email || "",
+              mergeClientImportNotes(current.notes, clientPayload.notes),
+            ]
+          );
+
+          syncClientImportStateRow(clientState, result.rows[0]);
+          report.updated += 1;
+          continue;
+        }
+
+        const result = await client.query(
+          `
+            insert into clients (
+              full_name,
+              document_number,
+              phone,
+              email,
+              notes,
+              is_active
+            )
+            values ($1, $2, $3, $4, $5, true)
+            returning *
+          `,
+          [
+            clientPayload.fullName,
+            clientPayload.documentNumber,
+            clientPayload.phone,
+            clientPayload.email,
+            clientPayload.notes,
+          ]
+        );
+
+        syncClientImportStateRow(clientState, result.rows[0]);
+        report.inserted += 1;
+      }
+
+      const totalResult = await client.query(
+        "select count(*)::int as total from clients"
+      );
+      report.totalClients = totalResult.rows[0].total;
+
+      await client.query("commit");
+      return report;
+    } catch (error) {
+      await client.query("rollback");
+      throw error;
+    }
+  });
+}
+
+function parseUsersWorkbookClients(workbook) {
+  const firstSheetName = workbook.SheetNames[0];
+  const sheet = workbook.Sheets[firstSheetName];
+
+  if (!sheet) {
+    return [];
+  }
+
+  const rows = XLSX.utils.sheet_to_json(sheet, {
+    defval: "",
+    raw: true,
+  });
+  const todayIso = formatDateInBogota(new Date());
+
+  return rows
+    .map((row) => {
+      const fullName = cleanExcelText(row["Nombre para mostrar"]);
+      const paidUntil = row["Pagado hasta:"];
+      const isDeleted = Boolean(row["Borrado"]);
+
+      if (!fullName || isDeleted || !(paidUntil instanceof Date)) {
+        return null;
+      }
+
+      const paidUntilIso = formatDateInBogota(paidUntil);
+      if (!paidUntilIso || paidUntilIso < todayIso) {
+        return null;
+      }
+
+      const documentNumber =
+        cleanExcelText(row["Dni"]) || cleanExcelText(row["Dni(Facturación)"]);
+      const phone = cleanExcelText(row["Teléfono"]).replace(/\s+/g, "");
+      const email = cleanExcelText(row["Email"]).toLowerCase();
+      const tariff = cleanExcelText(row["Tarifa"]);
+      const clientType = cleanExcelText(row["Tipo"]);
+      const notesParts = [
+        "Importado desde archivo de usuarios",
+        `Pago hasta: ${paidUntilIso}`,
+      ];
+
+      if (tariff) {
+        notesParts.push(`Tarifa: ${tariff}`);
+      }
+
+      if (clientType) {
+        notesParts.push(`Tipo: ${clientType}`);
+      }
+
+      return {
+        fullName,
+        documentNumber,
+        phone,
+        email,
+        notes: notesParts.join(" · "),
+      };
+    })
+    .filter(Boolean);
+}
+
+async function loadDetailedClientState(client) {
+  const result = await client.query(`
+    select id, full_name, document_number, phone, email, notes, is_active
+    from clients
+    order by id asc
+  `);
+
+  const state = {
+    byId: new Map(),
+    byName: new Map(),
+    byDocument: new Map(),
+  };
+
+  result.rows.forEach((row) => {
+    syncClientImportStateRow(state, row);
+  });
+
+  return state;
+}
+
+function syncClientImportStateRow(state, row) {
+  const normalizedRow = {
+    id: Number(row.id),
+    fullName: row.full_name,
+    documentNumber: row.document_number || "",
+    phone: row.phone || "",
+    email: row.email || "",
+    notes: row.notes || "",
+    isActive: Boolean(row.is_active),
+  };
+
+  state.byId.set(normalizedRow.id, normalizedRow);
+
+  const normalizedName = normalizeComparableText(normalizedRow.fullName);
+  if (normalizedName) {
+    state.byName.set(normalizedName, normalizedRow.id);
+  }
+
+  const normalizedDocument = normalizeComparableText(
+    normalizedRow.documentNumber
+  );
+  if (normalizedDocument) {
+    state.byDocument.set(normalizedDocument, normalizedRow.id);
+  }
+}
+
+function mergeClientImportNotes(currentNotes, importedNotes) {
+  const current = cleanExcelText(currentNotes);
+  const incoming = cleanExcelText(importedNotes);
+
+  if (!current) {
+    return incoming;
+  }
+
+  if (!incoming) {
+    return current;
+  }
+
+  if (current === incoming || current.includes(incoming)) {
+    return current;
+  }
+
+  if (incoming.includes(current)) {
+    return incoming;
+  }
+
+  return `${current} | ${incoming}`;
+}
+
+function formatDateInBogota(value) {
+  if (!(value instanceof Date) || Number.isNaN(value.getTime())) {
+    return "";
+  }
+
+  const formatter = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Bogota",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  });
+  const parts = formatter.formatToParts(value);
+  const map = Object.fromEntries(
+    parts
+      .filter((item) => item.type !== "literal")
+      .map((item) => [item.type, item.value])
+  );
+
+  return `${map.year}-${map.month}-${map.day}`;
 }
 
 function parseWorkbookForImport(workbook, warnings) {
@@ -2103,6 +2840,306 @@ function createEmptyCatalogMap() {
   };
 }
 
+async function listProgrammingMethods() {
+  const result = await query(
+    `
+      select *
+      from programming_methods
+      order by sort_order asc, name asc
+    `
+  );
+
+  return result.rows.map(mapProgrammingMethodRow);
+}
+
+async function listProgrammingExercises() {
+  const result = await query(
+    `
+      select *
+      from programming_exercises
+      order by is_active desc, family asc, category asc, name asc
+    `
+  );
+
+  return result.rows.map(mapProgrammingExerciseRow);
+}
+
+async function listClassPrograms(options = {}) {
+  const programId = Number(options.programId || 0);
+  const hasProgramId = Number.isInteger(programId) && programId > 0;
+  const params = [];
+  const whereClause = hasProgramId ? "where cp.id = $1" : "";
+
+  if (hasProgramId) {
+    params.push(programId);
+  }
+
+  const programResult = await query(
+    `
+      select
+        cp.*,
+        pm.name as method_name,
+        coalesce(nullif(created_by_user.full_name, ''), created_by_user.username) as created_by_name,
+        coalesce(nullif(updated_by_user.full_name, ''), updated_by_user.username) as updated_by_name
+      from class_programs cp
+      join programming_methods pm
+        on pm.id = cp.method_id
+      join app_users created_by_user
+        on created_by_user.id = cp.created_by_user_id
+      join app_users updated_by_user
+        on updated_by_user.id = cp.updated_by_user_id
+      ${whereClause}
+      order by cp.is_active desc, cp.class_date asc, cp.updated_at desc, cp.id desc
+    `,
+    params
+  );
+
+  const programIds = programResult.rows.map((row) => Number(row.id));
+  if (!programIds.length) {
+    return [];
+  }
+
+  const itemsResult = await query(
+    `
+      select
+        cpi.*,
+        pe.name as exercise_name,
+        pe.family as exercise_family,
+        pe.category as exercise_category,
+        pe.primary_muscle as exercise_primary_muscle,
+        pe.movement_pattern as exercise_movement_pattern,
+        pe.equipment as exercise_equipment,
+        pm.name as method_name
+      from class_program_items cpi
+      join programming_exercises pe
+        on pe.id = cpi.exercise_id
+      left join programming_methods pm
+        on pm.id = cpi.method_id
+      where cpi.class_program_id = any($1::bigint[])
+      order by cpi.class_program_id asc, cpi.sort_order asc, cpi.id asc
+    `,
+    [programIds]
+  );
+
+  const itemsByProgramId = new Map();
+  itemsResult.rows.forEach((row) => {
+    const currentProgramId = Number(row.class_program_id);
+    const currentItems = itemsByProgramId.get(currentProgramId) || [];
+    currentItems.push(mapClassProgramItemRow(row));
+    itemsByProgramId.set(currentProgramId, currentItems);
+  });
+
+  return programResult.rows.map((row) =>
+    mapClassProgramRow(row, itemsByProgramId.get(Number(row.id)) || [])
+  );
+}
+
+async function readClassProgramById(programId) {
+  const programs = await listClassPrograms({ programId });
+
+  if (!programs.length) {
+    throw httpError(404, "Programación no encontrada.");
+  }
+
+  return programs[0];
+}
+
+async function replaceClassProgramItems(client, programId, items) {
+  await client.query(
+    `
+      delete from class_program_items
+      where class_program_id = $1
+    `,
+    [programId]
+  );
+
+  for (const item of items) {
+    await client.query(
+      `
+        insert into class_program_items (
+          class_program_id,
+          sort_order,
+          block_name,
+          exercise_id,
+          method_id,
+          prescription,
+          repetition_text,
+          weight_text,
+          condition_notes,
+          coach_notes
+        )
+        values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+      `,
+      [
+        programId,
+        item.sortOrder,
+        item.blockName,
+        item.exerciseId,
+        item.methodId,
+        item.prescription,
+        item.repetitionText || "",
+        item.weightText || "",
+        item.conditionNotes,
+        item.coachNotes,
+      ]
+    );
+  }
+}
+
+async function assertProgrammingExerciseNameAvailable(name, options = {}) {
+  const exerciseName = String(name || "").trim();
+  const excludeId = Number(options.excludeId || 0);
+  const hasExcludeId = Number.isInteger(excludeId) && excludeId > 0;
+
+  const result = await query(
+    `
+      select id
+      from programming_exercises
+      where lower(name) = lower($1)
+      ${hasExcludeId ? "and id <> $2" : ""}
+      limit 1
+    `,
+    hasExcludeId ? [exerciseName, excludeId] : [exerciseName]
+  );
+
+  if (result.rows.length) {
+    throw httpError(409, "Ya existe un ejercicio registrado con ese nombre.");
+  }
+}
+
+async function assertProgrammingReferencesExist(payload) {
+  const methodIds = [
+    ...new Set(
+      [
+        payload.methodId,
+        ...payload.items
+          .map((item) => item.methodId)
+          .filter((value) => Number.isInteger(value) && value > 0),
+      ].filter((value) => Number.isInteger(value) && value > 0)
+    ),
+  ];
+
+  if (methodIds.length) {
+    const methodResult = await query(
+      `
+        select id
+        from programming_methods
+        where id = any($1::bigint[])
+      `,
+      [methodIds]
+    );
+
+    if (methodResult.rows.length !== methodIds.length) {
+      throw httpError(
+        400,
+        "Uno de los métodos seleccionados ya no está disponible."
+      );
+    }
+  }
+
+  const exerciseIds = [
+    ...new Set(
+      payload.items
+        .map((item) => item.exerciseId)
+        .filter((value) => Number.isInteger(value) && value > 0)
+    ),
+  ];
+
+  const exerciseResult = await query(
+    `
+      select id
+      from programming_exercises
+      where id = any($1::bigint[])
+    `,
+    [exerciseIds]
+  );
+
+  if (exerciseResult.rows.length !== exerciseIds.length) {
+    throw httpError(
+      400,
+      "Uno de los ejercicios seleccionados ya no está disponible."
+    );
+  }
+}
+
+function mapProgrammingMethodRow(row) {
+  return {
+    id: Number(row.id),
+    name: row.name,
+    code: row.code,
+    description: row.description || "",
+    prescriptionGuide: row.prescription_guide || "",
+    structureHint: row.structure_hint || "",
+    sortOrder: Number(row.sort_order || 0),
+    isActive: Boolean(row.is_active),
+    createdAt: row.created_at || null,
+    updatedAt: row.updated_at || null,
+  };
+}
+
+function mapProgrammingExerciseRow(row) {
+  return {
+    id: Number(row.id),
+    name: row.name,
+    family: row.family,
+    category: row.category,
+    primaryMuscle: row.primary_muscle,
+    movementPattern: row.movement_pattern || "",
+    equipment: row.equipment || "",
+    coachingNotes: row.coaching_notes || "",
+    isActive: Boolean(row.is_active),
+    createdAt: row.created_at || null,
+    updatedAt: row.updated_at || null,
+  };
+}
+
+function mapClassProgramItemRow(row) {
+  return {
+    id: Number(row.id),
+    classProgramId: Number(row.class_program_id),
+    sortOrder: Number(row.sort_order || 0),
+    blockName: row.block_name,
+    exerciseId: Number(row.exercise_id),
+    exerciseName: row.exercise_name,
+    exerciseFamily: row.exercise_family,
+    exerciseCategory: row.exercise_category,
+    exercisePrimaryMuscle: row.exercise_primary_muscle,
+    exerciseMovementPattern: row.exercise_movement_pattern || "",
+    exerciseEquipment: row.exercise_equipment || "",
+    methodId: row.method_id ? Number(row.method_id) : null,
+    methodName: row.method_name || "",
+    prescription: row.prescription || "",
+    repetitionText: row.repetition_text || "",
+    weightText: row.weight_text || "",
+    conditionNotes: row.condition_notes || "",
+    coachNotes: row.coach_notes || "",
+    createdAt: row.created_at || null,
+  };
+}
+
+function mapClassProgramRow(row, items = []) {
+  return {
+    id: Number(row.id),
+    classDate: normalizeDateOnly(row.class_date),
+    title: row.title,
+    classGroup: row.class_group || "",
+    focusArea: row.focus_area || "",
+    methodId: Number(row.method_id),
+    methodName: row.method_name || "",
+    durationMinutes: Number(row.duration_minutes || 0),
+    objective: row.objective || "",
+    generalNotes: row.general_notes || "",
+    isActive: Boolean(row.is_active),
+    createdByUserId: Number(row.created_by_user_id || 0),
+    updatedByUserId: Number(row.updated_by_user_id || 0),
+    createdByName: row.created_by_name || "",
+    updatedByName: row.updated_by_name || "",
+    createdAt: row.created_at || null,
+    updatedAt: row.updated_at || null,
+    items,
+  };
+}
+
 async function listActivePaymentMethodsFromClient(client) {
   const result = await client.query(
     `
@@ -2495,6 +3532,16 @@ function requireAdmin(req, res, next) {
   if (req.authUser?.role !== "administrador") {
     return res.status(403).json({
       error: "Solo el perfil administrador puede realizar esta operacion.",
+    });
+  }
+
+  next();
+}
+
+function requireProgrammingAccess(req, res, next) {
+  if (!["administrador", "asistente_operativo"].includes(req.authUser?.role)) {
+    return res.status(403).json({
+      error: "Tu perfil no tiene acceso al módulo de programación.",
     });
   }
 

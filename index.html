@@ -157,6 +157,7 @@
           <button class="nav-link" data-view="semanal">Informe semanal</button>
           <button class="nav-link" data-view="mensual">Resumen mensual</button>
           <button class="nav-link" data-view="cartera">Clientes</button>
+          <button class="nav-link" data-view="programacion">Programación</button>
           <button class="nav-link" data-view="listas">Listas maestras</button>
           <button class="nav-link admin-only is-hidden" data-view="usuarios">Usuarios</button>
           <button class="nav-link admin-only is-hidden" data-view="importar">Importar Excel</button>
@@ -1052,6 +1053,524 @@
           </div>
         </section>
 
+        <section id="programacion-view" class="view">
+          <div id="programming-summary" class="stats-grid"></div>
+
+          <section class="panel panel-nested">
+            <div class="panel-head">
+              <div>
+                <p class="section-kicker">Planeación del entrenador</p>
+                <h3>Programación de clases Petit</h3>
+              </div>
+
+              <div
+                class="client-menu"
+                role="tablist"
+                aria-label="Submódulos de programación"
+              >
+                <button
+                  class="client-menu-button active"
+                  type="button"
+                  data-programming-panel="clases"
+                >
+                  Clases
+                </button>
+                <button
+                  class="client-menu-button"
+                  type="button"
+                  data-programming-panel="biblioteca"
+                >
+                  Biblioteca
+                </button>
+                <button
+                  class="client-menu-button"
+                  type="button"
+                  data-programming-panel="metodos"
+                >
+                  Métodos
+                </button>
+              </div>
+            </div>
+          </section>
+
+          <div id="programming-panel-clases" class="programming-panel active">
+            <div class="content-grid two-up align-start">
+              <section class="panel">
+                <div class="panel-head">
+                  <div>
+                    <p class="section-kicker">Constructor de clase</p>
+                    <h3 id="program-form-title">Programar clase</h3>
+                  </div>
+                </div>
+
+                <form id="program-form" class="form-grid">
+                  <input id="program-id" type="hidden" />
+                  <input id="program-item-draft-index" type="hidden" />
+
+                  <label>
+                    Fecha de la clase
+                    <input id="program-date" name="classDate" type="date" required />
+                  </label>
+
+                  <label>
+                    Nombre de la clase
+                    <input
+                      id="program-title"
+                      name="title"
+                      type="text"
+                      placeholder="Ej. HYROX Engine o Lower Strength"
+                      required
+                    />
+                  </label>
+
+                  <label>
+                    Grupo / horario
+                    <input
+                      id="program-class-group"
+                      name="classGroup"
+                      type="text"
+                      placeholder="Ej. 6:00 a.m. · General"
+                    />
+                  </label>
+
+                  <label>
+                    Método principal
+                    <select id="program-method" name="methodId" required></select>
+                  </label>
+
+                  <label>
+                    Duración (minutos)
+                    <input
+                      id="program-duration"
+                      name="durationMinutes"
+                      type="number"
+                      min="1"
+                      max="240"
+                      step="1"
+                      placeholder="60"
+                      required
+                    />
+                  </label>
+
+                  <label>
+                    Enfoque principal
+                    <input
+                      id="program-focus"
+                      name="focusArea"
+                      type="text"
+                      placeholder="Tren inferior, resistencia, HYROX, técnica..."
+                    />
+                  </label>
+
+                  <label class="span-2">
+                    Objetivo de la clase
+                    <textarea
+                      id="program-objective"
+                      name="objective"
+                      rows="3"
+                      placeholder="Qué se quiere desarrollar en esta sesión"
+                    ></textarea>
+                  </label>
+
+                  <label class="span-2">
+                    Notas generales de la rutina
+                    <textarea
+                      id="program-notes"
+                      name="generalNotes"
+                      rows="3"
+                      placeholder="Pautas del coach, progresiones, ajustes o contexto"
+                    ></textarea>
+                  </label>
+
+                  <section class="panel panel-nested span-2">
+                    <div class="panel-head">
+                      <div>
+                        <p class="section-kicker">Bloques de trabajo</p>
+                        <h3 id="program-item-form-title">Agregar ejercicio</h3>
+                      </div>
+                    </div>
+
+                    <div class="form-grid">
+                      <label>
+                        Bloque
+                        <input
+                          id="program-item-block"
+                          name="blockName"
+                          type="text"
+                          placeholder="Calentamiento, bloque principal, finisher..."
+                        />
+                      </label>
+
+                      <label class="search-field">
+                        Ejercicio
+                        <input
+                          id="program-item-exercise-search"
+                          type="search"
+                          placeholder="Escribe para buscar un ejercicio"
+                          autocomplete="off"
+                        />
+                        <div
+                          id="program-item-exercise-suggestions"
+                          class="search-suggestions is-hidden"
+                          role="listbox"
+                          aria-label="Sugerencias de ejercicios"
+                        ></div>
+                        <select
+                          id="program-item-exercise"
+                          name="exerciseId"
+                          class="is-hidden"
+                          aria-hidden="true"
+                          tabindex="-1"
+                        ></select>
+                      </label>
+
+                      <label>
+                        Método puntual
+                        <select id="program-item-method" name="itemMethodId"></select>
+                        <span class="inline-hint">
+                          Déjalo en el método principal si no quieres una excepción.
+                        </span>
+                      </label>
+
+                      <label>
+                        Dosificación / volumen
+                        <input
+                          id="program-item-prescription"
+                          name="prescription"
+                          type="text"
+                          placeholder="12 rep, 200 m, 40/20 x 6, 5 x 5..."
+                        />
+                      </label>
+
+                      <label class="span-2">
+                        Condición o estándar
+                      </label>
+
+                      <label>
+                        Reps / volumen
+                        <input
+                          id="program-item-reps"
+                          name="repetitionText"
+                          type="text"
+                          placeholder="Ej. 10, 12-10-8, 250 m o 20 cal"
+                        />
+                      </label>
+
+                      <label>
+                        Peso / carga
+                        <input
+                          id="program-item-weight"
+                          name="weightText"
+                          type="text"
+                          placeholder="Ej. 20 kg, 2 mancuernas de 15 lb"
+                        />
+                      </label>
+
+                      <label class="span-2">
+                        CondiciÃ³n o estÃ¡ndar
+                        <textarea
+                          id="program-item-condition"
+                          name="conditionNotes"
+                          rows="3"
+                          placeholder="Tempo, descanso, score, transiciones o ajustes"
+                        ></textarea>
+                      </label>
+
+                      <label class="span-2">
+                        Nota técnica del entrenador
+                        <textarea
+                          id="program-item-notes"
+                          name="coachNotes"
+                          rows="3"
+                          placeholder="Cues, focos técnicos, regresiones o progresiones"
+                        ></textarea>
+                      </label>
+
+                      <div id="program-item-feedback" class="form-note span-2">
+                        Agrega los ejercicios uno a uno para construir la rutina completa.
+                      </div>
+
+                      <div class="form-actions span-2">
+                        <button
+                          id="add-program-item"
+                          class="primary-button"
+                          type="button"
+                        >
+                          Agregar ejercicio
+                        </button>
+                        <button
+                          id="cancel-program-item-edit"
+                          class="ghost-button"
+                          type="button"
+                        >
+                          Cancelar ajuste
+                        </button>
+                      </div>
+                    </div>
+                  </section>
+
+                  <div id="program-feedback" class="form-note span-2">
+                    Primero defines la estructura de la clase y luego agregas cada
+                    ejercicio con su condición, volumen y notas de coaching.
+                  </div>
+
+                  <div class="form-actions span-2">
+                    <button class="primary-button" type="submit">
+                      Guardar programación
+                    </button>
+                    <button
+                      id="cancel-program-edit"
+                      class="ghost-button"
+                      type="button"
+                    >
+                      Cancelar edición
+                    </button>
+                  </div>
+                </form>
+              </section>
+
+              <section class="panel">
+                <div class="panel-head">
+                  <div>
+                    <p class="section-kicker">Lectura rápida</p>
+                    <h3>Método y rutina</h3>
+                  </div>
+                </div>
+
+                <div id="program-method-guide" class="collection-context">
+                  Selecciona un método principal para ver aquí su guía de uso.
+                </div>
+
+                <div id="program-draft-summary" class="mini-stats"></div>
+
+                <div id="program-draft-items" class="stack-list">
+                  <div class="empty-state">
+                    Aquí aparecerán los ejercicios que vayas agregando a la clase.
+                  </div>
+                </div>
+              </section>
+            </div>
+
+            <section class="panel">
+              <div class="panel-head">
+                <div>
+                  <p class="section-kicker">Consulta</p>
+                  <h3>Clases programadas</h3>
+                </div>
+              </div>
+
+              <div class="filter-grid">
+                <label>
+                  Fecha
+                  <input id="program-filter-date" type="date" />
+                </label>
+
+                <label>
+                  Método
+                  <select id="program-filter-method"></select>
+                </label>
+
+                <label class="span-2">
+                  Buscar
+                  <input
+                    id="program-filter-query"
+                    type="search"
+                    placeholder="Clase, grupo, enfoque, método o ejercicio"
+                    autocomplete="off"
+                  />
+                </label>
+              </div>
+
+              <div id="programs-metrics" class="stats-grid"></div>
+
+              <div class="table-wrap">
+                <table class="stack-table">
+                  <thead>
+                    <tr>
+                      <th>Fecha</th>
+                      <th>Clase</th>
+                      <th>Grupo</th>
+                      <th>Método</th>
+                      <th>Enfoque</th>
+                      <th>Duración</th>
+                      <th>Ejercicios</th>
+                      <th>Estado</th>
+                      <th>Acciones</th>
+                    </tr>
+                  </thead>
+                  <tbody id="programs-table"></tbody>
+                </table>
+              </div>
+            </section>
+          </div>
+
+          <div id="programming-panel-biblioteca" class="programming-panel is-hidden">
+            <div class="content-grid two-up align-start">
+              <section class="panel">
+                <div class="panel-head">
+                  <div>
+                    <p class="section-kicker">Biblioteca reusable</p>
+                    <h3 id="program-exercise-form-title">Crear ejercicio</h3>
+                  </div>
+                </div>
+
+                <form id="program-exercise-form" class="form-grid">
+                  <input id="program-exercise-id" type="hidden" />
+
+                  <label class="span-2">
+                    Nombre del ejercicio
+                    <input
+                      id="program-exercise-name"
+                      name="name"
+                      type="text"
+                      placeholder="Ej. Sled Push o Romanian Deadlift"
+                      required
+                    />
+                  </label>
+
+                  <label>
+                    Familia
+                    <select
+                      id="program-exercise-family"
+                      name="family"
+                      required
+                    ></select>
+                  </label>
+
+                  <label>
+                    Categoría
+                    <input
+                      id="program-exercise-category"
+                      name="category"
+                      type="text"
+                      placeholder="Sentadilla, jalón, ergómetro..."
+                      required
+                    />
+                  </label>
+
+                  <label>
+                    Músculo principal
+                    <input
+                      id="program-exercise-muscle"
+                      name="primaryMuscle"
+                      type="text"
+                      placeholder="Glúteos, dorsal, cuádriceps..."
+                      required
+                    />
+                  </label>
+
+                  <label>
+                    Patrón de movimiento
+                    <input
+                      id="program-exercise-pattern"
+                      name="movementPattern"
+                      type="text"
+                      placeholder="Bisagra, empuje vertical, carry..."
+                    />
+                  </label>
+
+                  <label class="span-2">
+                    Implemento o estación
+                    <input
+                      id="program-exercise-equipment"
+                      name="equipment"
+                      type="text"
+                      placeholder="Barra, mancuernas, SkiErg, trineo..."
+                    />
+                  </label>
+
+                  <label class="span-2">
+                    Notas técnicas
+                    <textarea
+                      id="program-exercise-notes"
+                      name="coachingNotes"
+                      rows="3"
+                      placeholder="Estándares, cues técnicos o criterios de calidad"
+                    ></textarea>
+                  </label>
+
+                  <div id="program-exercise-feedback" class="form-note span-2">
+                    Usa familia + categoría + músculo para que luego la búsqueda y la
+                    programación sean rápidas.
+                  </div>
+
+                  <div class="form-actions span-2">
+                    <button class="primary-button" type="submit">
+                      Guardar ejercicio
+                    </button>
+                    <button
+                      id="cancel-program-exercise-edit"
+                      class="ghost-button"
+                      type="button"
+                    >
+                      Cancelar edición
+                    </button>
+                  </div>
+                </form>
+              </section>
+
+              <section class="panel">
+                <div class="panel-head">
+                  <div>
+                    <p class="section-kicker">Consulta</p>
+                    <h3>Biblioteca de ejercicios</h3>
+                  </div>
+                </div>
+
+                <div class="filter-grid">
+                  <label>
+                    Familia
+                    <select id="program-exercise-filter-family"></select>
+                  </label>
+
+                  <label class="span-2">
+                    Buscar
+                    <input
+                      id="program-exercise-query"
+                      type="search"
+                      placeholder="Ejercicio, músculo, categoría, patrón o equipo"
+                      autocomplete="off"
+                    />
+                  </label>
+                </div>
+
+                <div id="program-exercises-metrics" class="mini-stats"></div>
+
+                <div class="table-wrap">
+                  <table class="stack-table">
+                    <thead>
+                      <tr>
+                        <th>Ejercicio</th>
+                        <th>Familia</th>
+                        <th>Categoría</th>
+                        <th>Músculo</th>
+                        <th>Patrón</th>
+                        <th>Implemento</th>
+                        <th>Estado</th>
+                        <th>Acciones</th>
+                      </tr>
+                    </thead>
+                    <tbody id="program-exercises-table"></tbody>
+                  </table>
+                </div>
+              </section>
+            </div>
+          </div>
+
+          <div id="programming-panel-metodos" class="programming-panel is-hidden">
+            <section class="panel">
+              <div class="panel-head">
+                <div>
+                  <p class="section-kicker">Biblioteca metodológica</p>
+                  <h3>Métodos disponibles para programar</h3>
+                </div>
+              </div>
+
+              <div id="programming-methods-grid" class="stack-list"></div>
+            </section>
+          </div>
+        </section>
+
         <section id="listas-view" class="view">
           <section class="panel">
             <div class="panel-head">
@@ -1297,6 +1816,64 @@
               <div id="excel-import-summary" class="stack-list">
                 <div class="empty-state">
                   Aquí verás cuántas listas, movimientos y clientes fueron importados o reutilizados.
+                </div>
+              </div>
+            </section>
+
+            <section class="panel">
+              <div class="panel-head">
+                <div>
+                  <p class="section-kicker">Clientes activos</p>
+                  <h3>Importar clientes desde archivo de usuarios</h3>
+                </div>
+              </div>
+
+              <form id="users-clients-import-form" class="form-grid">
+                <label class="span-2">
+                  Archivo de usuarios
+                  <input
+                    id="users-clients-import-file"
+                    name="usersClientsFile"
+                    type="file"
+                    accept=".xlsx,.xls"
+                    required
+                  />
+                </label>
+
+                <label class="span-2">
+                  Contraseña del archivo
+                  <input
+                    id="users-clients-import-password"
+                    name="usersClientsPassword"
+                    type="password"
+                    placeholder="Escribe la contraseña del Excel"
+                    required
+                  />
+                </label>
+
+                <div id="users-clients-import-feedback" class="form-note span-2">
+                  Este importador toma `Dni` como cédula, `Nombre para mostrar` como nombre completo y solo sube clientes con `Pago hasta` igual o mayor a hoy.
+                </div>
+
+                <div class="form-actions span-2">
+                  <button class="primary-button" type="submit">
+                    Importar clientes
+                  </button>
+                </div>
+              </form>
+            </section>
+
+            <section class="panel">
+              <div class="panel-head">
+                <div>
+                  <p class="section-kicker">Resultado</p>
+                  <h3>Resumen de clientes importados</h3>
+                </div>
+              </div>
+
+              <div id="users-clients-import-summary" class="stack-list">
+                <div class="empty-state">
+                  Aquí verás cuántos clientes fueron evaluados, creados o actualizados desde el archivo de usuarios.
                 </div>
               </div>
             </section>

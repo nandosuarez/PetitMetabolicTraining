@@ -20,6 +20,9 @@ const emptyState = {
   boxTransfers: [],
   clients: [],
   users: [],
+  programmingMethods: [],
+  programmingExercises: [],
+  classPrograms: [],
   notes: {
     daily: {},
     weekly: {},
@@ -59,10 +62,13 @@ let state = structuredClone(emptyState);
 let activeView = "dashboard";
 let activeClientPanel = "base";
 let activeBoxPanel = "resumen";
+let activeProgrammingPanel = "clases";
 let selectedCollectionMovementId = null;
 let isSidebarOpen = false;
 const COMPACT_SIDEBAR_BREAKPOINT = 1180;
 let lastImportReport = null;
+let lastUsersClientsImportReport = null;
+let programDraftItems = [];
 let authState = {
   authenticated: false,
   user: null,
@@ -95,6 +101,7 @@ const elements = {
     semanal: document.getElementById("semanal-view"),
     mensual: document.getElementById("mensual-view"),
     cartera: document.getElementById("cartera-view"),
+    programacion: document.getElementById("programacion-view"),
     listas: document.getElementById("listas-view"),
     usuarios: document.getElementById("usuarios-view"),
     importar: document.getElementById("importar-view"),
@@ -202,6 +209,70 @@ const elements = {
     cobros: document.getElementById("client-panel-cobros"),
     cartera: document.getElementById("client-panel-cartera"),
   },
+  programmingSummary: document.getElementById("programming-summary"),
+  programmingMenuButtons: [...document.querySelectorAll("[data-programming-panel]")],
+  programmingPanels: {
+    clases: document.getElementById("programming-panel-clases"),
+    biblioteca: document.getElementById("programming-panel-biblioteca"),
+    metodos: document.getElementById("programming-panel-metodos"),
+  },
+  programForm: document.getElementById("program-form"),
+  programFormTitle: document.getElementById("program-form-title"),
+  programId: document.getElementById("program-id"),
+  programDate: document.getElementById("program-date"),
+  programTitle: document.getElementById("program-title"),
+  programClassGroup: document.getElementById("program-class-group"),
+  programMethod: document.getElementById("program-method"),
+  programDuration: document.getElementById("program-duration"),
+  programFocus: document.getElementById("program-focus"),
+  programObjective: document.getElementById("program-objective"),
+  programNotes: document.getElementById("program-notes"),
+  programFeedback: document.getElementById("program-feedback"),
+  cancelProgramEdit: document.getElementById("cancel-program-edit"),
+  programItemDraftIndex: document.getElementById("program-item-draft-index"),
+  programItemFormTitle: document.getElementById("program-item-form-title"),
+  programItemFamily: document.getElementById("program-item-family"),
+  programItemBlock: document.getElementById("program-item-block"),
+  programItemExerciseSearch: document.getElementById("program-item-exercise-search"),
+  programItemExerciseSuggestions: document.getElementById(
+    "program-item-exercise-suggestions"
+  ),
+  programItemExercise: document.getElementById("program-item-exercise"),
+  programItemMethod: document.getElementById("program-item-method"),
+  programItemPrescription: document.getElementById("program-item-prescription"),
+  programItemReps: document.getElementById("program-item-reps"),
+  programItemWeight: document.getElementById("program-item-weight"),
+  programItemCondition: document.getElementById("program-item-condition"),
+  programItemNotes: document.getElementById("program-item-notes"),
+  addProgramItem: document.getElementById("add-program-item"),
+  cancelProgramItemEdit: document.getElementById("cancel-program-item-edit"),
+  programItemFeedback: document.getElementById("program-item-feedback"),
+  programMethodGuide: document.getElementById("program-method-guide"),
+  programDraftSummary: document.getElementById("program-draft-summary"),
+  programDraftItems: document.getElementById("program-draft-items"),
+  programFilterDate: document.getElementById("program-filter-date"),
+  programFilterMethod: document.getElementById("program-filter-method"),
+  programFilterQuery: document.getElementById("program-filter-query"),
+  programsMetrics: document.getElementById("programs-metrics"),
+  programsTable: document.getElementById("programs-table"),
+  programWeekBoard: document.getElementById("program-week-board"),
+  programExerciseForm: document.getElementById("program-exercise-form"),
+  programExerciseFormTitle: document.getElementById("program-exercise-form-title"),
+  programExerciseId: document.getElementById("program-exercise-id"),
+  programExerciseName: document.getElementById("program-exercise-name"),
+  programExerciseFamily: document.getElementById("program-exercise-family"),
+  programExerciseCategory: document.getElementById("program-exercise-category"),
+  programExerciseMuscle: document.getElementById("program-exercise-muscle"),
+  programExercisePattern: document.getElementById("program-exercise-pattern"),
+  programExerciseEquipment: document.getElementById("program-exercise-equipment"),
+  programExerciseNotes: document.getElementById("program-exercise-notes"),
+  programExerciseFeedback: document.getElementById("program-exercise-feedback"),
+  cancelProgramExerciseEdit: document.getElementById("cancel-program-exercise-edit"),
+  programExerciseFilterFamily: document.getElementById("program-exercise-filter-family"),
+  programExerciseQuery: document.getElementById("program-exercise-query"),
+  programExercisesMetrics: document.getElementById("program-exercises-metrics"),
+  programExercisesTable: document.getElementById("program-exercises-table"),
+  programmingMethodsGrid: document.getElementById("programming-methods-grid"),
   userForm: document.getElementById("user-form"),
   userFullName: document.getElementById("user-full-name"),
   userUsername: document.getElementById("user-username"),
@@ -217,16 +288,168 @@ const elements = {
   excelImportClients: document.getElementById("excel-import-clients"),
   excelImportFeedback: document.getElementById("excel-import-feedback"),
   excelImportSummary: document.getElementById("excel-import-summary"),
+  usersClientsImportForm: document.getElementById("users-clients-import-form"),
+  usersClientsImportFile: document.getElementById("users-clients-import-file"),
+  usersClientsImportPassword: document.getElementById(
+    "users-clients-import-password"
+  ),
+  usersClientsImportFeedback: document.getElementById(
+    "users-clients-import-feedback"
+  ),
+  usersClientsImportSummary: document.getElementById(
+    "users-clients-import-summary"
+  ),
 };
 
 init();
 
 async function init() {
   hydrateDefaultDates();
+  initProgrammingSimplifiedUi();
   bindEvents();
   syncSidebarLayout();
   renderLoginFeedback("Ingresa tus credenciales para continuar.");
   await restoreSession();
+}
+
+function initProgrammingSimplifiedUi() {
+  const programmingClassesPanel = document.getElementById("programming-panel-clases");
+  if (!programmingClassesPanel) {
+    return;
+  }
+
+  if (!elements.programItemFamily && elements.programItemExercise) {
+    const exerciseLabel = elements.programItemExercise.closest("label");
+    if (exerciseLabel?.parentElement) {
+      const familyLabel = document.createElement("label");
+      familyLabel.innerHTML = `
+        Tipo
+        <select id="program-item-family" name="itemFamily"></select>
+      `;
+      exerciseLabel.parentElement.insertBefore(familyLabel, exerciseLabel);
+      elements.programItemFamily = document.getElementById("program-item-family");
+    }
+  }
+
+  if (!elements.programWeekBoard) {
+    const metrics = elements.programsMetrics;
+    const tableWrap = elements.programsTable?.closest(".table-wrap");
+    if (metrics?.parentElement) {
+      const weekBoard = document.createElement("div");
+      weekBoard.id = "program-week-board";
+      weekBoard.className = "program-week-board";
+      metrics.parentElement.insertBefore(weekBoard, tableWrap || null);
+      elements.programWeekBoard = weekBoard;
+    }
+  }
+
+  elements.programsTable?.closest(".table-wrap")?.classList.add("is-hidden");
+  const orphanConditionLabel = [...programmingClassesPanel.querySelectorAll("label")].find(
+    (label) =>
+      /condici/i.test(label.textContent || "") &&
+      !label.querySelector("input, textarea, select")
+  );
+  orphanConditionLabel?.remove();
+
+  setProgrammingFieldLabel(elements.programFocus, "Encabezado del workout");
+  setProgrammingFieldLabel(elements.programNotes, "Notas del coach");
+  setProgrammingFieldLabel(elements.programItemReps, "Reps / volumen");
+  setProgrammingFieldLabel(elements.programItemWeight, "Peso / carga");
+  setProgrammingFieldLabel(elements.programItemCondition, "Condición");
+  setProgrammingFieldLabel(elements.programItemPrescription, "Línea visible");
+  if (elements.programItemPrescription?.nextElementSibling?.classList.contains("inline-hint")) {
+    elements.programItemPrescription.nextElementSibling.textContent =
+      "Si escribes la línea completa, se mostrará tal cual en la tarjeta.";
+  }
+
+  setProgrammingFieldLabel(elements.programFilterDate, "Semana de referencia");
+  if (elements.programTitle) {
+    elements.programTitle.placeholder = "Ej. HYROX Foundation";
+  }
+  if (elements.programFocus) {
+    elements.programFocus.placeholder = "Ej. 25 min AMRAP o 3 rondas fuertes";
+  }
+  if (elements.programNotes) {
+    elements.programNotes.placeholder =
+      "Notas cortas del coach, ajustes y recordatorios clave.";
+  }
+  if (elements.programItemReps) {
+    elements.programItemReps.placeholder = "Ej. 10, 12-10-8, 250 m o 20 cal";
+  }
+  if (elements.programItemWeight) {
+    elements.programItemWeight.placeholder = "Ej. 20 kg, 2 mancuernas de 15 lb";
+  }
+  if (elements.programItemPrescription) {
+    elements.programItemPrescription.placeholder =
+      "Si quieres, escribe la lÃ­nea exacta; si no, usamos el nombre del ejercicio.";
+  }
+
+  const classesHeadings = programmingClassesPanel.querySelectorAll(".panel-head h3");
+  const classesKickers = programmingClassesPanel.querySelectorAll(".panel-head .section-kicker");
+  if (classesKickers[0]) {
+    classesKickers[0].textContent = "Programación rápida";
+  }
+  if (classesHeadings[0]) {
+    classesHeadings[0].textContent = "Armar clase";
+  }
+  if (classesKickers[1]) {
+    classesKickers[1].textContent = "Vista previa";
+  }
+  if (classesHeadings[1]) {
+    classesHeadings[1].textContent = "Así se verá la clase";
+  }
+  if (classesKickers[2]) {
+    classesKickers[2].textContent = "Vista semanal";
+  }
+  if (classesHeadings[2]) {
+    classesHeadings[2].textContent = "Programación de la semana";
+  }
+  if (classesKickers[3]) {
+    classesKickers[3].textContent = "Carga rápida";
+  }
+  if (classesHeadings[3]) {
+    classesHeadings[3].textContent = "Agregar línea del workout";
+  }
+
+  hideProgrammingField(elements.programClassGroup);
+  hideProgrammingField(elements.programDuration);
+  hideProgrammingField(elements.programObjective);
+  hideProgrammingField(elements.programItemBlock);
+  hideProgrammingField(elements.programItemMethod);
+  hideProgrammingField(elements.programItemPrescription);
+  hideProgrammingField(elements.programItemNotes);
+
+  if (elements.programDuration) {
+    elements.programDuration.value = "60";
+  }
+  if (elements.programItemBlock) {
+    elements.programItemBlock.value = "Workout";
+  }
+  if (elements.programFilterDate && !elements.programFilterDate.value) {
+    elements.programFilterDate.value = getCurrentIsoDate();
+  }
+}
+
+function hideProgrammingField(field) {
+  const shell = field?.closest("label") || field;
+  if (shell) {
+    shell.classList.add("is-hidden");
+  }
+}
+
+function setProgrammingFieldLabel(field, label) {
+  const shell = field?.closest("label");
+  if (!shell) {
+    return;
+  }
+
+  const textNode = [...shell.childNodes].find(
+    (node) => node.nodeType === Node.TEXT_NODE && node.textContent.trim()
+  );
+
+  if (textNode) {
+    textNode.textContent = `\n                  ${label}\n                  `;
+  }
 }
 
 function bindEvents() {
@@ -248,6 +471,12 @@ function bindEvents() {
 
   elements.clientMenuButtons.forEach((button) => {
     button.addEventListener("click", () => setClientPanel(button.dataset.clientPanel));
+  });
+
+  elements.programmingMenuButtons.forEach((button) => {
+    button.addEventListener("click", () =>
+      setProgrammingPanel(button.dataset.programmingPanel)
+    );
   });
 
   elements.boxMenuButtons.forEach((button) => {
@@ -292,9 +521,114 @@ function bindEvents() {
   addListener(elements.portfolioTable, "click", handlePortfolioTableClick);
   addListener(elements.collectionForm, "submit", handleCollectionSubmit);
   addListener(elements.cancelCollection, "click", resetCollectionSelection);
+  addListener(elements.programForm, "submit", handleProgramSubmit);
+  addListener(elements.cancelProgramEdit, "click", resetProgramForm);
+  addListener(elements.addProgramItem, "click", handleProgramItemAdd);
+  addListener(elements.cancelProgramItemEdit, "click", resetProgramItemForm);
+  addListener(elements.programItemFamily, "change", () => {
+    fillProgrammingExerciseSelect({
+      selectedValue: "",
+      familyValue: elements.programItemFamily?.value || "",
+    });
+    if (
+      elements.programItemPrescription &&
+      (!elements.programItemPrescription.value.trim() ||
+        elements.programItemPrescription.value.trim() ===
+          String(elements.programItemPrescription.dataset.autoSource || "").trim())
+    ) {
+      elements.programItemPrescription.value = "";
+      elements.programItemPrescription.dataset.autoSource = "";
+    }
+  });
+  addListener(elements.programItemExerciseSearch, "input", () =>
+    handleProgramExerciseSearchInput()
+  );
+  addListener(elements.programItemExerciseSearch, "focus", () =>
+    renderProgramExerciseSuggestions(
+      elements.programItemExerciseSearch?.value || "",
+      { forceOpen: true }
+    )
+  );
+  addListener(elements.programItemExerciseSearch, "click", () =>
+    renderProgramExerciseSuggestions(
+      elements.programItemExerciseSearch?.value || "",
+      { forceOpen: true }
+    )
+  );
+  addListener(elements.programItemExerciseSearch, "keydown", (event) =>
+    handleProgramExerciseSearchKeydown(event)
+  );
+  addListener(elements.programItemExerciseSearch, "blur", () => {
+    window.setTimeout(hideProgramExerciseSuggestions, 120);
+  });
+  addListener(elements.programItemExerciseSearch, "change", () =>
+    syncProgramExerciseSelectionFromSearch({
+      allowClosestMatch: true,
+    })
+  );
+  addListener(
+    elements.programItemExerciseSuggestions,
+    "click",
+    handleProgramExerciseSuggestionClick
+  );
+  addListener(elements.programItemExercise, "change", () =>
+    syncProgramItemVisibleLine()
+  );
+  [elements.programItemReps, elements.programItemWeight].forEach((input) => {
+    addListener(input, "input", () => {
+      syncProgramItemVisibleLine(true);
+      renderProgramDraftState();
+    });
+    addListener(input, "change", () => {
+      syncProgramItemVisibleLine(true);
+      renderProgramDraftState();
+    });
+  });
+  addListener(elements.programItemCondition, "input", renderProgramDraftState);
+  addListener(elements.programItemCondition, "change", renderProgramDraftState);
+  [
+    elements.programDate,
+    elements.programTitle,
+    elements.programMethod,
+    elements.programDuration,
+    elements.programFocus,
+    elements.programNotes,
+  ].forEach((input) => {
+    addListener(input, "input", renderProgramDraftState);
+    addListener(input, "change", renderProgramDraftState);
+  });
+  [elements.programFilterDate, elements.programFilterMethod, elements.programFilterQuery].forEach(
+    (input) => {
+      addListener(input, "input", renderProgrammingPrograms);
+      addListener(input, "change", renderProgrammingPrograms);
+    }
+  );
+  addListener(elements.programsTable, "click", handleProgramsTableClick);
+  addListener(elements.programWeekBoard, "click", handleProgramsTableClick);
+  addListener(elements.programDraftItems, "click", handleProgramDraftItemsClick);
+  addListener(elements.programExerciseForm, "submit", handleProgramExerciseSubmit);
+  addListener(
+    elements.cancelProgramExerciseEdit,
+    "click",
+    resetProgramExerciseForm
+  );
+  [elements.programExerciseFilterFamily, elements.programExerciseQuery].forEach((input) => {
+    addListener(input, "input", renderProgrammingExercisesLibrary);
+    addListener(input, "change", renderProgrammingExercisesLibrary);
+  });
+  addListener(
+    elements.programExercisesTable,
+    "click",
+    handleProgramExercisesTableClick
+  );
   addListener(elements.userForm, "submit", handleUserSubmit);
   addListener(elements.usersTable, "click", handleUsersTableClick);
   addListener(elements.excelImportForm, "submit", handleExcelImportSubmit);
+  addListener(
+    elements.usersClientsImportForm,
+    "submit",
+    handleUsersClientsImportSubmit
+  );
 
   document
     .querySelectorAll("[data-list-form]")
@@ -545,6 +879,9 @@ async function loadBootstrap() {
         weekly: data.notes?.weekly || {},
       },
       movements: normalizeMovements(data.movements),
+      programmingMethods: normalizeProgrammingMethods(data.programmingMethods),
+      programmingExercises: normalizeProgrammingExercises(data.programmingExercises),
+      classPrograms: normalizeClassPrograms(data.classPrograms),
     };
 
     selectedCollectionMovementId = state.portfolioMovements.some(
@@ -561,6 +898,8 @@ async function loadBootstrap() {
     syncCollectionSelectionState();
     resetBoxTransferForm();
     resetUserForm();
+    resetProgramExerciseForm();
+    resetProgramForm();
     renderAll();
     setStatus(`PostgreSQL conectado · ${formatClockTime(new Date())}`);
   } catch (error) {
@@ -667,6 +1006,7 @@ function getAllowedViews() {
       "semanal",
       "mensual",
       "cartera",
+      "programacion",
       "listas",
       "usuarios",
       "importar",
@@ -674,7 +1014,7 @@ function getAllowedViews() {
   }
 
   if (isAssistantUser()) {
-    return ["movimientos", "cajas", "cartera"];
+    return ["movimientos", "cajas", "cartera", "programacion"];
   }
 
   return [];
@@ -690,6 +1030,10 @@ function defaultClientPanelForCurrentUser() {
 
 function defaultBoxPanelForCurrentUser() {
   return "resumen";
+}
+
+function defaultProgrammingPanelForCurrentUser() {
+  return "clases";
 }
 
 function hasViewAccess(view) {
@@ -727,6 +1071,9 @@ function hydrateDefaultDates() {
   const today = getCurrentIsoDate();
   elements.fecha.value = today;
   elements.dailyDate.value = today;
+  if (elements.programDate) {
+    elements.programDate.value = today;
+  }
   if (elements.collectionDate) {
     elements.collectionDate.value = today;
   }
@@ -750,6 +1097,15 @@ function hydrateStaticOptions() {
   const previousTransferTarget = elements.boxTransferTarget?.value || "";
   const previousBoxFilter = elements.boxFilter?.value || "Todas";
   const previousCategory = elements.categoria.value;
+  const previousProgramMethod = elements.programMethod?.value || "";
+  const previousProgramItemExercise = elements.programItemExercise?.value || "";
+  const previousProgramItemMethod = elements.programItemMethod?.value || "";
+  const previousProgramItemFamily = elements.programItemFamily?.value || "";
+  const previousProgramFilterMethod = elements.programFilterMethod?.value || "";
+  const previousProgramExerciseFamily =
+    elements.programExerciseFilterFamily?.value || "Todas";
+  const previousProgramExerciseFormFamily =
+    elements.programExerciseFamily?.value || "";
 
   fillSelect(elements.tipo, state.lists.tipos, {
     includeValue: previousType,
@@ -780,6 +1136,20 @@ function hydrateStaticOptions() {
   fillClientOptions();
   syncCategoryOptions({
     includeValue: previousCategory,
+  });
+  fillProgrammingMethodSelects({
+    programMethod: previousProgramMethod,
+    itemMethod: previousProgramItemMethod,
+    programFilterMethod: previousProgramFilterMethod,
+  });
+  fillProgrammingExerciseSelect({
+    selectedValue: previousProgramItemExercise,
+    familyValue: previousProgramItemFamily,
+  });
+  fillProgrammingFamilySelects({
+    formValue: previousProgramExerciseFormFamily,
+    filterValue: previousProgramExerciseFamily,
+    itemValue: previousProgramItemFamily,
   });
 
   if (getAvailableSelectValues(elements.tipo).includes(previousType)) {
@@ -833,6 +1203,14 @@ function switchView(view, options = {}) {
     );
   }
 
+  if (view === "programacion") {
+    activeProgrammingPanel = normalizeProgrammingPanel(
+      options.programmingPanel ||
+        activeProgrammingPanel ||
+        defaultProgrammingPanelForCurrentUser()
+    );
+  }
+
   if (view === "cajas") {
     activeBoxPanel = normalizeBoxPanel(
       options.boxPanel || activeBoxPanel || defaultBoxPanelForCurrentUser()
@@ -857,6 +1235,7 @@ function switchView(view, options = {}) {
     semanal: "Informe semanal",
     mensual: "Resumen mensual",
     cartera: "Clientes",
+    programacion: "Programación",
     listas: "Listas maestras",
     usuarios: "Usuarios",
     importar: "Importar Excel",
@@ -866,6 +1245,10 @@ function switchView(view, options = {}) {
 
   if (view === "cartera") {
     renderClientPanels();
+  }
+
+  if (view === "programacion") {
+    renderProgrammingPanels();
   }
 
   if (view === "cajas") {
@@ -891,6 +1274,25 @@ function setClientPanel(panel) {
 
   switchView("cartera", {
     clientPanel: activeClientPanel,
+  });
+}
+
+function normalizeProgrammingPanel(panel) {
+  return ["clases", "biblioteca", "metodos"].includes(panel)
+    ? panel
+    : defaultProgrammingPanelForCurrentUser();
+}
+
+function setProgrammingPanel(panel) {
+  activeProgrammingPanel = normalizeProgrammingPanel(panel);
+
+  if (activeView === "programacion") {
+    renderProgrammingPanels();
+    return;
+  }
+
+  switchView("programacion", {
+    programmingPanel: activeProgrammingPanel,
   });
 }
 
@@ -953,6 +1355,26 @@ function renderClientPanels() {
   });
 }
 
+function renderProgrammingPanels() {
+  const normalizedPanel = normalizeProgrammingPanel(activeProgrammingPanel);
+  activeProgrammingPanel = normalizedPanel;
+
+  elements.programmingMenuButtons.forEach((button) => {
+    const isActive = button.dataset.programmingPanel === normalizedPanel;
+    button.classList.toggle("active", isActive);
+    button.setAttribute("aria-selected", String(isActive));
+  });
+
+  Object.entries(elements.programmingPanels).forEach(([key, panel]) => {
+    if (!panel) {
+      return;
+    }
+
+    panel.classList.toggle("active", key === normalizedPanel);
+    panel.classList.toggle("is-hidden", key !== normalizedPanel);
+  });
+}
+
 function renderAll() {
   applyRoleVisibility();
   renderSidebar();
@@ -963,6 +1385,7 @@ function renderAll() {
   renderWeeklyView();
   renderMonthlyView();
   renderPortfolioView();
+  renderProgrammingView();
   renderListsView();
   renderUsersView();
   renderImportView();
@@ -1883,7 +2306,12 @@ function renderUsersView() {
 }
 
 function renderImportView() {
-  if (!elements.excelImportSummary || !elements.excelImportFeedback) {
+  if (
+    !elements.excelImportSummary ||
+    !elements.excelImportFeedback ||
+    !elements.usersClientsImportSummary ||
+    !elements.usersClientsImportFeedback
+  ) {
     return;
   }
 
@@ -1891,6 +2319,11 @@ function renderImportView() {
     elements.excelImportSummary.innerHTML = `
       <div class="empty-state">
         Solo el perfil administrador puede usar la carga de Excel.
+      </div>
+    `;
+    elements.usersClientsImportSummary.innerHTML = `
+      <div class="empty-state">
+        Solo el perfil administrador puede usar la carga de clientes.
       </div>
     `;
     return;
@@ -1902,44 +2335,67 @@ function renderImportView() {
         Aquí verás cuántas listas, movimientos y clientes fueron importados o reutilizados.
       </div>
     `;
+  } else {
+    const warnings = Array.isArray(lastImportReport.warnings)
+      ? lastImportReport.warnings
+      : [];
+
+    elements.excelImportSummary.innerHTML = `
+      <article class="list-item">
+        <strong>${escapeHtml(lastImportReport.fileName || "Archivo importado")}</strong>
+        <small>${escapeHtml(lastImportReport.message || "Carga completada.")}</small>
+      </article>
+      <div class="mini-stats compact-mini-stats">
+        <div class="mini-stat"><span>Listas nuevas</span><strong>${Number(lastImportReport.catalogInserted || 0)}</strong></div>
+        <div class="mini-stat"><span>Listas reactivadas</span><strong>${Number(lastImportReport.catalogReactivated || 0)}</strong></div>
+        <div class="mini-stat"><span>Movimientos importados</span><strong>${Number(lastImportReport.movementsInserted || 0)}</strong></div>
+        <div class="mini-stat"><span>Movimientos omitidos</span><strong>${Number(lastImportReport.movementsSkipped || 0)}</strong></div>
+        <div class="mini-stat"><span>Clientes nuevos</span><strong>${Number(lastImportReport.clientsInserted || 0)}</strong></div>
+        <div class="mini-stat"><span>Clientes reutilizados</span><strong>${Number(lastImportReport.clientsMatched || 0)}</strong></div>
+      </div>
+      ${
+        warnings.length
+          ? `
+            <div class="stack-list">
+              ${warnings
+                .map(
+                  (warning) => `
+                    <article class="list-item">
+                      <strong>Advertencia</strong>
+                      <small>${escapeHtml(warning)}</small>
+                    </article>
+                  `
+                )
+                .join("")}
+            </div>
+          `
+          : ""
+      }
+    `;
+  }
+
+  if (!lastUsersClientsImportReport) {
+    elements.usersClientsImportSummary.innerHTML = `
+      <div class="empty-state">
+        Aquí verás cuántos clientes fueron evaluados, creados o actualizados desde el archivo de usuarios.
+      </div>
+    `;
     return;
   }
 
-  const warnings = Array.isArray(lastImportReport.warnings)
-    ? lastImportReport.warnings
-    : [];
-
-  elements.excelImportSummary.innerHTML = `
+  elements.usersClientsImportSummary.innerHTML = `
     <article class="list-item">
-      <strong>${escapeHtml(lastImportReport.fileName || "Archivo importado")}</strong>
-      <small>${escapeHtml(lastImportReport.message || "Carga completada.")}</small>
+      <strong>${escapeHtml(lastUsersClientsImportReport.fileName || "Archivo importado")}</strong>
+      <small>${escapeHtml(lastUsersClientsImportReport.message || "Carga completada.")}</small>
     </article>
     <div class="mini-stats compact-mini-stats">
-      <div class="mini-stat"><span>Listas nuevas</span><strong>${Number(lastImportReport.catalogInserted || 0)}</strong></div>
-      <div class="mini-stat"><span>Listas reactivadas</span><strong>${Number(lastImportReport.catalogReactivated || 0)}</strong></div>
-      <div class="mini-stat"><span>Movimientos importados</span><strong>${Number(lastImportReport.movementsInserted || 0)}</strong></div>
-      <div class="mini-stat"><span>Movimientos omitidos</span><strong>${Number(lastImportReport.movementsSkipped || 0)}</strong></div>
-      <div class="mini-stat"><span>Clientes nuevos</span><strong>${Number(lastImportReport.clientsInserted || 0)}</strong></div>
-      <div class="mini-stat"><span>Clientes reutilizados</span><strong>${Number(lastImportReport.clientsMatched || 0)}</strong></div>
+      <div class="mini-stat"><span>Clientes evaluados</span><strong>${Number(lastUsersClientsImportReport.considered || 0)}</strong></div>
+      <div class="mini-stat"><span>Clientes creados</span><strong>${Number(lastUsersClientsImportReport.inserted || 0)}</strong></div>
+      <div class="mini-stat"><span>Clientes actualizados</span><strong>${Number(lastUsersClientsImportReport.updated || 0)}</strong></div>
+      <div class="mini-stat"><span>Cruce por cédula</span><strong>${Number(lastUsersClientsImportReport.matchedByDocument || 0)}</strong></div>
+      <div class="mini-stat"><span>Cruce por nombre</span><strong>${Number(lastUsersClientsImportReport.matchedByName || 0)}</strong></div>
+      <div class="mini-stat"><span>Total en clientes</span><strong>${Number(lastUsersClientsImportReport.totalClients || 0)}</strong></div>
     </div>
-    ${
-      warnings.length
-        ? `
-          <div class="stack-list">
-            ${warnings
-              .map(
-                (warning) => `
-                  <article class="list-item">
-                    <strong>Advertencia</strong>
-                    <small>${escapeHtml(warning)}</small>
-                  </article>
-                `
-              )
-              .join("")}
-          </div>
-        `
-        : ""
-    }
   `;
 }
 
@@ -2005,6 +2461,58 @@ async function handleExcelImportSubmit(event) {
   } catch (error) {
     elements.excelImportFeedback.textContent =
       error.message || "No se pudo cargar el archivo Excel.";
+  }
+}
+
+async function handleUsersClientsImportSubmit(event) {
+  event.preventDefault();
+
+  if (!isAdminUser()) {
+    elements.usersClientsImportFeedback.textContent =
+      "Solo el perfil administrador puede ejecutar esta carga.";
+    return;
+  }
+
+  const file = elements.usersClientsImportFile?.files?.[0];
+  const password = String(elements.usersClientsImportPassword?.value || "").trim();
+
+  if (!file) {
+    elements.usersClientsImportFeedback.textContent =
+      "Selecciona el archivo de usuarios antes de importar.";
+    return;
+  }
+
+  if (!password) {
+    elements.usersClientsImportFeedback.textContent =
+      "Escribe la contraseña del archivo para poder leerlo.";
+    return;
+  }
+
+  elements.usersClientsImportFeedback.textContent =
+    "Leyendo archivo protegido y preparando la carga de clientes...";
+
+  try {
+    const fileBuffer = await file.arrayBuffer();
+    const base64 = arrayBufferToBase64(fileBuffer);
+    const result = await apiRequest("/api/import/clients-users-workbook", {
+      method: "POST",
+      body: JSON.stringify({
+        fileName: file.name,
+        fileDataBase64: base64,
+        password,
+      }),
+    });
+
+    lastUsersClientsImportReport = result;
+    elements.usersClientsImportForm.reset();
+    elements.usersClientsImportFeedback.textContent =
+      result.message || "La carga de clientes terminó correctamente.";
+
+    await loadBootstrap();
+    switchView("importar");
+  } catch (error) {
+    elements.usersClientsImportFeedback.textContent =
+      error.message || "No se pudo cargar el archivo de usuarios.";
   }
 }
 
@@ -2647,6 +3155,2205 @@ function getFilteredMovements() {
 
     return lineMatches && statusMatches && queryMatches;
   });
+}
+
+function renderProgrammingView() {
+  renderProgrammingPanels();
+  renderProgrammingSummary();
+  renderProgrammingPrograms();
+  renderProgrammingExercisesLibrary();
+  renderProgrammingMethodsReference();
+  renderProgramDraftState();
+}
+
+function renderProgrammingSummary() {
+  if (!elements.programmingSummary) {
+    return;
+  }
+
+  const allPrograms = Array.isArray(state.classPrograms) ? state.classPrograms : [];
+  const activePrograms = allPrograms.filter((item) => item.isActive);
+  const exercises = Array.isArray(state.programmingExercises)
+    ? state.programmingExercises
+    : [];
+  const activeExercises = exercises.filter((item) => item.isActive);
+  const methods = Array.isArray(state.programmingMethods) ? state.programmingMethods : [];
+  const { start, end } = getCurrentWeekRange();
+  const weekPrograms = activePrograms.filter((item) =>
+    isBetween(item.classDate, start, end)
+  );
+
+  elements.programmingSummary.innerHTML = [
+    createStatCard(
+      "Clases activas",
+      String(activePrograms.length),
+      `${allPrograms.length} programaciones registradas`
+    ),
+    createStatCard(
+      "Clases esta semana",
+      String(weekPrograms.length),
+      `Ventana ${formatDate(start)} a ${formatDate(end)}`
+    ),
+    createStatCard(
+      "Ejercicios activos",
+      String(activeExercises.length),
+      `${exercises.length} ejercicios en biblioteca`
+    ),
+    createStatCard(
+      "Métodos disponibles",
+      String(methods.filter((item) => item.isActive).length),
+      "AMRAP, EMOM, intervalos, fuerza y más"
+    ),
+  ].join("");
+}
+
+function renderProgrammingPrograms() {
+  {
+  if (!elements.programsMetrics || !elements.programWeekBoard) {
+    return;
+  }
+
+  const referenceDate = normalizeDateOnly(
+    elements.programFilterDate?.value || getCurrentIsoDate()
+  );
+  const referenceWeek = getReferenceWeekRange(referenceDate);
+  const programs = getFilteredClassPrograms();
+  const visibleActivePrograms = programs.filter((item) => item.isActive);
+  const totalLines = programs.reduce(
+    (accumulator, item) => accumulator + (item.items?.length || 0),
+    0
+  );
+  const weekDays = getWeekBoardDays(referenceDate, programs);
+
+  elements.programsMetrics.innerHTML = `
+    <div class="mini-stat"><span>Semana visible</span><strong>${escapeHtml(formatDate(referenceWeek.start))}</strong></div>
+    <div class="mini-stat"><span>Clases visibles</span><strong>${programs.length}</strong></div>
+    <div class="mini-stat"><span>Clases activas</span><strong>${visibleActivePrograms.length}</strong></div>
+    <div class="mini-stat"><span>Líneas del workout</span><strong>${totalLines}</strong></div>
+  `;
+
+  if (elements.programsTable) {
+    elements.programsTable.innerHTML = "";
+  }
+
+  const boardMarkup = weekDays
+    .map((day) => {
+      const dayPrograms = programs.filter(
+        (program) => normalizeDateOnly(program.classDate) === day.iso
+      );
+
+      return `
+        <section class="program-day-column">
+          <div class="program-day-header">
+            <div>
+              <strong>${escapeHtml(day.label)}</strong>
+              <span>${escapeHtml(day.dateLabel)}</span>
+            </div>
+          </div>
+          <div class="program-day-body">
+            ${
+              dayPrograms.length
+                ? dayPrograms.map((program) => renderProgramWeekCard(program)).join("")
+                : `<div class="program-day-empty">Sin clase cargada</div>`
+            }
+          </div>
+        </section>
+      `;
+    })
+    .join("");
+
+  elements.programWeekBoard.innerHTML = `
+    ${
+      programs.length
+        ? ""
+        : `<div class="program-board-empty">
+            No hay clases programadas para esta semana o los filtros actuales.
+          </div>`
+    }
+    ${boardMarkup}
+  `;
+  return;
+  }
+
+  if (!elements.programsTable || !elements.programsMetrics) {
+    return;
+  }
+
+  const programs = getFilteredClassPrograms();
+  const activePrograms = (state.classPrograms || []).filter((item) => item.isActive);
+  const totalExercises = programs.reduce(
+    (accumulator, item) => accumulator + (item.items?.length || 0),
+    0
+  );
+
+  elements.programsMetrics.innerHTML = `
+    <div class="mini-stat"><span>Clases visibles</span><strong>${programs.length}</strong></div>
+    <div class="mini-stat"><span>Activas</span><strong>${activePrograms.length}</strong></div>
+    <div class="mini-stat"><span>Ejercicios visibles</span><strong>${totalExercises}</strong></div>
+    <div class="mini-stat"><span>Método líder</span><strong>${escapeHtml(getMostUsedProgramMethod(programs))}</strong></div>
+  `;
+
+  if (!programs.length) {
+    elements.programsTable.innerHTML = `
+      <tr>
+        <td colspan="9" class="empty-state">
+          No hay clases programadas que coincidan con los filtros actuales.
+        </td>
+      </tr>
+    `;
+    return;
+  }
+
+  elements.programsTable.innerHTML = programs
+    .map((program) => {
+      const nextActive = program.isActive ? "false" : "true";
+      const statusTitle = program.isActive
+        ? "Inactivar programación"
+        : "Reactivar programación";
+      const exerciseSummary = summarizeProgramExercises(program);
+
+      return `
+        <tr>
+          <td>${formatDate(program.classDate)}</td>
+          <td>
+            <strong>${escapeHtml(program.title)}</strong>
+            ${program.objective ? `<small class="muted table-subcopy">${escapeHtml(program.objective)}</small>` : ""}
+          </td>
+          <td>${program.classGroup ? escapeHtml(program.classGroup) : "<span class='muted'>Sin grupo</span>"}</td>
+          <td><span class="status-pill method-pill">${escapeHtml(program.methodName || "Sin método")}</span></td>
+          <td>${program.focusArea ? escapeHtml(program.focusArea) : "<span class='muted'>Sin enfoque</span>"}</td>
+          <td>${program.durationMinutes} min</td>
+          <td>${escapeHtml(exerciseSummary)}</td>
+          <td><span class="status-pill ${program.isActive ? "user-status-active" : "user-status-inactive"}">${program.isActive ? "Activa" : "Inactiva"}</span></td>
+          <td>
+            <div class="table-actions">
+              <button
+                class="table-button icon-button"
+                type="button"
+                data-program-edit-id="${program.id}"
+                title="Editar programación"
+                aria-label="Editar programación"
+              >
+                <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                  <path d="M4 20h4l10-10-4-4L4 16v4Z"></path>
+                  <path d="m12 6 4 4"></path>
+                </svg>
+              </button>
+              <button
+                class="table-button icon-button ${program.isActive ? "danger" : ""}"
+                type="button"
+                data-program-status-id="${program.id}"
+                data-program-next-active="${nextActive}"
+                title="${statusTitle}"
+                aria-label="${statusTitle}"
+              >
+                <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                  <path d="M12 3v9"></path>
+                  <path d="M7.05 5.05a8 8 0 1 0 9.9 0"></path>
+                </svg>
+              </button>
+            </div>
+          </td>
+        </tr>
+      `;
+    })
+    .join("");
+}
+
+function renderProgrammingExercisesLibrary() {
+  if (!elements.programExercisesTable || !elements.programExercisesMetrics) {
+    return;
+  }
+
+  const exercises = getFilteredProgrammingExercises();
+  const activeExercises = (state.programmingExercises || []).filter(
+    (item) => item.isActive
+  );
+
+  elements.programExercisesMetrics.innerHTML = `
+    <div class="mini-stat"><span>Ejercicios visibles</span><strong>${exercises.length}</strong></div>
+    <div class="mini-stat"><span>Activos</span><strong>${activeExercises.length}</strong></div>
+    <div class="mini-stat"><span>HYROX oficiales</span><strong>${activeExercises.filter((item) => item.family === "hyrox_oficial").length}</strong></div>
+  `;
+
+  if (!exercises.length) {
+    elements.programExercisesTable.innerHTML = `
+      <tr>
+        <td colspan="8" class="empty-state">
+          No hay ejercicios que coincidan con la búsqueda o la familia elegida.
+        </td>
+      </tr>
+    `;
+    return;
+  }
+
+  elements.programExercisesTable.innerHTML = exercises
+    .map((exercise) => {
+      const nextActive = exercise.isActive ? "false" : "true";
+      const statusTitle = exercise.isActive
+        ? "Inactivar ejercicio"
+        : "Reactivar ejercicio";
+
+      return `
+        <tr>
+          <td>
+            <strong>${escapeHtml(exercise.name)}</strong>
+            ${exercise.coachingNotes ? `<small class="muted table-subcopy">${escapeHtml(exercise.coachingNotes)}</small>` : ""}
+          </td>
+          <td><span class="status-pill family-pill">${escapeHtml(programmingFamilyLabel(exercise.family))}</span></td>
+          <td>${escapeHtml(exercise.category)}</td>
+          <td>${escapeHtml(exercise.primaryMuscle)}</td>
+          <td>${exercise.movementPattern ? escapeHtml(exercise.movementPattern) : "<span class='muted'>Sin patrón</span>"}</td>
+          <td>${exercise.equipment ? escapeHtml(exercise.equipment) : "<span class='muted'>Sin implemento</span>"}</td>
+          <td><span class="status-pill ${exercise.isActive ? "user-status-active" : "user-status-inactive"}">${exercise.isActive ? "Activo" : "Inactivo"}</span></td>
+          <td>
+            <div class="table-actions">
+              <button
+                class="table-button icon-button"
+                type="button"
+                data-program-exercise-edit-id="${exercise.id}"
+                title="Editar ejercicio"
+                aria-label="Editar ejercicio"
+              >
+                <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                  <path d="M4 20h4l10-10-4-4L4 16v4Z"></path>
+                  <path d="m12 6 4 4"></path>
+                </svg>
+              </button>
+              <button
+                class="table-button icon-button ${exercise.isActive ? "danger" : ""}"
+                type="button"
+                data-program-exercise-status-id="${exercise.id}"
+                data-program-exercise-next-active="${nextActive}"
+                title="${statusTitle}"
+                aria-label="${statusTitle}"
+              >
+                <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                  <path d="M12 3v9"></path>
+                  <path d="M7.05 5.05a8 8 0 1 0 9.9 0"></path>
+                </svg>
+              </button>
+            </div>
+          </td>
+        </tr>
+      `;
+    })
+    .join("");
+}
+
+function renderProgrammingMethodsReference() {
+  if (!elements.programmingMethodsGrid) {
+    return;
+  }
+
+  const methods = (state.programmingMethods || []).filter((item) => item.isActive);
+
+  if (!methods.length) {
+    elements.programmingMethodsGrid.innerHTML = `
+      <div class="empty-state">
+        No hay métodos registrados todavía.
+      </div>
+    `;
+    return;
+  }
+
+  elements.programmingMethodsGrid.innerHTML = methods
+    .map(
+      (method) => `
+        <article class="list-item method-reference-card">
+          <div class="method-reference-top">
+            <strong>${escapeHtml(method.name)}</strong>
+            <span class="status-pill method-pill">${escapeHtml(method.code)}</span>
+          </div>
+          <span>${escapeHtml(method.description)}</span>
+          <small><strong>Cómo usarlo:</strong> ${escapeHtml(method.prescriptionGuide)}</small>
+          <small><strong>Estructura sugerida:</strong> ${escapeHtml(method.structureHint)}</small>
+        </article>
+      `
+    )
+    .join("");
+}
+
+function renderProgramDraftState() {
+  {
+  if (!elements.programDraftItems || !elements.programDraftSummary) {
+    return;
+  }
+
+  renderProgramMethodGuide();
+
+  const selectedMethod = getProgrammingMethodById(elements.programMethod?.value);
+  const classDate = normalizeDateOnly(elements.programDate?.value || getCurrentIsoDate());
+  const previewTitle = elements.programTitle?.value.trim() || "Clase sin nombre";
+
+  elements.programDraftSummary.innerHTML = `
+    <div class="mini-stat"><span>Líneas</span><strong>${programDraftItems.length}</strong></div>
+    <div class="mini-stat"><span>Método</span><strong>${escapeHtml(selectedMethod?.name || "Sin definir")}</strong></div>
+    <div class="mini-stat"><span>Día</span><strong>${escapeHtml(formatProgramDayLabel(classDate))}</strong></div>
+    <div class="mini-stat"><span>Duración</span><strong>${escapeHtml(elements.programDuration?.value || "0")} min</strong></div>
+  `;
+
+  elements.programDraftItems.innerHTML = `
+    <div class="program-preview-shell">
+      ${renderProgramPreviewCard({
+        dayLabel: formatProgramDayLabel(classDate),
+        dateLabel: formatProgramShortDate(classDate),
+        title: previewTitle,
+        methodName: selectedMethod?.name || "",
+        workoutHeadline: buildProgramWorkoutHeadline({
+          focusArea: elements.programFocus?.value || "",
+          methodName: selectedMethod?.name || "",
+          durationMinutes: elements.programDuration?.value || "60",
+        }),
+        items: programDraftItems,
+        generalNotes: elements.programNotes?.value || "",
+        isDraft: true,
+      })}
+    </div>
+    <div class="program-line-list">
+      ${
+        programDraftItems.length
+          ? programDraftItems
+              .map(
+                (item, index) => `
+                  <article class="program-line-row">
+                    <div class="program-line-copy">
+                      <strong>${index + 1}. ${escapeHtml(buildProgramDisplayLine(item))}</strong>
+                      <small>${escapeHtml(item.exerciseName)} · ${escapeHtml(programmingFamilyLabel(item.exerciseFamily))}</small>
+                    </div>
+                    <div class="table-actions">
+                      <button
+                        class="table-button icon-button"
+                        type="button"
+                        data-program-item-edit-index="${index}"
+                        title="Editar línea"
+                        aria-label="Editar línea"
+                      >
+                        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                          <path d="M4 20h4l10-10-4-4L4 16v4Z"></path>
+                          <path d="m12 6 4 4"></path>
+                        </svg>
+                      </button>
+                      <button
+                        class="table-button icon-button danger"
+                        type="button"
+                        data-program-item-remove-index="${index}"
+                        title="Quitar línea"
+                        aria-label="Quitar línea"
+                      >
+                        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                          <path d="M3 6h18"></path>
+                          <path d="M8 6V4h8v2"></path>
+                          <path d="M19 6l-1 14H6L5 6"></path>
+                          <path d="M10 11v6"></path>
+                          <path d="M14 11v6"></path>
+                        </svg>
+                      </button>
+                    </div>
+                  </article>
+                `
+              )
+              .join("")
+          : `<div class="empty-state">
+              Selecciona tipo y ejercicio para ir armando el workout rápido.
+            </div>`
+      }
+    </div>
+  `;
+  return;
+  }
+
+  if (!elements.programDraftItems || !elements.programDraftSummary) {
+    return;
+  }
+
+  renderProgramMethodGuide();
+
+  const distinctBlocks = new Set(
+    programDraftItems.map((item) => normalizeSearchValue(item.blockName))
+  ).size;
+  const selectedMethod = getProgrammingMethodById(elements.programMethod?.value);
+
+  elements.programDraftSummary.innerHTML = `
+    <div class="mini-stat"><span>Ejercicios</span><strong>${programDraftItems.length}</strong></div>
+    <div class="mini-stat"><span>Bloques</span><strong>${distinctBlocks}</strong></div>
+    <div class="mini-stat"><span>Método</span><strong>${escapeHtml(selectedMethod?.name || "Sin definir")}</strong></div>
+    <div class="mini-stat"><span>Duración</span><strong>${escapeHtml(elements.programDuration?.value || "0")} min</strong></div>
+  `;
+
+  if (!programDraftItems.length) {
+    elements.programDraftItems.innerHTML = `
+      <div class="empty-state">
+        Aquí aparecerán los ejercicios que vayas agregando a la clase.
+      </div>
+    `;
+    return;
+  }
+
+  elements.programDraftItems.innerHTML = programDraftItems
+    .map(
+      (item, index) => `
+        <article class="routine-item-card">
+          <div class="routine-item-head">
+            <div>
+              <strong>${index + 1}. ${escapeHtml(item.exerciseName)}</strong>
+              <span class="muted">${escapeHtml(item.blockName)}</span>
+            </div>
+            <div class="table-actions">
+              <button
+                class="table-button icon-button"
+                type="button"
+                data-program-item-edit-index="${index}"
+                title="Editar ejercicio de la rutina"
+                aria-label="Editar ejercicio de la rutina"
+              >
+                <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                  <path d="M4 20h4l10-10-4-4L4 16v4Z"></path>
+                  <path d="m12 6 4 4"></path>
+                </svg>
+              </button>
+              <button
+                class="table-button icon-button danger"
+                type="button"
+                data-program-item-remove-index="${index}"
+                title="Quitar ejercicio de la rutina"
+                aria-label="Quitar ejercicio de la rutina"
+              >
+                <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                  <path d="M3 6h18"></path>
+                  <path d="M8 6V4h8v2"></path>
+                  <path d="M19 6l-1 14H6L5 6"></path>
+                  <path d="M10 11v6"></path>
+                  <path d="M14 11v6"></path>
+                </svg>
+              </button>
+            </div>
+          </div>
+          <div class="routine-meta">
+            <span><strong>Dosis:</strong> ${escapeHtml(item.prescription)}</span>
+            <span><strong>Método:</strong> ${escapeHtml(item.methodName || selectedMethod?.name || "Principal")}</span>
+            <span><strong>Familia:</strong> ${escapeHtml(programmingFamilyLabel(item.exerciseFamily))}</span>
+          </div>
+          ${item.conditionNotes ? `<p><strong>Condición:</strong> ${escapeHtml(item.conditionNotes)}</p>` : ""}
+          ${item.coachNotes ? `<p><strong>Nota técnica:</strong> ${escapeHtml(item.coachNotes)}</p>` : ""}
+        </article>
+      `
+    )
+    .join("");
+}
+
+function renderProgramMethodGuide() {
+  if (!elements.programMethodGuide) {
+    return;
+  }
+
+  const selectedMethod = getProgrammingMethodById(elements.programMethod?.value);
+
+  if (!selectedMethod) {
+    elements.programMethodGuide.innerHTML =
+      "Selecciona un método principal para ver aquí su guía de uso.";
+    return;
+  }
+
+  elements.programMethodGuide.innerHTML = `
+    <strong>${escapeHtml(selectedMethod.name)}</strong>
+    <small>${escapeHtml(selectedMethod.description)}</small>
+    <small><strong>Cómo plantearlo:</strong> ${escapeHtml(selectedMethod.prescriptionGuide)}</small>
+    <small><strong>Plantilla sugerida:</strong> ${escapeHtml(selectedMethod.structureHint)}</small>
+  `;
+}
+
+async function handleProgramSubmit(event) {
+  event.preventDefault();
+
+  const programId = Number(elements.programId.value || 0);
+  const payload = buildProgramPayload();
+  const validation = validateProgramPayload(payload);
+
+  if (!validation.valid) {
+    elements.programFeedback.textContent = validation.message;
+    return;
+  }
+
+  try {
+    if (programId > 0) {
+      await apiRequest(`/api/programming/programs/${programId}`, {
+        method: "PUT",
+        body: JSON.stringify(payload),
+      });
+    } else {
+      await apiRequest("/api/programming/programs", {
+        method: "POST",
+        body: JSON.stringify(payload),
+      });
+    }
+
+    await loadBootstrap();
+    resetProgramForm();
+    switchView("programacion", {
+      programmingPanel: "clases",
+    });
+    elements.programFeedback.textContent =
+      programId > 0
+        ? "Programación actualizada correctamente."
+        : "Clase programada correctamente.";
+  } catch (error) {
+    elements.programFeedback.textContent = error.message;
+  }
+}
+
+function handleProgramItemAdd() {
+  {
+  syncProgramExerciseSelectionFromSearch({
+    allowClosestMatch: true,
+  });
+  const draftIndex = Number(elements.programItemDraftIndex.value || -1);
+  const selectedExercise = getProgrammingExerciseById(
+    elements.programItemExercise.value
+  );
+  const selectedMainMethod = getProgrammingMethodById(elements.programMethod.value);
+  const repetitionText = String(elements.programItemReps?.value || "").trim();
+  const weightText = String(elements.programItemWeight?.value || "").trim();
+  const conditionNotes = String(elements.programItemCondition?.value || "").trim();
+  const visibleLine = buildProgramLineFromFields({
+    exerciseName: selectedExercise?.name || "",
+    repetitionText,
+    weightText,
+  });
+
+  const draftItem = {
+    blockName: "Workout",
+    exerciseId: Number(elements.programItemExercise.value || 0),
+    exerciseName: selectedExercise?.name || "",
+    exerciseFamily:
+      selectedExercise?.family || elements.programItemFamily?.value || "",
+    exerciseCategory: selectedExercise?.category || "",
+    exercisePrimaryMuscle: selectedExercise?.primaryMuscle || "",
+    methodId: null,
+    methodName: "",
+    prescription: visibleLine,
+    repetitionText,
+    weightText,
+    conditionNotes,
+    coachNotes: "",
+    methodFallbackName: selectedMainMethod?.name || "",
+  };
+
+  const validation = validateProgramItemDraft(draftItem);
+  if (!validation.valid) {
+    elements.programItemFeedback.textContent = validation.message;
+    return;
+  }
+
+  if (draftIndex >= 0 && draftIndex < programDraftItems.length) {
+    programDraftItems.splice(draftIndex, 1, draftItem);
+    elements.programItemFeedback.textContent =
+      "Línea del workout actualizada.";
+  } else {
+    programDraftItems.push(draftItem);
+    elements.programItemFeedback.textContent = "Línea agregada a la clase.";
+  }
+
+  resetProgramItemForm();
+  renderProgramDraftState();
+  return;
+  }
+
+  const draftIndex = Number(elements.programItemDraftIndex.value || -1);
+  const selectedExercise = getProgrammingExerciseById(
+    elements.programItemExercise.value
+  );
+  const selectedMethod = getProgrammingMethodById(elements.programItemMethod.value);
+  const selectedMainMethod = getProgrammingMethodById(elements.programMethod.value);
+
+  const draftItem = {
+    blockName: elements.programItemBlock.value.trim(),
+    exerciseId: Number(elements.programItemExercise.value || 0),
+    exerciseName: selectedExercise?.name || "",
+    exerciseFamily: selectedExercise?.family || "",
+    exerciseCategory: selectedExercise?.category || "",
+    exercisePrimaryMuscle: selectedExercise?.primaryMuscle || "",
+    methodId: selectedMethod?.id || null,
+    methodName: selectedMethod?.name || "",
+    prescription: elements.programItemPrescription.value.trim(),
+    conditionNotes: elements.programItemCondition.value.trim(),
+    coachNotes: elements.programItemNotes.value.trim(),
+    methodFallbackName: selectedMainMethod?.name || "",
+  };
+
+  const validation = validateProgramItemDraft(draftItem);
+  if (!validation.valid) {
+    elements.programItemFeedback.textContent = validation.message;
+    return;
+  }
+
+  if (draftIndex >= 0 && draftIndex < programDraftItems.length) {
+    programDraftItems.splice(draftIndex, 1, draftItem);
+    elements.programItemFeedback.textContent =
+      "Ejercicio actualizado dentro de la rutina.";
+  } else {
+    programDraftItems.push(draftItem);
+    elements.programItemFeedback.textContent =
+      "Ejercicio agregado a la rutina.";
+  }
+
+  resetProgramItemForm();
+  renderProgramDraftState();
+}
+
+function handleProgramDraftItemsClick(event) {
+  {
+  const editButton = event.target.closest("[data-program-item-edit-index]");
+  const removeButton = event.target.closest("[data-program-item-remove-index]");
+  const editIndex = Number(editButton?.dataset.programItemEditIndex || -1);
+  const removeIndex = Number(removeButton?.dataset.programItemRemoveIndex || -1);
+
+  if (editIndex >= 0) {
+    const item = programDraftItems[editIndex];
+    if (!item) {
+      return;
+    }
+
+    elements.programItemDraftIndex.value = String(editIndex);
+    elements.programItemFormTitle.textContent = "Editar línea";
+    elements.addProgramItem.textContent = "Actualizar línea";
+    if (elements.programItemFamily) {
+      elements.programItemFamily.value = item.exerciseFamily || "";
+    }
+    fillProgrammingExerciseSelect({
+      selectedValue: String(item.exerciseId || ""),
+      familyValue: item.exerciseFamily || "",
+    });
+    elements.programItemExercise.value = String(item.exerciseId || "");
+    if (elements.programItemReps) {
+      elements.programItemReps.value = item.repetitionText || "";
+    }
+    if (elements.programItemWeight) {
+      elements.programItemWeight.value = item.weightText || "";
+    }
+    if (elements.programItemCondition) {
+      elements.programItemCondition.value = item.conditionNotes || "";
+    }
+    elements.programItemPrescription.value =
+      item.prescription || buildProgramLineFromFields(item);
+    elements.programItemPrescription.dataset.autoSource =
+      buildProgramLineFromFields(item);
+    elements.programItemFeedback.textContent =
+      "Ajusta la línea y guarda para reemplazarla en la rutina.";
+    elements.programItemReps?.focus();
+    return;
+  }
+
+  if (removeIndex >= 0) {
+    programDraftItems = programDraftItems.filter(
+      (_item, index) => index !== removeIndex
+    );
+    elements.programItemFeedback.textContent = "Línea retirada de la rutina.";
+    if (Number(elements.programItemDraftIndex.value || -1) === removeIndex) {
+      resetProgramItemForm();
+    }
+    renderProgramDraftState();
+  }
+  return;
+  }
+
+  const editButton = event.target.closest("[data-program-item-edit-index]");
+  const removeButton = event.target.closest("[data-program-item-remove-index]");
+  const editIndex = Number(editButton?.dataset.programItemEditIndex || -1);
+  const removeIndex = Number(removeButton?.dataset.programItemRemoveIndex || -1);
+
+  if (editIndex >= 0) {
+    const item = programDraftItems[editIndex];
+    if (!item) {
+      return;
+    }
+
+    elements.programItemDraftIndex.value = String(editIndex);
+    elements.programItemFormTitle.textContent = "Editar ejercicio";
+    elements.addProgramItem.textContent = "Actualizar ejercicio";
+    elements.programItemBlock.value = item.blockName || "";
+    fillProgrammingExerciseSelect({
+      selectedValue: String(item.exerciseId || ""),
+    });
+    elements.programItemExercise.value = String(item.exerciseId || "");
+    fillProgrammingMethodSelects({
+      programMethod: elements.programMethod.value,
+      itemMethod: item.methodId ? String(item.methodId) : "",
+      programFilterMethod: elements.programFilterMethod?.value || "",
+    });
+    elements.programItemMethod.value = item.methodId
+      ? String(item.methodId)
+      : "";
+    elements.programItemPrescription.value = item.prescription || "";
+    elements.programItemCondition.value = item.conditionNotes || "";
+    elements.programItemNotes.value = item.coachNotes || "";
+    elements.programItemFeedback.textContent =
+      "Ajusta el ejercicio y guarda para reemplazarlo en la rutina.";
+    elements.programItemBlock.focus();
+    return;
+  }
+
+  if (removeIndex >= 0) {
+    programDraftItems = programDraftItems.filter((_item, index) => index !== removeIndex);
+    elements.programItemFeedback.textContent =
+      "Ejercicio retirado de la rutina.";
+    if (Number(elements.programItemDraftIndex.value || -1) === removeIndex) {
+      resetProgramItemForm();
+    }
+    renderProgramDraftState();
+  }
+}
+
+async function handleProgramsTableClick(event) {
+  const editButton = event.target.closest("[data-program-edit-id]");
+  const statusButton = event.target.closest("[data-program-status-id]");
+  const editProgramId = editButton?.dataset.programEditId;
+  const programId = statusButton?.dataset.programStatusId;
+  const nextActive = statusButton?.dataset.programNextActive;
+
+  if (editProgramId) {
+    const program = (state.classPrograms || []).find(
+      (item) => String(item.id) === String(editProgramId)
+    );
+
+    if (!program) {
+      elements.programFeedback.textContent =
+        "No encontré la programación que quieres editar.";
+      return;
+    }
+
+    elements.programId.value = String(program.id);
+    elements.programFormTitle.textContent = "Editar programación";
+    elements.programDate.value = program.classDate || getCurrentIsoDate();
+    if (elements.programFilterDate) {
+      elements.programFilterDate.value = program.classDate || getCurrentIsoDate();
+    }
+    elements.programTitle.value = program.title || "";
+    elements.programClassGroup.value = program.classGroup || "";
+    fillProgrammingMethodSelects({
+      programMethod: String(program.methodId || ""),
+      itemMethod: "",
+      programFilterMethod: elements.programFilterMethod?.value || "",
+    });
+    elements.programMethod.value = String(program.methodId || "");
+    elements.programDuration.value = String(program.durationMinutes || 60);
+    elements.programFocus.value = program.focusArea || "";
+    elements.programObjective.value = program.objective || "";
+    elements.programNotes.value = program.generalNotes || "";
+    programDraftItems = (program.items || []).map((item) => ({
+      blockName: item.blockName || "",
+      exerciseId: Number(item.exerciseId || 0),
+      exerciseName: item.exerciseName || "",
+      exerciseFamily: item.exerciseFamily || "",
+      exerciseCategory: item.exerciseCategory || "",
+      exercisePrimaryMuscle: item.exercisePrimaryMuscle || "",
+      methodId: item.methodId ? Number(item.methodId) : null,
+      methodName: item.methodName || "",
+      prescription: item.prescription || "",
+      repetitionText: item.repetitionText || "",
+      weightText: item.weightText || "",
+      conditionNotes: item.conditionNotes || "",
+      coachNotes: item.coachNotes || "",
+    }));
+    resetProgramItemForm();
+    renderProgramDraftState();
+    switchView("programacion", {
+      programmingPanel: "clases",
+    });
+    elements.programFeedback.textContent =
+      "Puedes ajustar la clase y sus líneas del workout.";
+    elements.programTitle.focus();
+    return;
+  }
+
+  if (!programId || !nextActive) {
+    return;
+  }
+
+  const activate = nextActive === "true";
+  const confirmed = window.confirm(
+    activate
+      ? "¿Deseas reactivar esta programación?"
+      : "¿Deseas inactivar esta programación?"
+  );
+
+  if (!confirmed) {
+    return;
+  }
+
+  try {
+    await apiRequest(`/api/programming/programs/${programId}/active`, {
+      method: "PATCH",
+      body: JSON.stringify({
+        isActive: activate,
+      }),
+    });
+    await loadBootstrap();
+    switchView("programacion", {
+      programmingPanel: "clases",
+    });
+    elements.programFeedback.textContent = activate
+      ? "Programación reactivada correctamente."
+      : "Programación inactivada correctamente.";
+  } catch (error) {
+    elements.programFeedback.textContent = error.message;
+  }
+}
+
+async function handleProgramExerciseSubmit(event) {
+  event.preventDefault();
+
+  const exerciseId = Number(elements.programExerciseId.value || 0);
+  const payload = {
+    name: elements.programExerciseName.value.trim(),
+    family: elements.programExerciseFamily.value,
+    category: elements.programExerciseCategory.value.trim(),
+    primaryMuscle: elements.programExerciseMuscle.value.trim(),
+    movementPattern: elements.programExercisePattern.value.trim(),
+    equipment: elements.programExerciseEquipment.value.trim(),
+    coachingNotes: elements.programExerciseNotes.value.trim(),
+  };
+
+  const validation = validateProgrammingExerciseFormPayload(payload);
+  if (!validation.valid) {
+    elements.programExerciseFeedback.textContent = validation.message;
+    return;
+  }
+
+  try {
+    if (exerciseId > 0) {
+      await apiRequest(`/api/programming/exercises/${exerciseId}`, {
+        method: "PUT",
+        body: JSON.stringify(payload),
+      });
+    } else {
+      await apiRequest("/api/programming/exercises", {
+        method: "POST",
+        body: JSON.stringify(payload),
+      });
+    }
+    await loadBootstrap();
+    resetProgramExerciseForm();
+    switchView("programacion", {
+      programmingPanel: "biblioteca",
+    });
+    elements.programExerciseFeedback.textContent =
+      exerciseId > 0
+        ? "Ejercicio actualizado correctamente."
+        : "Ejercicio creado correctamente.";
+  } catch (error) {
+    elements.programExerciseFeedback.textContent = error.message;
+  }
+}
+
+async function handleProgramExercisesTableClick(event) {
+  const editButton = event.target.closest("[data-program-exercise-edit-id]");
+  const statusButton = event.target.closest("[data-program-exercise-status-id]");
+  const editExerciseId = editButton?.dataset.programExerciseEditId;
+  const exerciseId = statusButton?.dataset.programExerciseStatusId;
+  const nextActive = statusButton?.dataset.programExerciseNextActive;
+
+  if (editExerciseId) {
+    const exercise = (state.programmingExercises || []).find(
+      (item) => String(item.id) === String(editExerciseId)
+    );
+
+    if (!exercise) {
+      elements.programExerciseFeedback.textContent =
+        "No encontré el ejercicio que quieres editar.";
+      return;
+    }
+
+    elements.programExerciseId.value = String(exercise.id);
+    elements.programExerciseFormTitle.textContent = "Editar ejercicio";
+    elements.programExerciseName.value = exercise.name || "";
+    fillProgrammingFamilySelects({
+      formValue: exercise.family,
+      filterValue: elements.programExerciseFilterFamily?.value || "Todas",
+    });
+    elements.programExerciseFamily.value = exercise.family || "";
+    elements.programExerciseCategory.value = exercise.category || "";
+    elements.programExerciseMuscle.value = exercise.primaryMuscle || "";
+    elements.programExercisePattern.value = exercise.movementPattern || "";
+    elements.programExerciseEquipment.value = exercise.equipment || "";
+    elements.programExerciseNotes.value = exercise.coachingNotes || "";
+    switchView("programacion", {
+      programmingPanel: "biblioteca",
+    });
+    elements.programExerciseFeedback.textContent =
+      "Actualiza la clasificación o las notas técnicas del ejercicio.";
+    elements.programExerciseName.focus();
+    return;
+  }
+
+  if (!exerciseId || !nextActive) {
+    return;
+  }
+
+  const activate = nextActive === "true";
+  const confirmed = window.confirm(
+    activate
+      ? "¿Deseas reactivar este ejercicio?"
+      : "¿Deseas inactivar este ejercicio?"
+  );
+
+  if (!confirmed) {
+    return;
+  }
+
+  try {
+    await apiRequest(`/api/programming/exercises/${exerciseId}/active`, {
+      method: "PATCH",
+      body: JSON.stringify({
+        isActive: activate,
+      }),
+    });
+    await loadBootstrap();
+    switchView("programacion", {
+      programmingPanel: "biblioteca",
+    });
+    elements.programExerciseFeedback.textContent = activate
+      ? "Ejercicio reactivado correctamente."
+      : "Ejercicio inactivado correctamente.";
+  } catch (error) {
+    elements.programExerciseFeedback.textContent = error.message;
+  }
+}
+
+function resetProgramForm() {
+  if (!elements.programForm) {
+    return;
+  }
+
+  elements.programForm.reset();
+  elements.programId.value = "";
+  elements.programFormTitle.textContent = "Armar clase";
+  elements.programDate.value = getCurrentIsoDate();
+  elements.programDuration.value = "60";
+  elements.programFeedback.textContent =
+    "Selecciona el método, agrega las líneas del workout y guarda la clase.";
+  programDraftItems = [];
+  resetProgramItemForm();
+  renderProgramDraftState();
+  return;
+
+  if (!elements.programForm) {
+    return;
+  }
+
+  elements.programForm.reset();
+  elements.programId.value = "";
+  elements.programFormTitle.textContent = "Programar clase";
+  elements.programDate.value = getCurrentIsoDate();
+  elements.programDuration.value = "60";
+  elements.programFeedback.textContent =
+    "Primero defines la estructura de la clase y luego agregas cada ejercicio con su condición, volumen y notas de coaching.";
+  programDraftItems = [];
+  resetProgramItemForm();
+  renderProgramDraftState();
+}
+
+function resetProgramItemForm() {
+  if (!elements.programItemDraftIndex) {
+    return;
+  }
+
+  const currentFamily = elements.programItemFamily?.value || "";
+  elements.programItemDraftIndex.value = "";
+  elements.programItemFormTitle.textContent = "Agregar línea del workout";
+  elements.addProgramItem.textContent = "Agregar línea";
+  if (elements.programItemBlock) {
+    elements.programItemBlock.value = "Workout";
+  }
+  if (elements.programItemFamily) {
+    elements.programItemFamily.value = currentFamily;
+  }
+  fillProgrammingExerciseSelect({
+    selectedValue: "",
+    familyValue: currentFamily,
+  });
+  fillProgrammingMethodSelects({
+    programMethod: elements.programMethod?.value || "",
+    itemMethod: "",
+    programFilterMethod: elements.programFilterMethod?.value || "",
+  });
+  if (elements.programItemReps) {
+    elements.programItemReps.value = "";
+  }
+  if (elements.programItemWeight) {
+    elements.programItemWeight.value = "";
+  }
+  elements.programItemPrescription.value = "";
+  elements.programItemPrescription.dataset.autoSource = "";
+  if (elements.programItemCondition) {
+    elements.programItemCondition.value = "";
+  }
+  if (elements.programItemNotes) {
+    elements.programItemNotes.value = "";
+  }
+  elements.programItemFeedback.textContent =
+    "Selecciona tipo, ejercicio, reps, peso y condición para agregar la línea.";
+  return;
+
+  if (!elements.programItemDraftIndex) {
+    return;
+  }
+
+  elements.programItemDraftIndex.value = "";
+  elements.programItemFormTitle.textContent = "Agregar ejercicio";
+  elements.addProgramItem.textContent = "Agregar ejercicio";
+  elements.programItemBlock.value = "";
+  fillProgrammingExerciseSelect({
+    selectedValue: "",
+  });
+  fillProgrammingMethodSelects({
+    programMethod: elements.programMethod?.value || "",
+    itemMethod: "",
+    programFilterMethod: elements.programFilterMethod?.value || "",
+  });
+  elements.programItemPrescription.value = "";
+  elements.programItemCondition.value = "";
+  elements.programItemNotes.value = "";
+  elements.programItemFeedback.textContent =
+    "Agrega los ejercicios uno a uno para construir la rutina completa.";
+}
+
+function syncProgramItemVisibleLine(force = false) {
+  const selectedExercise = getProgrammingExerciseById(
+    elements.programItemExercise?.value
+  );
+
+  if (!selectedExercise || !elements.programItemPrescription) {
+    return;
+  }
+
+  const currentValue = elements.programItemPrescription.value.trim();
+  const previousAutoSource = String(
+    elements.programItemPrescription.dataset.autoSource || ""
+  ).trim();
+  const composedLine = buildProgramLineFromFields({
+    exerciseName: selectedExercise.name,
+    repetitionText: String(elements.programItemReps?.value || "").trim(),
+    weightText: String(elements.programItemWeight?.value || "").trim(),
+  });
+
+  if (!currentValue || force || currentValue === previousAutoSource) {
+    elements.programItemPrescription.value = composedLine;
+    elements.programItemPrescription.dataset.autoSource = composedLine;
+  }
+}
+
+function handleProgramExerciseSearchInput() {
+  syncProgramExerciseSelectionFromSearch();
+  renderProgramExerciseSuggestions(elements.programItemExerciseSearch?.value || "", {
+    forceOpen: true,
+  });
+}
+
+function handleProgramExerciseSearchKeydown(event) {
+  if (event.key === "Escape") {
+    hideProgramExerciseSuggestions();
+    return;
+  }
+
+  if (event.key !== "Enter") {
+    return;
+  }
+
+  const suggestions = getProgramExerciseMatches(
+    elements.programItemExerciseSearch?.value || "",
+    elements.programItemFamily?.value || ""
+  );
+  if (!suggestions.length) {
+    return;
+  }
+
+  event.preventDefault();
+  applyProgramExerciseSelection(suggestions[0]);
+}
+
+function handleProgramExerciseSuggestionClick(event) {
+  const trigger = event.target.closest("[data-program-exercise-id]");
+  if (!trigger) {
+    return;
+  }
+
+  const selectedExercise = getProgrammingExerciseById(
+    trigger.dataset.programExerciseId
+  );
+  if (!selectedExercise) {
+    return;
+  }
+
+  applyProgramExerciseSelection(selectedExercise);
+}
+
+function renderProgramExerciseSuggestions(query = "", options = {}) {
+  if (!elements.programItemExerciseSuggestions) {
+    return;
+  }
+
+  const rawQuery = String(query || "").trim();
+  const forceOpen = Boolean(options.forceOpen);
+  const matches = getProgramExerciseMatches(
+    rawQuery,
+    elements.programItemFamily?.value || ""
+  );
+
+  if (!matches.length && !forceOpen) {
+    elements.programItemExerciseSuggestions.innerHTML = "";
+    elements.programItemExerciseSuggestions.classList.add("is-hidden");
+    return;
+  }
+
+  if (!matches.length) {
+    elements.programItemExerciseSuggestions.innerHTML = `
+      <div class="search-suggestion-empty">
+        No encontramos ejercicios con ese filtro.
+      </div>
+    `;
+    elements.programItemExerciseSuggestions.classList.remove("is-hidden");
+    return;
+  }
+
+  elements.programItemExerciseSuggestions.innerHTML = matches
+    .slice(0, 10)
+    .map(
+      (item) => `
+        <button
+          class="search-suggestion-item"
+          type="button"
+          data-program-exercise-id="${escapeHtml(String(item.id))}"
+        >
+          <span class="search-suggestion-title">${escapeHtml(item.name || "")}</span>
+          <span class="search-suggestion-meta">${escapeHtml(
+            [
+              programmingFamilyLabel(item.family),
+              item.category,
+              item.primaryMuscle,
+            ]
+              .filter(Boolean)
+              .join(" · ")
+          )}</span>
+        </button>
+      `
+    )
+    .join("");
+  elements.programItemExerciseSuggestions.classList.remove("is-hidden");
+}
+
+function hideProgramExerciseSuggestions() {
+  if (!elements.programItemExerciseSuggestions) {
+    return;
+  }
+
+  elements.programItemExerciseSuggestions.classList.add("is-hidden");
+}
+
+function getProgramExerciseMatches(query = "", familyValue = "") {
+  const normalizedQuery = normalizeSearchValue(String(query || "").trim());
+  const records = getActiveProgrammingExercises().filter((item) =>
+    familyValue ? item.family === familyValue : true
+  );
+
+  if (!normalizedQuery) {
+    return records;
+  }
+
+  return records.filter((item) => {
+    const haystack = normalizeSearchValue(
+      [
+        item.name,
+        programmingFamilyLabel(item.family),
+        item.category,
+        item.primaryMuscle,
+        item.movementPattern,
+        item.equipment,
+      ]
+        .filter(Boolean)
+        .join(" ")
+    );
+    return haystack.includes(normalizedQuery);
+  });
+}
+
+function applyProgramExerciseSelection(exercise) {
+  if (!exercise || !elements.programItemExercise) {
+    return false;
+  }
+
+  const familyValue = String(elements.programItemFamily?.value || "");
+  elements.programItemExercise.value = String(exercise.id);
+  if (elements.programItemExerciseSearch) {
+    elements.programItemExerciseSearch.value = buildProgramExerciseOptionLabel(
+      exercise,
+      familyValue
+    );
+  }
+  hideProgramExerciseSuggestions();
+  syncProgramItemVisibleLine(true);
+  renderProgramDraftState();
+  return true;
+}
+
+function syncProgramExerciseSelectionFromSearch(options = {}) {
+  if (!elements.programItemExerciseSearch || !elements.programItemExercise) {
+    return false;
+  }
+
+  const rawValue = elements.programItemExerciseSearch.value.trim();
+  if (!rawValue) {
+    elements.programItemExercise.value = "";
+    return false;
+  }
+
+  const familyValue = String(elements.programItemFamily?.value || "");
+  const selectedOptions = getProgramExerciseMatches(rawValue, familyValue);
+  const normalizedQuery = normalizeSearchValue(rawValue);
+
+  let matchedExercise =
+    selectedOptions.find(
+      (item) =>
+        normalizeSearchValue(
+          buildProgramExerciseOptionLabel(item, familyValue)
+        ) === normalizedQuery
+    ) || null;
+
+  if (!matchedExercise && options.allowClosestMatch) {
+    matchedExercise =
+      selectedOptions.find((item) =>
+        normalizeSearchValue(
+          buildProgramExerciseOptionLabel(item, familyValue)
+        ).startsWith(normalizedQuery)
+      ) || null;
+  }
+
+  if (!matchedExercise) {
+    elements.programItemExercise.value = "";
+    return false;
+  }
+
+  return applyProgramExerciseSelection(matchedExercise);
+}
+
+function buildProgramExerciseOptionLabel(exercise, familyValue = "") {
+  if (!exercise) {
+    return "";
+  }
+
+  if (familyValue) {
+    return String(exercise.name || "");
+  }
+
+  return `${exercise.name} · ${programmingFamilyLabel(exercise.family)}`;
+}
+
+function resetProgramExerciseForm() {
+  if (!elements.programExerciseForm) {
+    return;
+  }
+
+  elements.programExerciseForm.reset();
+  elements.programExerciseId.value = "";
+  elements.programExerciseFormTitle.textContent = "Crear ejercicio";
+  fillProgrammingFamilySelects({
+    formValue: "",
+    filterValue: elements.programExerciseFilterFamily?.value || "Todas",
+  });
+  elements.programExerciseFeedback.textContent =
+    "Usa familia + categoría + músculo para que luego la búsqueda y la programación sean rápidas.";
+}
+
+function buildProgramPayload() {
+  return {
+    classDate: elements.programDate.value,
+    title: elements.programTitle.value.trim(),
+    classGroup: elements.programClassGroup.value.trim(),
+    focusArea: elements.programFocus.value.trim(),
+    methodId: Number(elements.programMethod.value || 0),
+    durationMinutes: Number(elements.programDuration.value || 0),
+    objective: elements.programObjective.value.trim(),
+    generalNotes: elements.programNotes.value.trim(),
+    items: programDraftItems.map((item) => ({
+      blockName: item.blockName,
+      exerciseId: Number(item.exerciseId || 0),
+      methodId: item.methodId ? Number(item.methodId) : null,
+      prescription: item.prescription,
+      repetitionText: item.repetitionText || "",
+      weightText: item.weightText || "",
+      conditionNotes: item.conditionNotes,
+      coachNotes: item.coachNotes,
+    })),
+  };
+}
+
+function validateProgramPayload(payload) {
+  if (!payload.classDate) {
+    return {
+      valid: false,
+      message: "Selecciona la fecha de la clase.",
+    };
+  }
+
+  if (!payload.title) {
+    return {
+      valid: false,
+      message: "Escribe el nombre de la clase.",
+    };
+  }
+
+  if (!(payload.methodId > 0)) {
+    return {
+      valid: false,
+      message: "Selecciona el método principal de la clase.",
+    };
+  }
+
+  if (!(payload.durationMinutes > 0)) {
+    return {
+      valid: false,
+      message: "La duración debe ser mayor que cero.",
+    };
+  }
+
+  if (!payload.items.length) {
+    return {
+      valid: false,
+      message: "Agrega al menos un ejercicio a la rutina.",
+    };
+  }
+
+  return {
+    valid: true,
+  };
+}
+
+function validateProgramItemDraft(item) {
+  if (!(item.exerciseId > 0) || !item.exerciseName) {
+    return {
+      valid: false,
+      message: "Selecciona un ejercicio de la biblioteca.",
+    };
+  }
+
+  return {
+    valid: true,
+  };
+
+  if (!item.prescription) {
+    return {
+      valid: false,
+      message: "Escribe la línea que debe verse en la rutina.",
+    };
+  }
+
+  return {
+    valid: true,
+  };
+
+  if (!item.blockName) {
+    return {
+      valid: false,
+      message: "Define a qué bloque pertenece el ejercicio.",
+    };
+  }
+
+  if (!(item.exerciseId > 0) || !item.exerciseName) {
+    return {
+      valid: false,
+      message: "Selecciona un ejercicio de la biblioteca.",
+    };
+  }
+
+  if (!item.prescription) {
+    return {
+      valid: false,
+      message: "Escribe la dosificación o el volumen del ejercicio.",
+    };
+  }
+
+  return {
+    valid: true,
+  };
+}
+
+function validateProgrammingExerciseFormPayload(payload) {
+  if (!payload.name) {
+    return {
+      valid: false,
+      message: "El nombre del ejercicio es obligatorio.",
+    };
+  }
+
+  if (!payload.family) {
+    return {
+      valid: false,
+      message: "Selecciona la familia del ejercicio.",
+    };
+  }
+
+  if (!payload.category) {
+    return {
+      valid: false,
+      message: "La categoría del ejercicio es obligatoria.",
+    };
+  }
+
+  if (!payload.primaryMuscle) {
+    return {
+      valid: false,
+      message: "El músculo principal es obligatorio.",
+    };
+  }
+
+  return {
+    valid: true,
+  };
+}
+
+function fillProgrammingMethodSelects(selectedValues = {}) {
+  const methods = getActiveProgrammingMethods();
+
+  fillSelectFromRecords(elements.programMethod, methods, {
+    selectedValue: selectedValues.programMethod,
+    placeholder: "Selecciona un método",
+  });
+  fillSelectFromRecords(elements.programItemMethod, methods, {
+    selectedValue: selectedValues.itemMethod,
+    placeholder: "Usar método principal",
+  });
+  fillSelectFromRecords(elements.programFilterMethod, methods, {
+    selectedValue: selectedValues.programFilterMethod,
+    placeholder: "Todos los métodos",
+  });
+}
+
+function fillProgrammingExerciseSelect(options = {}) {
+  {
+  const selectedValue = String(options.selectedValue || "");
+  const familyValue = String(options.familyValue || "");
+  const records = getActiveProgrammingExercises().filter((item) =>
+    familyValue ? item.family === familyValue : true
+  );
+  const selectedRecord = getProgrammingExerciseById(selectedValue);
+
+  fillSelectFromRecords(elements.programItemExercise, records, {
+    selectedValue,
+    placeholder: "Selecciona un ejercicio",
+    includeRecord: selectedRecord,
+    labelBuilder: (item) =>
+      familyValue ? item.name : `${item.name} · ${programmingFamilyLabel(item.family)}`,
+  });
+  return;
+  }
+
+  const selectedValue = String(options.selectedValue || "");
+  const records = getActiveProgrammingExercises();
+  const selectedRecord = getProgrammingExerciseById(selectedValue);
+
+  fillSelectFromRecords(elements.programItemExercise, records, {
+    selectedValue,
+    placeholder: "Selecciona un ejercicio",
+    includeRecord: selectedRecord,
+    labelBuilder: (item) =>
+      `${item.name} · ${programmingFamilyLabel(item.family)}`,
+  });
+}
+
+function fillProgrammingExerciseSelect(options = {}) {
+  const selectedValue = String(options.selectedValue || "");
+  const familyValue = String(
+    options.familyValue || elements.programItemFamily?.value || ""
+  );
+  const records = getActiveProgrammingExercises().filter((item) =>
+    familyValue ? item.family === familyValue : true
+  );
+  const selectedRecord = getProgrammingExerciseById(selectedValue);
+
+  fillSelectFromRecords(elements.programItemExercise, records, {
+    selectedValue,
+    placeholder: "Selecciona un ejercicio",
+    includeRecord: selectedRecord,
+    labelBuilder: (item) => buildProgramExerciseOptionLabel(item, familyValue),
+  });
+
+  if (elements.programItemExerciseSearch) {
+    elements.programItemExerciseSearch.value = selectedRecord
+      ? buildProgramExerciseOptionLabel(selectedRecord, familyValue)
+      : "";
+    elements.programItemExerciseSearch.placeholder = records.length
+      ? "Escribe para buscar un ejercicio"
+      : "No hay ejercicios disponibles para este tipo";
+  }
+
+  hideProgramExerciseSuggestions();
+}
+
+function fillProgrammingFamilySelects(selectedValues = {}) {
+  {
+  const options = getProgrammingFamilyOptions();
+
+  if (elements.programExerciseFamily) {
+    elements.programExerciseFamily.innerHTML = [
+      `<option value="">Selecciona una familia</option>`,
+      ...options.map(
+        (item) =>
+          `<option value="${escapeHtml(item.value)}">${escapeHtml(item.label)}</option>`
+      ),
+    ].join("");
+    if (options.some((item) => item.value === selectedValues.formValue)) {
+      elements.programExerciseFamily.value = selectedValues.formValue;
+    }
+  }
+
+  if (elements.programExerciseFilterFamily) {
+    elements.programExerciseFilterFamily.innerHTML = [
+      `<option value="Todas">Todas</option>`,
+      ...options.map(
+        (item) =>
+          `<option value="${escapeHtml(item.value)}">${escapeHtml(item.label)}</option>`
+      ),
+    ].join("");
+    if (
+      ["Todas", ...options.map((item) => item.value)].includes(
+        selectedValues.filterValue
+      )
+    ) {
+      elements.programExerciseFilterFamily.value = selectedValues.filterValue;
+    }
+  }
+
+  if (elements.programItemFamily) {
+    elements.programItemFamily.innerHTML = [
+      `<option value="">Todos los tipos</option>`,
+      ...options.map(
+        (item) =>
+          `<option value="${escapeHtml(item.value)}">${escapeHtml(item.label)}</option>`
+      ),
+    ].join("");
+    if (
+      ["", ...options.map((item) => item.value)].includes(selectedValues.itemValue)
+    ) {
+      elements.programItemFamily.value = selectedValues.itemValue;
+    }
+  }
+  return;
+  }
+
+  const options = getProgrammingFamilyOptions();
+
+  if (elements.programExerciseFamily) {
+    elements.programExerciseFamily.innerHTML = [
+      `<option value="">Selecciona una familia</option>`,
+      ...options.map(
+        (item) =>
+          `<option value="${escapeHtml(item.value)}">${escapeHtml(item.label)}</option>`
+      ),
+    ].join("");
+    if (options.some((item) => item.value === selectedValues.formValue)) {
+      elements.programExerciseFamily.value = selectedValues.formValue;
+    }
+  }
+
+  if (elements.programExerciseFilterFamily) {
+    elements.programExerciseFilterFamily.innerHTML = [
+      `<option value="Todas">Todas</option>`,
+      ...options.map(
+        (item) =>
+          `<option value="${escapeHtml(item.value)}">${escapeHtml(item.label)}</option>`
+      ),
+    ].join("");
+    if (
+      ["Todas", ...options.map((item) => item.value)].includes(
+        selectedValues.filterValue
+      )
+    ) {
+      elements.programExerciseFilterFamily.value = selectedValues.filterValue;
+    }
+  }
+}
+
+function fillProgrammingExerciseSelect(options = {}) {
+  const selectedValue = String(options.selectedValue || "");
+  const familyValue = String(
+    options.familyValue || elements.programItemFamily?.value || ""
+  );
+  const records = getActiveProgrammingExercises().filter((item) =>
+    familyValue ? item.family === familyValue : true
+  );
+  const selectedRecord = getProgrammingExerciseById(selectedValue);
+  const normalizedRecords = [...records];
+
+  if (
+    selectedRecord &&
+    !normalizedRecords.some(
+      (item) => String(item.id) === String(selectedRecord.id)
+    )
+  ) {
+    normalizedRecords.push(selectedRecord);
+  }
+
+  fillSelectFromRecords(elements.programItemExercise, normalizedRecords, {
+    selectedValue,
+    placeholder: "Selecciona un ejercicio",
+    includeRecord: selectedRecord,
+    labelBuilder: (item) =>
+      familyValue
+        ? item.name
+        : `${item.name} · ${programmingFamilyLabel(item.family)}`,
+  });
+
+  if (elements.programItemExerciseSearch) {
+    elements.programItemExerciseSearch.value = selectedRecord
+      ? buildProgramExerciseOptionLabel(selectedRecord, familyValue)
+      : "";
+    elements.programItemExerciseSearch.placeholder = normalizedRecords.length
+      ? "Escribe para buscar un ejercicio"
+      : "No hay ejercicios disponibles para este tipo";
+  }
+  hideProgramExerciseSuggestions();
+}
+
+function fillSelectFromRecords(select, records, options = {}) {
+  if (!select) {
+    return;
+  }
+
+  const selectedValue = String(options.selectedValue || "");
+  const placeholder = options.placeholder || "";
+  const includeRecord = options.includeRecord;
+  const normalizedRecords = Array.isArray(records) ? [...records] : [];
+
+  if (
+    includeRecord &&
+    !normalizedRecords.some(
+      (item) => String(item.id) === String(includeRecord.id)
+    )
+  ) {
+    normalizedRecords.push(includeRecord);
+  }
+
+  const optionMarkup = normalizedRecords.map((item) => {
+    const label = options.labelBuilder
+      ? options.labelBuilder(item)
+      : item.name || item.value || String(item.id);
+
+    return `<option value="${escapeHtml(String(item.id))}">${escapeHtml(label)}</option>`;
+  });
+
+  select.innerHTML = [
+    placeholder ? `<option value="">${escapeHtml(placeholder)}</option>` : "",
+    ...optionMarkup,
+  ].join("");
+
+  if ([...select.options].some((item) => item.value === selectedValue)) {
+    select.value = selectedValue;
+  } else if (placeholder) {
+    select.value = "";
+  } else if (select.options.length) {
+    select.selectedIndex = 0;
+  }
+}
+
+function getProgrammingFamilyOptions() {
+  return [
+    {
+      value: "multiarticular_tren_inferior",
+      label: "Multiarticular tren inferior",
+    },
+    {
+      value: "multiarticular_tren_superior",
+      label: "Multiarticular tren superior",
+    },
+    {
+      value: "aislado_por_musculo",
+      label: "Aislado por músculo",
+    },
+    {
+      value: "hyrox_oficial",
+      label: "HYROX oficial",
+    },
+  ];
+}
+
+function programmingFamilyLabel(value) {
+  return (
+    getProgrammingFamilyOptions().find((item) => item.value === value)?.label ||
+    "Sin familia"
+  );
+}
+
+function getProgrammingMethodById(id) {
+  return (state.programmingMethods || []).find(
+    (item) => String(item.id) === String(id)
+  );
+}
+
+function getProgrammingExerciseById(id) {
+  return (state.programmingExercises || []).find(
+    (item) => String(item.id) === String(id)
+  );
+}
+
+function getActiveProgrammingMethods() {
+  return (state.programmingMethods || []).filter((item) => item.isActive);
+}
+
+function getActiveProgrammingExercises() {
+  return (state.programmingExercises || []).filter((item) => item.isActive);
+}
+
+function getFilteredProgrammingExercises() {
+  const family = elements.programExerciseFilterFamily?.value || "Todas";
+  const query = normalizeSearchValue(elements.programExerciseQuery?.value || "");
+
+  return (state.programmingExercises || []).filter((item) => {
+    if (family !== "Todas" && item.family !== family) {
+      return false;
+    }
+
+    if (!query) {
+      return true;
+    }
+
+    return normalizeSearchValue(
+      [
+        item.name,
+        programmingFamilyLabel(item.family),
+        item.category,
+        item.primaryMuscle,
+        item.movementPattern,
+        item.equipment,
+        item.coachingNotes,
+      ].join(" ")
+    ).includes(query);
+  });
+}
+
+function getFilteredClassPrograms() {
+  {
+  const selectedDate = normalizeDateOnly(
+    elements.programFilterDate?.value || getCurrentIsoDate()
+  );
+  const { start, end } = getReferenceWeekRange(selectedDate);
+  const selectedMethod = String(elements.programFilterMethod?.value || "");
+  const query = normalizeSearchValue(elements.programFilterQuery?.value || "");
+
+  return [...(state.classPrograms || [])]
+    .filter((program) => {
+      if (!isBetween(program.classDate, start, end)) {
+        return false;
+      }
+
+      if (selectedMethod && String(program.methodId) !== selectedMethod) {
+        return false;
+      }
+
+      if (!query) {
+        return true;
+      }
+
+      return normalizeSearchValue(
+        [
+          program.title,
+          program.classGroup,
+          program.focusArea,
+          program.methodName,
+          program.objective,
+          program.generalNotes,
+          ...(program.items || []).map((item) =>
+            [
+              item.blockName,
+              item.exerciseName,
+              item.prescription,
+              item.conditionNotes,
+              item.coachNotes,
+            ].join(" ")
+          ),
+        ].join(" ")
+      ).includes(query);
+    })
+    .sort((a, b) => {
+      const dateCompare = String(a.classDate).localeCompare(String(b.classDate));
+      if (dateCompare !== 0) {
+        return dateCompare;
+      }
+
+      return String(a.title).localeCompare(String(b.title), APP_LOCALE);
+    });
+  }
+
+  const selectedDate = normalizeDateOnly(elements.programFilterDate?.value || "");
+  const selectedMethod = String(elements.programFilterMethod?.value || "");
+  const query = normalizeSearchValue(elements.programFilterQuery?.value || "");
+
+  return [...(state.classPrograms || [])].filter((program) => {
+    if (selectedDate && normalizeDateOnly(program.classDate) !== selectedDate) {
+      return false;
+    }
+
+    if (selectedMethod && String(program.methodId) !== selectedMethod) {
+      return false;
+    }
+
+    if (!query) {
+      return true;
+    }
+
+    return normalizeSearchValue(
+      [
+        program.title,
+        program.classGroup,
+        program.focusArea,
+        program.methodName,
+        program.objective,
+        program.generalNotes,
+        ...(program.items || []).map((item) =>
+          [
+            item.blockName,
+            item.exerciseName,
+            item.prescription,
+            item.conditionNotes,
+            item.coachNotes,
+          ].join(" ")
+        ),
+      ].join(" ")
+    ).includes(query);
+  });
+}
+
+function summarizeProgramExercises(program) {
+  const items = Array.isArray(program.items) ? program.items : [];
+
+  if (!items.length) {
+    return "Sin ejercicios";
+  }
+
+  const names = items.slice(0, 2).map((item) => item.exerciseName);
+  if (items.length <= 2) {
+    return names.join(", ");
+  }
+
+  return `${names.join(", ")} y ${items.length - 2} más`;
+}
+
+function getMostUsedProgramMethod(programs) {
+  const counts = new Map();
+
+  programs.forEach((program) => {
+    const key = program.methodName || "Sin método";
+    counts.set(key, Number(counts.get(key) || 0) + 1);
+  });
+
+  return [...counts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] || "Sin datos";
+}
+
+function getReferenceWeekRange(referenceDate) {
+  const safeReferenceDate = normalizeDateOnly(referenceDate) || getCurrentIsoDate();
+  const parsedReferenceDate = parseIsoDateAtMidday(safeReferenceDate);
+  const dayIndex = parsedReferenceDate.getUTCDay();
+  const offsetToMonday = dayIndex === 0 ? -6 : 1 - dayIndex;
+  const start = addDays(parsedReferenceDate, offsetToMonday);
+  const end = addDays(start, 6);
+
+  return {
+    start: toIsoDate(start),
+    end: toIsoDate(end),
+  };
+}
+
+function getWeekBoardDays(referenceDate, programs = []) {
+  const { start } = getReferenceWeekRange(referenceDate);
+  const startDate = parseIsoDateAtMidday(start);
+  const shouldShowWeekend = (programs || []).some((program) => {
+    const weekday = parseIsoDateAtMidday(program.classDate).getUTCDay();
+    return weekday === 0 || weekday === 6;
+  });
+  const dayCount = shouldShowWeekend ? 7 : 5;
+
+  return Array.from({ length: dayCount }, (_item, index) => {
+    const date = addDays(startDate, index);
+    const iso = toIsoDate(date);
+
+    return {
+      iso,
+      label: formatProgramDayLabel(iso),
+      dateLabel: formatProgramShortDate(iso),
+    };
+  });
+}
+
+function formatProgramDayLabel(value) {
+  if (!value) {
+    return "SIN DÍA";
+  }
+
+  return new Intl.DateTimeFormat(APP_LOCALE, {
+    timeZone: APP_TIME_ZONE,
+    weekday: "long",
+  })
+    .format(parseIsoDateAtMidday(value))
+    .toLocaleUpperCase(APP_LOCALE);
+}
+
+function formatProgramShortDate(value) {
+  if (!value) {
+    return "";
+  }
+
+  return new Intl.DateTimeFormat(APP_LOCALE, {
+    timeZone: APP_TIME_ZONE,
+    day: "2-digit",
+    month: "short",
+  }).format(parseIsoDateAtMidday(value));
+}
+
+function buildProgramWorkoutHeadline({
+  focusArea = "",
+  methodName = "",
+  durationMinutes = "",
+} = {}) {
+  const cleanFocusArea = String(focusArea || "").trim();
+  if (cleanFocusArea) {
+    return cleanFocusArea;
+  }
+
+  const cleanMethod = String(methodName || "").trim();
+  if (cleanMethod && durationMinutes) {
+    return `${durationMinutes} min ${cleanMethod}`;
+  }
+
+  return cleanMethod || "Workout del día";
+}
+
+function buildProgramDisplayLine(item) {
+  const composedLine = buildProgramLineFromFields(item);
+  if (composedLine) {
+    return composedLine;
+  }
+
+  return (
+    String(item?.prescription || "").trim() ||
+    String(item?.exerciseName || "").trim() ||
+    "Línea sin texto"
+  );
+}
+
+function buildProgramLineFromFields(item = {}) {
+  const exerciseName = String(item.exerciseName || "").trim();
+  const repetitionText = String(item.repetitionText || "").trim();
+  const weightText = String(item.weightText || "").trim();
+
+  if (!exerciseName) {
+    return String(item.prescription || "").trim();
+  }
+
+  const parts = [exerciseName];
+  const normalizedRepetitionText = formatProgramVolumeText(repetitionText);
+  if (normalizedRepetitionText) {
+    parts.push(normalizedRepetitionText);
+  }
+  if (weightText) {
+    parts.push(weightText);
+  }
+
+  return parts.join(" · ").trim();
+}
+
+function formatProgramVolumeText(value) {
+  const rawValue = String(value || "").trim();
+  if (!rawValue) {
+    return "";
+  }
+
+  return /^[0-9]+([.,][0-9]+)?$/.test(rawValue) ? `x ${rawValue}` : rawValue;
+}
+
+function renderProgramWeekCard(program) {
+  const nextActive = program.isActive ? "false" : "true";
+  const statusTitle = program.isActive
+    ? "Inactivar programación"
+    : "Reactivar programación";
+
+  return renderProgramPreviewCard({
+    dayLabel: formatProgramDayLabel(program.classDate),
+    dateLabel: formatProgramShortDate(program.classDate),
+    title: program.title,
+    methodName: program.methodName || "",
+    workoutHeadline: buildProgramWorkoutHeadline({
+      focusArea: program.focusArea,
+      methodName: program.methodName,
+      durationMinutes: program.durationMinutes,
+    }),
+    items: program.items || [],
+    generalNotes: program.generalNotes || "",
+    programId: program.id,
+    isActive: program.isActive,
+    statusTitle,
+    nextActive,
+  });
+}
+
+function renderProgramPreviewCard({
+  dayLabel = "",
+  dateLabel = "",
+  title = "",
+  methodName = "",
+  workoutHeadline = "",
+  items = [],
+  generalNotes = "",
+  programId = "",
+  isActive = true,
+  statusTitle = "",
+  nextActive = "",
+  isDraft = false,
+} = {}) {
+  const normalizedItems = Array.isArray(items) ? items : [];
+  const notesHtml = escapeHtml(String(generalNotes || "").trim()).replace(
+    /\n/g,
+    "<br />"
+  );
+  const actionsMarkup = isDraft
+    ? ""
+    : `
+        <div class="program-card-actions">
+          <button
+            class="table-button icon-button"
+            type="button"
+            data-program-edit-id="${escapeHtml(String(programId))}"
+            title="Editar programación"
+            aria-label="Editar programación"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+              <path d="M4 20h4l10-10-4-4L4 16v4Z"></path>
+              <path d="m12 6 4 4"></path>
+            </svg>
+          </button>
+          <button
+            class="table-button icon-button ${isActive ? "danger" : ""}"
+            type="button"
+            data-program-status-id="${escapeHtml(String(programId))}"
+            data-program-next-active="${escapeHtml(String(nextActive))}"
+            title="${escapeHtml(statusTitle)}"
+            aria-label="${escapeHtml(statusTitle)}"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+              <path d="M12 3v9"></path>
+              <path d="M7.05 5.05a8 8 0 1 0 9.9 0"></path>
+            </svg>
+          </button>
+        </div>
+      `;
+
+  return `
+    <article class="program-week-card ${isDraft ? "program-preview-card" : ""} ${isActive ? "" : "program-week-card-inactive"}">
+      <div class="program-card-top">
+        <div class="program-card-day">
+          ${dayLabel ? `<span class="program-card-day-name">${escapeHtml(dayLabel)}</span>` : ""}
+          ${dateLabel ? `<span class="program-card-day-date">${escapeHtml(dateLabel)}</span>` : ""}
+        </div>
+        ${actionsMarkup}
+      </div>
+      <div class="program-card-badge">${escapeHtml(title || "Clase sin nombre")}</div>
+      ${
+        methodName
+          ? `<div class="program-card-method">${escapeHtml(methodName)}</div>`
+          : ""
+      }
+      <div class="program-card-label">Workout</div>
+      <div class="program-card-workout">${escapeHtml(workoutHeadline || "Sin encabezado")}</div>
+      <div class="program-card-lines ${normalizedItems.length ? "" : "is-empty"}">
+        ${
+          normalizedItems.length
+            ? normalizedItems
+                .map(
+                  (item) =>
+                    `<div class="program-card-line-item">
+                      <div class="program-card-line">${escapeHtml(buildProgramDisplayLine(item))}</div>
+                      ${
+                        item.conditionNotes
+                          ? `<div class="program-card-line-meta">${escapeHtml(item.conditionNotes)}</div>`
+                          : ""
+                      }
+                    </div>`
+                )
+                .join("")
+            : `<div class="program-card-line muted">Agrega ejercicios y aquí aparecerá la rutina.</div>`
+        }
+      </div>
+      ${
+        notesHtml
+          ? `
+              <div class="program-card-label">Notes</div>
+              <div class="program-card-notes">${notesHtml}</div>
+            `
+          : ""
+      }
+    </article>
+  `;
+}
+
+function getCurrentWeekRange() {
+  const currentDate = getCurrentTimeZoneDate();
+  const dayIndex = currentDate.getDay();
+  const offsetToMonday = dayIndex === 0 ? -6 : 1 - dayIndex;
+  const start = addDays(currentDate, offsetToMonday);
+  const end = addDays(start, 6);
+
+  return {
+    start: toIsoDate(start),
+    end: toIsoDate(end),
+  };
+}
+
+function normalizeProgrammingMethods(items) {
+  if (!Array.isArray(items)) {
+    return [];
+  }
+
+  return items.map((item) => ({
+    ...item,
+    id: Number(item.id || 0),
+    sortOrder: Number(item.sortOrder || 0),
+    isActive: Boolean(item.isActive),
+  }));
+}
+
+function normalizeProgrammingExercises(items) {
+  if (!Array.isArray(items)) {
+    return [];
+  }
+
+  return items.map((item) => ({
+    ...item,
+    id: Number(item.id || 0),
+    isActive: Boolean(item.isActive),
+  }));
+}
+
+function normalizeClassPrograms(items) {
+  if (!Array.isArray(items)) {
+    return [];
+  }
+
+  return items.map((item) => ({
+    ...item,
+    id: Number(item.id || 0),
+    classDate: normalizeDateOnly(item.classDate),
+    methodId: Number(item.methodId || 0),
+    durationMinutes: Number(item.durationMinutes || 0),
+    isActive: Boolean(item.isActive),
+    items: Array.isArray(item.items)
+      ? item.items.map((entry) => ({
+          ...entry,
+          id: Number(entry.id || 0),
+          classProgramId: Number(entry.classProgramId || 0),
+          sortOrder: Number(entry.sortOrder || 0),
+          exerciseId: Number(entry.exerciseId || 0),
+          methodId: entry.methodId ? Number(entry.methodId) : null,
+        }))
+      : [],
+  }));
 }
 
 function normalizeMovements(items) {

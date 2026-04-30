@@ -13,6 +13,7 @@
   "dependencies": {
     "dotenv": "^16.4.5",
     "express": "^4.21.2",
+    "officecrypto-tool": "^0.0.19",
     "pg": "^8.13.1",
     "xlsx": "^0.18.5"
   }
