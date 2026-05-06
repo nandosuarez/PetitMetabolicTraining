@@ -287,9 +287,27 @@
                   <select id="categoria" name="categoria" required></select>
                 </label>
 
-                <label>
+                <label class="search-field">
                   Cliente
-                  <select id="cliente" name="cliente"></select>
+                  <input
+                    id="cliente-search"
+                    type="search"
+                    placeholder="Escribe para buscar un cliente"
+                    autocomplete="off"
+                  />
+                  <div
+                    id="cliente-suggestions"
+                    class="search-suggestions is-hidden"
+                    role="listbox"
+                    aria-label="Sugerencias de clientes"
+                  ></div>
+                  <select
+                    id="cliente"
+                    name="cliente"
+                    class="is-hidden"
+                    aria-hidden="true"
+                    tabindex="-1"
+                  ></select>
                 </label>
 
                 <label class="span-2">
@@ -298,8 +316,7 @@
                     id="descripcion"
                     name="descripcion"
                     type="text"
-                    placeholder="Detalle corto del ingreso o gasto"
-                    required
+                    placeholder="Detalle corto del ingreso o gasto (opcional)"
                   />
                 </label>
 
@@ -431,22 +448,14 @@
                 <h3>Movimientos registrados</h3>
               </div>
             </div>
-            <div class="table-wrap">
-              <table class="stack-table">
+            <div class="table-wrap adaptive-table-wrap">
+              <table class="stack-table adaptive-stack-table">
                 <thead>
                   <tr>
-                    <th>Fecha</th>
-                    <th>Línea</th>
-                    <th>Tipo</th>
-                    <th>Categoría</th>
-                    <th>Cliente</th>
-                    <th>Descripción</th>
+                    <th>Resumen</th>
                     <th>Estado</th>
-                    <th>Caja</th>
                     <th>Total</th>
-                    <th>Abono</th>
                     <th>Saldo</th>
-                    <th>Flujo</th>
                     <th>Acciones</th>
                   </tr>
                 </thead>
@@ -745,8 +754,8 @@
 
               <div id="box-filter-summary" class="mini-stats"></div>
 
-              <div class="table-wrap">
-                <table class="stack-table">
+              <div class="table-wrap adaptive-table-wrap">
+                <table class="stack-table adaptive-stack-table">
                   <thead>
                     <tr>
                       <th>Fecha</th>
@@ -899,6 +908,15 @@
                   <p class="section-kicker">Consulta</p>
                   <h3>Clientes registrados</h3>
                 </div>
+                <label class="inline-label portfolio-search">
+                  Buscar clientes
+                  <input
+                    id="clients-query"
+                    type="search"
+                    placeholder="Nombre, documento, teléfono o correo"
+                    autocomplete="off"
+                  />
+                </label>
               </div>
 
               <div class="table-wrap">
@@ -939,6 +957,11 @@
                   </div>
 
                   <div id="collection-balance" class="collection-balance span-2"></div>
+
+                  <div
+                    id="collection-movement-list"
+                    class="collection-movement-list span-2"
+                  ></div>
 
                   <label>
                     Fecha del cobro
@@ -1028,21 +1051,13 @@
               </div>
               <div id="portfolio-summary" class="stats-grid"></div>
 
-              <div class="table-wrap">
-                <table class="stack-table">
+              <div class="table-wrap adaptive-table-wrap">
+                <table class="stack-table adaptive-stack-table">
                   <thead>
                     <tr>
-                      <th>Línea</th>
-                      <th>Fecha</th>
-                      <th>Cliente</th>
-                      <th>Categoría</th>
-                      <th>Descripción</th>
+                      <th>Resumen</th>
                       <th>Estado</th>
-                      <th>Total</th>
-                      <th>Abono</th>
                       <th>Saldo</th>
-                      <th>Caja</th>
-                      <th>Observaciones</th>
                       <th>Acciones</th>
                     </tr>
                   </thead>

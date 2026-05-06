@@ -838,9 +838,9 @@ app.get("/api/bootstrap", asyncHandler(async (req, res) => {
         order by bt.transfer_date desc, bt.created_at desc, bt.id desc
       `
     ),
-    listProgrammingMethods(),
-    listProgrammingExercises(),
-    listClassPrograms(),
+    isAssistantOperative ? Promise.resolve([]) : listProgrammingMethods(),
+    isAssistantOperative ? Promise.resolve([]) : listProgrammingExercises(),
+    isAssistantOperative ? Promise.resolve([]) : listClassPrograms(),
   ]);
 
   res.json({
@@ -940,6 +940,7 @@ app.put("/api/movements/:id", asyncHandler(async (req, res) => {
   validateMovementPayload(payload, {
     requireEditJustification:
       req.authUser?.role === "asistente_operativo",
+    requireObservationMinOnEdit: true,
   });
 
   const existingMovementResult = await query(
@@ -1699,10 +1700,6 @@ function validateMovementPayload(payload, options = {}) {
     throw httpError(400, "La categoria es obligatoria.");
   }
 
-  if (!payload.descripcion) {
-    throw httpError(400, "La descripcion es obligatoria.");
-  }
-
   if (!payload.medioPago) {
     throw httpError(400, "El medio de pago es obligatorio.");
   }
@@ -1722,6 +1719,16 @@ function validateMovementPayload(payload, options = {}) {
   const expectedStatus = derivePaymentStatus(payload.valorTotal, payload.abono);
   if (!["Pagado", "Parcial", "Pendiente"].includes(expectedStatus)) {
     throw httpError(400, "No se pudo calcular el estado de pago del movimiento.");
+  }
+
+  if (
+    options.requireObservationMinOnEdit &&
+    String(payload.observaciones || "").trim().length < 4
+  ) {
+    throw httpError(
+      400,
+      "Cuando editas un movimiento, la observacion debe tener al menos 4 caracteres."
+    );
   }
 
   if (payload.estadoPago !== expectedStatus) {
@@ -3539,7 +3546,7 @@ function requireAdmin(req, res, next) {
 }
 
 function requireProgrammingAccess(req, res, next) {
-  if (!["administrador", "asistente_operativo"].includes(req.authUser?.role)) {
+  if (req.authUser?.role !== "administrador") {
     return res.status(403).json({
       error: "Tu perfil no tiene acceso al módulo de programación.",
     });

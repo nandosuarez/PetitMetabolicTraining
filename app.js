@@ -64,6 +64,11 @@ let activeClientPanel = "base";
 let activeBoxPanel = "resumen";
 let activeProgrammingPanel = "clases";
 let selectedCollectionMovementId = null;
+let selectedCollectionClientKey = null;
+let selectedCollectionMovementIds = [];
+const expandedMovementDetailIds = new Set();
+const expandedPortfolioDetailIds = new Set();
+const expandedCollectionAccountIds = new Set();
 let isSidebarOpen = false;
 const COMPACT_SIDEBAR_BREAKPOINT = 1180;
 let lastImportReport = null;
@@ -130,6 +135,8 @@ const elements = {
   fecha: document.getElementById("fecha"),
   tipo: document.getElementById("tipo"),
   categoria: document.getElementById("categoria"),
+  clienteSearch: document.getElementById("cliente-search"),
+  clienteSuggestions: document.getElementById("cliente-suggestions"),
   cliente: document.getElementById("cliente"),
   descripcion: document.getElementById("descripcion"),
   estadoPago: document.getElementById("estadoPago"),
@@ -189,6 +196,7 @@ const elements = {
   cancelClientEdit: document.getElementById("cancel-client-edit"),
   clientsMetrics: document.getElementById("clients-metrics"),
   clientsTable: document.getElementById("clients-table"),
+  clientsQuery: document.getElementById("clients-query"),
   portfolioQuery: document.getElementById("portfolio-query"),
   portfolioSummary: document.getElementById("portfolio-summary"),
   portfolioTable: document.getElementById("portfolio-table"),
@@ -196,6 +204,7 @@ const elements = {
   collectionMovementId: document.getElementById("collection-movement-id"),
   collectionContext: document.getElementById("collection-context"),
   collectionBalance: document.getElementById("collection-balance"),
+  collectionMovementList: document.getElementById("collection-movement-list"),
   collectionDate: document.getElementById("collection-date"),
   collectionAmount: document.getElementById("collection-amount"),
   collectionMethod: document.getElementById("collection-method"),
@@ -514,11 +523,45 @@ function bindEvents() {
   elements.saveDailyNotes.addEventListener("click", saveDailyNote);
   elements.saveWeeklyNotes.addEventListener("click", saveWeeklyNote);
   addListener(elements.movementTable, "click", handleMovementTableClick);
+  addListener(elements.clienteSearch, "input", handleMovementClientSearchInput);
+  addListener(elements.clienteSearch, "focus", () =>
+    renderMovementClientSuggestions(elements.clienteSearch?.value || "", {
+      forceOpen: true,
+    })
+  );
+  addListener(elements.clienteSearch, "click", () =>
+    renderMovementClientSuggestions(elements.clienteSearch?.value || "", {
+      forceOpen: true,
+    })
+  );
+  addListener(elements.clienteSearch, "keydown", (event) =>
+    handleMovementClientSearchKeydown(event)
+  );
+  addListener(elements.clienteSearch, "blur", () => {
+    window.setTimeout(hideMovementClientSuggestions, 120);
+  });
+  addListener(elements.clienteSearch, "change", () =>
+    syncMovementClientSelectionFromSearch({
+      allowClosestMatch: true,
+      allowSingleMatch: true,
+    })
+  );
+  addListener(
+    elements.clienteSuggestions,
+    "click",
+    handleMovementClientSuggestionClick
+  );
   addListener(elements.clientForm, "submit", handleClientSubmit);
   addListener(elements.cancelClientEdit, "click", resetClientForm);
   addListener(elements.clientsTable, "click", handleClientsTableClick);
+  addListener(elements.clientsQuery, "input", renderClientsAdmin);
   addListener(elements.portfolioQuery, "input", renderPortfolioView);
   addListener(elements.portfolioTable, "click", handlePortfolioTableClick);
+  addListener(
+    elements.collectionMovementList,
+    "click",
+    handleCollectionMovementListClick
+  );
   addListener(elements.collectionForm, "submit", handleCollectionSubmit);
   addListener(elements.cancelCollection, "click", resetCollectionSelection);
   addListener(elements.programForm, "submit", handleProgramSubmit);
@@ -842,6 +885,8 @@ async function handleLogout() {
   };
   state = structuredClone(emptyState);
   selectedCollectionMovementId = null;
+  selectedCollectionClientKey = null;
+  selectedCollectionMovementIds = [];
   elements.passwordChangeForm.reset();
   showLogin("Sesión cerrada. Ingresa de nuevo para continuar.");
 }
@@ -851,6 +896,7 @@ async function loadBootstrap() {
 
   try {
     const previousSelectedCollectionId = selectedCollectionMovementId;
+    const previousSelectedCollectionClientKey = selectedCollectionClientKey;
     const [data, usersPayload] = await Promise.all([
       apiRequest("/api/bootstrap"),
       isAdminUser()
@@ -884,11 +930,33 @@ async function loadBootstrap() {
       classPrograms: normalizeClassPrograms(data.classPrograms),
     };
 
-    selectedCollectionMovementId = state.portfolioMovements.some(
+    const previousSelectedMovement = state.portfolioMovements.find(
       (item) => String(item.id) === String(previousSelectedCollectionId)
-    )
-      ? String(previousSelectedCollectionId)
-      : null;
+    );
+    if (previousSelectedMovement) {
+      selectedCollectionClientKey = getCollectionClientKey(
+        previousSelectedMovement.cliente
+      );
+      selectedCollectionMovementId = String(previousSelectedMovement.id);
+    } else if (
+      previousSelectedCollectionClientKey &&
+      getPortfolioMovementsByClientKey(
+        previousSelectedCollectionClientKey,
+        state.portfolioMovements
+      ).length
+    ) {
+      const fallbackMovement = getPortfolioMovementsByClientKey(
+        previousSelectedCollectionClientKey,
+        state.portfolioMovements
+      )[0];
+      selectedCollectionClientKey = previousSelectedCollectionClientKey;
+      selectedCollectionMovementId = fallbackMovement
+        ? String(fallbackMovement.id)
+        : null;
+    } else {
+      selectedCollectionClientKey = null;
+      selectedCollectionMovementId = null;
+    }
 
     hydrateStaticOptions();
     if (!elements.movementId.value) {
@@ -1014,7 +1082,7 @@ function getAllowedViews() {
   }
 
   if (isAssistantUser()) {
-    return ["movimientos", "cajas", "cartera", "programacion"];
+    return ["movimientos", "cajas", "cartera"];
   }
 
   return [];
@@ -1472,7 +1540,7 @@ function renderDashboard() {
           (item) => `
             <article class="list-item">
               <strong>${escapeHtml(item.cliente || "Sin cliente")} · ${formatCurrency(item.saldoPendiente)}</strong>
-              <small>${escapeHtml(item.linea)} · ${escapeHtml(item.categoria)} · ${escapeHtml(item.descripcion)}</small>
+              <small>${escapeHtml(item.linea)} · ${escapeHtml(item.categoria)} · ${escapeHtml(item.descripcion || "Sin descripcion")}</small>
             </article>
           `
         )
@@ -1485,7 +1553,7 @@ function renderDashboard() {
         .map(
           (item) => `
             <article class="list-item">
-              <strong>${escapeHtml(item.descripcion)}</strong>
+              <strong>${escapeHtml(item.descripcion || "Sin descripcion")}</strong>
               <small>${formatDate(item.fecha)} · ${escapeHtml(item.linea)} · ${escapeHtml(item.tipo)} · ${formatCurrency(item.abono)}</small>
             </article>
           `
@@ -1513,6 +1581,170 @@ function renderDashboard() {
       `;
     })
     .join("");
+}
+
+function createDetailToggleButton(attributeName, id, isExpanded, label) {
+  return `
+    <button
+      class="table-button icon-button detail-toggle-button ${isExpanded ? "is-open" : ""}"
+      type="button"
+      ${attributeName}="${escapeHtml(String(id))}"
+      title="${escapeHtml(label)}"
+      aria-label="${escapeHtml(label)}"
+      aria-expanded="${isExpanded ? "true" : "false"}"
+    >
+      <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+        <path d="m6 9 6 6 6-6"></path>
+      </svg>
+    </button>
+  `;
+}
+
+function createDetailItem(label, value, extraClass = "") {
+  return `
+    <article class="detail-item ${extraClass}">
+      <span>${escapeHtml(label)}</span>
+      <strong>${value}</strong>
+    </article>
+  `;
+}
+
+function renderMovementSummary(item, isExpanded) {
+  const summaryTitle = item.cliente || "Sin cliente";
+  const summaryMeta = [
+    item.categoria || item.descripcion || "Movimiento registrado",
+    item.linea,
+    item.tipo,
+    item.medioPago,
+  ]
+    .filter(Boolean)
+    .map((value) => escapeHtml(String(value)))
+    .join(" · ");
+
+  return `
+    <div class="compact-summary">
+      <div class="compact-summary-head">
+        <div class="compact-summary-copy">
+          <strong>${escapeHtml(summaryTitle)}</strong>
+          <span class="compact-summary-date">${formatDate(item.fecha)}</span>
+        </div>
+        ${createDetailToggleButton(
+          "data-movement-detail-id",
+          item.id,
+          isExpanded,
+          isExpanded ? "Ocultar detalle del movimiento" : "Ver detalle del movimiento"
+        )}
+      </div>
+      <small class="compact-summary-meta">${summaryMeta}</small>
+    </div>
+  `;
+}
+
+function renderMovementDetail(item) {
+  return `
+    <div class="detail-panel">
+      <div class="detail-grid">
+        ${createDetailItem("Caja", escapeHtml(item.medioPago))}
+        ${createDetailItem("Abono", formatCurrency(item.abono))}
+        ${createDetailItem(
+          "Flujo neto",
+          `<span class="${item.flujoNeto >= 0 ? "positive" : "negative"}">${formatCurrency(
+            item.flujoNeto
+          )}</span>`
+        )}
+        ${createDetailItem(
+          "Resumen",
+          item.descripcion
+            ? escapeHtml(item.descripcion)
+            : "<span class='muted'>Sin resumen</span>",
+          "detail-item--wide"
+        )}
+        ${createDetailItem(
+          "Observaciones",
+          item.observaciones
+            ? escapeHtml(item.observaciones)
+            : "<span class='muted'>Sin observaciones</span>",
+          "detail-item--wide"
+        )}
+      </div>
+    </div>
+  `;
+}
+
+function renderPortfolioSummary(item, isExpanded) {
+  const summaryText = item.descripcion || item.categoria || "Cuenta pendiente";
+  const summaryMeta = [summaryText, formatDate(item.fecha), item.linea, item.categoria]
+    .filter(Boolean)
+    .map((value) => escapeHtml(String(value)))
+    .join(" · ");
+
+  return `
+    <div class="compact-summary">
+      <div class="compact-summary-head">
+        <div class="compact-summary-copy">
+          ${
+            item.cliente
+              ? `<button
+                  class="table-link-button compact-client-button"
+                  type="button"
+                  data-collect-client="${escapeHtml(item.cliente)}"
+                  data-collect-id="${item.id}"
+                >${escapeHtml(item.cliente)}</button>`
+              : "<strong>Sin cliente</strong>"
+          }
+        </div>
+        ${createDetailToggleButton(
+          "data-portfolio-detail-id",
+          item.id,
+          isExpanded,
+          isExpanded ? "Ocultar detalle de la cuenta" : "Ver detalle de la cuenta"
+        )}
+      </div>
+      <small class="compact-summary-meta">${summaryMeta}</small>
+    </div>
+  `;
+}
+
+function renderPortfolioDetail(item) {
+  return `
+    <div class="detail-panel">
+      <div class="detail-grid">
+        ${createDetailItem("Total", formatCurrency(item.valorTotal))}
+        ${createDetailItem("Abono", formatCurrency(item.abono))}
+        ${createDetailItem("Caja", escapeHtml(item.medioPago))}
+        ${createDetailItem("Línea", escapeHtml(item.linea))}
+        ${createDetailItem(
+          "Observaciones",
+          item.observaciones
+            ? escapeHtml(item.observaciones)
+            : "<span class='muted'>Sin observaciones</span>",
+          "detail-item--wide"
+        )}
+      </div>
+    </div>
+  `;
+}
+
+function renderCollectionAccountDetail(item) {
+  return `
+    <div class="detail-panel detail-panel--collection">
+      <div class="detail-grid">
+        ${createDetailItem("Fecha", formatDate(item.fecha))}
+        ${createDetailItem("Categoría", escapeHtml(item.categoria))}
+        ${createDetailItem("Línea", escapeHtml(item.linea))}
+        ${createDetailItem("Caja", escapeHtml(item.medioPago))}
+        ${createDetailItem("Total", formatCurrency(item.valorTotal))}
+        ${createDetailItem("Abono", formatCurrency(item.abono))}
+        ${createDetailItem(
+          "Observaciones",
+          item.observaciones
+            ? escapeHtml(item.observaciones)
+            : "<span class='muted'>Sin observaciones</span>",
+          "detail-item--wide"
+        )}
+      </div>
+    </div>
+  `;
 }
 
 function renderMovementsView() {
@@ -1546,7 +1778,7 @@ function renderMovementsView() {
 
     elements.movementTable.innerHTML = `
       <tr>
-        <td colspan="13" class="empty-state">
+        <td colspan="5" class="empty-state">
           ${emptyMessage}
         </td>
       </tr>
@@ -1557,71 +1789,61 @@ function renderMovementsView() {
 
   elements.movementTable.innerHTML = getSortedMovements(filtered)
     .map(
-      (item) => `
-        <tr>
-          ${tableCell("Fecha", formatDate(item.fecha))}
-          ${tableCell("Linea", `<span class="line-pill">${escapeHtml(item.linea)}</span>`)}
-          ${tableCell(
-            "Tipo",
-            `<span class="type-pill ${item.tipo === "Ingreso" ? "type-ingreso" : "type-gasto"}">${escapeHtml(item.tipo)}</span>`
-          )}
-          ${tableCell("Categoria", escapeHtml(item.categoria))}
-          ${tableCell(
-            "Cliente",
-            item.cliente
-              ? escapeHtml(item.cliente)
-              : "<span class='muted'>Sin cliente</span>"
-          )}
-          ${tableCell("Descripcion", escapeHtml(item.descripcion))}
-          ${tableCell(
-            "Estado",
-            `<span class="status-pill ${statusClass(item.estadoPago)}">${escapeHtml(item.estadoPago)}</span>`
-          )}
-          ${tableCell("Caja", escapeHtml(item.medioPago))}
-          ${tableCell("Total", formatCurrency(item.valorTotal))}
-          ${tableCell("Abono", formatCurrency(item.abono))}
-          ${tableCell("Saldo", formatCurrency(item.saldoPendiente))}
-          ${tableCell(
-            "Flujo",
-            formatCurrency(item.flujoNeto),
-            item.flujoNeto >= 0 ? "positive" : "negative"
-          )}
-          ${tableCell(
-            "Acciones",
-            `
-            <div class="row-actions">
-              <button
-                class="table-button icon-button"
-                type="button"
-                data-edit-id="${item.id}"
-                title="Editar movimiento"
-                aria-label="Editar movimiento"
-              >
-                <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-                  <path d="M4 20h4l10-10-4-4L4 16v4Z"></path>
-                  <path d="m12 6 4 4"></path>
-                </svg>
-              </button>
-              <button
-                class="table-button danger icon-button"
-                type="button"
-                data-delete-id="${item.id}"
-                title="Eliminar movimiento"
-                aria-label="Eliminar movimiento"
-              >
-                <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-                  <path d="M4 7h16"></path>
-                  <path d="M10 11v6"></path>
-                  <path d="M14 11v6"></path>
-                  <path d="M6 7l1 12h10l1-12"></path>
-                  <path d="M9 7V4h6v3"></path>
-                </svg>
-              </button>
-            </div>
-          `
-          )}
-        </tr>
-      `
+      (item) => {
+        const isExpanded = expandedMovementDetailIds.has(String(item.id));
+        return `
+          <tr class="accordion-summary-row ${isExpanded ? "is-expanded" : ""}">
+            ${tableCell("Resumen", renderMovementSummary(item, isExpanded), "summary-cell")}
+            ${tableCell(
+              "Estado",
+              `<span class="status-pill ${statusClass(item.estadoPago)}">${escapeHtml(item.estadoPago)}</span>`,
+              "status-cell"
+            )}
+            ${tableCell("Total", formatCurrency(item.valorTotal), "numeric-cell")}
+            ${tableCell("Saldo", formatCurrency(item.saldoPendiente), "numeric-cell")}
+            ${tableCell(
+              "Acciones",
+              `
+              <div class="row-actions row-actions--compact">
+                <button
+                  class="table-button icon-button"
+                  type="button"
+                  data-edit-id="${item.id}"
+                  title="Editar movimiento"
+                  aria-label="Editar movimiento"
+                >
+                  <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                    <path d="M4 20h4l10-10-4-4L4 16v4Z"></path>
+                    <path d="m12 6 4 4"></path>
+                  </svg>
+                </button>
+                <button
+                  class="table-button danger icon-button"
+                  type="button"
+                  data-delete-id="${item.id}"
+                  title="Eliminar movimiento"
+                  aria-label="Eliminar movimiento"
+                >
+                  <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                    <path d="M4 7h16"></path>
+                    <path d="M10 11v6"></path>
+                    <path d="M14 11v6"></path>
+                    <path d="M6 7l1 12h10l1-12"></path>
+                    <path d="M9 7V4h6v3"></path>
+                  </svg>
+                </button>
+              </div>
+            `,
+              "actions-cell"
+            )}
+          </tr>
+          <tr class="accordion-detail-row ${isExpanded ? "is-open" : ""}">
+            <td colspan="5" class="accordion-detail-cell">
+              ${renderMovementDetail(item)}
+            </td>
+          </tr>
+        `;
+      }
     )
     .join("");
   applyStackTableLabels(elements.appShell);
@@ -1858,6 +2080,84 @@ function renderMonthlyView() {
     .join("");
 }
 
+function getCollectionClientKey(clientName = "") {
+  return normalizeSearchValue(clientName) || "__sin_cliente__";
+}
+
+function getPortfolioMovementsByClientKey(
+  clientKey,
+  source = getPortfolioMovements()
+) {
+  return getSortedMovements(
+    (Array.isArray(source) ? source : []).filter(
+      (item) => getCollectionClientKey(item.cliente) === clientKey
+    )
+  );
+}
+
+function getSelectedCollectionClientMovements() {
+  if (!selectedCollectionClientKey) {
+    return [];
+  }
+
+  return getPortfolioMovementsByClientKey(selectedCollectionClientKey);
+}
+
+function getSelectedCollectionClientDisplayName() {
+  const movements = getSelectedCollectionClientMovements();
+  return movements[0]?.cliente || "Cliente sin nombre";
+}
+
+function getSelectedCollectionMovementIdsForClient(clientMovements = []) {
+  const validIds = new Set(
+    clientMovements.map((item) => String(item.id))
+  );
+
+  return selectedCollectionMovementIds.filter((id) => validIds.has(String(id)));
+}
+
+function getSelectedCollectionMovementsForPayment() {
+  const clientMovements = getSelectedCollectionClientMovements();
+  const selectedIds = new Set(
+    getSelectedCollectionMovementIdsForClient(clientMovements)
+  );
+
+  return clientMovements.filter((item) => selectedIds.has(String(item.id)));
+}
+
+function setSelectedCollectionMovementIds(ids) {
+  selectedCollectionMovementIds = [...new Set((ids || []).map((id) => String(id)))];
+}
+
+function selectCollectionClient(clientName, options = {}) {
+  const clientKey = getCollectionClientKey(clientName);
+  const clientMovements = getPortfolioMovementsByClientKey(clientKey);
+
+  if (!clientMovements.length) {
+    selectedCollectionClientKey = null;
+    selectedCollectionMovementId = null;
+    setSelectedCollectionMovementIds([]);
+    syncCollectionSelectionState();
+    return false;
+  }
+
+  const preferredMovementId = String(options.movementId || "");
+  const selectedMovement =
+    clientMovements.find(
+      (item) => String(item.id) === String(preferredMovementId)
+    ) || clientMovements[0];
+
+  selectedCollectionClientKey = clientKey;
+  selectedCollectionMovementId = selectedMovement
+    ? String(selectedMovement.id)
+    : null;
+  setSelectedCollectionMovementIds(
+    selectedMovement ? [String(selectedMovement.id)] : []
+  );
+  syncCollectionSelectionState();
+  return true;
+}
+
 function renderPortfolioView() {
   renderClientPanels();
   renderClientsAdmin();
@@ -1891,7 +2191,7 @@ function renderPortfolioView() {
   if (!portfolio.length) {
     elements.portfolioTable.innerHTML = `
       <tr>
-        <td colspan="12" class="empty-state">
+        <td colspan="4" class="empty-state">
           ${
             portfolioQuery
               ? "No hay cuentas pendientes que coincidan con la busqueda."
@@ -1905,58 +2205,63 @@ function renderPortfolioView() {
   }
 
   elements.portfolioTable.innerHTML = portfolio
-    .map(
-      (item) => `
-        <tr class="${
-          String(item.id) === String(selectedCollectionMovementId)
+    .map((item) => {
+      const isSelectedMovement =
+        String(item.id) === String(selectedCollectionMovementId);
+      const isSelectedClient =
+        getCollectionClientKey(item.cliente) === selectedCollectionClientKey;
+      const isExpanded = expandedPortfolioDetailIds.has(String(item.id));
+
+      return `
+        <tr class="accordion-summary-row ${isExpanded ? "is-expanded" : ""} ${
+          isSelectedMovement
             ? "portfolio-row-selected"
-            : ""
+            : isSelectedClient
+              ? "portfolio-row-client-selected"
+              : ""
         }">
-          ${tableCell("Linea", escapeHtml(item.linea))}
-          ${tableCell("Fecha", formatDate(item.fecha))}
           ${tableCell(
-            "Cliente",
-            item.cliente
-              ? escapeHtml(item.cliente)
-              : "<span class='muted'>Sin cliente</span>"
+            "Resumen",
+            renderPortfolioSummary(item, isExpanded),
+            "summary-cell"
           )}
-          ${tableCell("Categoria", escapeHtml(item.categoria))}
-          ${tableCell("Descripcion", escapeHtml(item.descripcion))}
           ${tableCell(
             "Estado",
-            `<span class="status-pill ${statusClass(item.estadoPago)}">${escapeHtml(item.estadoPago)}</span>`
+            `<span class="status-pill ${statusClass(item.estadoPago)}">${escapeHtml(item.estadoPago)}</span>`,
+            "status-cell"
           )}
-          ${tableCell("Total", formatCurrency(item.valorTotal))}
-          ${tableCell("Abono", formatCurrency(item.abono))}
-          ${tableCell("Saldo", formatCurrency(item.saldoPendiente))}
-          ${tableCell("Caja", escapeHtml(item.medioPago))}
-          ${tableCell(
-            "Observaciones",
-            item.observaciones
-              ? escapeHtml(item.observaciones)
-              : "<span class='muted'>Sin observaciones</span>"
-          )}
+          ${tableCell("Saldo", formatCurrency(item.saldoPendiente), "numeric-cell")}
           ${tableCell(
             "Acciones",
             `
-            ${
-              item.tipo === "Ingreso"
-                ? `
-                  <button
-                    class="table-button"
-                    type="button"
-                    data-collect-id="${item.id}"
-                  >
-                    Cobrar
-                  </button>
-                `
-                : "<span class='muted'>No aplica</span>"
-            }
+            <div class="row-actions row-actions--compact">
+              ${
+                item.tipo === "Ingreso"
+                  ? `
+                    <button
+                      class="table-button"
+                      type="button"
+                      data-collect-id="${item.id}"
+                      data-collect-client="${escapeHtml(item.cliente || "")}"
+                    >
+                      Cobrar
+                    </button>
+                  `
+                  : "<span class='muted'>No aplica</span>"
+              }
+            </div>
           `
+            ,
+            "actions-cell"
           )}
         </tr>
-      `
-    )
+        <tr class="accordion-detail-row ${isExpanded ? "is-open" : ""}">
+          <td colspan="4" class="accordion-detail-cell">
+            ${renderPortfolioDetail(item)}
+          </td>
+        </tr>
+      `;
+    })
     .join("");
   applyStackTableLabels(elements.appShell);
 }
@@ -2053,13 +2358,16 @@ function renderClientsAdmin() {
   }
 
   const clients = Array.isArray(state.clients) ? state.clients : [];
+  const filteredClients = getFilteredClientsAdminList();
+  const query = getClientsSearchQuery();
   const activeClients = clients.filter((item) => item.isActive);
+  const clientsWithBalance = getPortfolioMovements().filter((item) => item.cliente).length;
 
   elements.clientsMetrics.innerHTML = `
     <div class="mini-stat"><span>Total clientes</span><strong>${clients.length}</strong></div>
     <div class="mini-stat"><span>Activos</span><strong>${activeClients.length}</strong></div>
     <div class="mini-stat"><span>Inactivos</span><strong>${Math.max(clients.length - activeClients.length, 0)}</strong></div>
-    <div class="mini-stat"><span>Con saldo pendiente</span><strong>${getPortfolioMovements().filter((item) => item.cliente).length}</strong></div>
+    <div class="mini-stat"><span>${query ? "Coincidencias" : "Con saldo pendiente"}</span><strong>${query ? filteredClients.length : clientsWithBalance}</strong></div>
   `;
 
   if (!clients.length) {
@@ -2073,7 +2381,18 @@ function renderClientsAdmin() {
     return;
   }
 
-  elements.clientsTable.innerHTML = clients
+  if (!filteredClients.length) {
+    elements.clientsTable.innerHTML = `
+      <tr>
+        <td colspan="8" class="empty-state">
+          No encontramos clientes que coincidan con esa búsqueda.
+        </td>
+      </tr>
+    `;
+    return;
+  }
+
+  elements.clientsTable.innerHTML = filteredClients
     .map((client) => {
       const nextActive = client.isActive ? "false" : "true";
       const statusTitle = client.isActive ? "Inactivar cliente" : "Activar cliente";
@@ -2646,6 +2965,20 @@ async function handleUsersTableClick(event) {
 async function handleMovementSubmit(event) {
   event.preventDefault();
 
+  const typedClientQuery = String(elements.clienteSearch?.value || "").trim();
+  const resolvedClient =
+    syncMovementClientSelectionFromSearch({
+      allowClosestMatch: true,
+      allowSingleMatch: true,
+    }) || !typedClientQuery;
+
+  if (!resolvedClient && typedClientQuery) {
+    elements.movementFeedback.textContent =
+      "Selecciona un cliente valido de la lista antes de guardar el movimiento.";
+    elements.clienteSearch?.focus();
+    return;
+  }
+
   const payload = {
     linea: elements.linea.value,
     fecha: elements.fecha.value,
@@ -2661,7 +2994,9 @@ async function handleMovementSubmit(event) {
   };
   payload.estadoPago = derivePaymentStatus(payload.valorTotal, payload.abono);
 
-  const validation = validateMovement(payload);
+  const validation = validateMovement(payload, {
+    isEditing: Boolean(elements.movementId.value),
+  });
   if (!validation.valid) {
     elements.movementFeedback.textContent = validation.message;
     return;
@@ -2912,10 +3247,22 @@ async function handleCollectionSubmit(event) {
 }
 
 async function handleMovementTableClick(event) {
+  const detailButton = event.target.closest("[data-movement-detail-id]");
   const editButton = event.target.closest("[data-edit-id]");
   const deleteButton = event.target.closest("[data-delete-id]");
+  const detailId = detailButton?.dataset.movementDetailId;
   const editId = editButton?.dataset.editId;
   const deleteId = deleteButton?.dataset.deleteId;
+
+  if (detailId) {
+    if (expandedMovementDetailIds.has(String(detailId))) {
+      expandedMovementDetailIds.delete(String(detailId));
+    } else {
+      expandedMovementDetailIds.add(String(detailId));
+    }
+    renderMovementsView();
+    return;
+  }
 
   if (editId) {
     const movement = state.movements.find((item) => String(item.id) === editId);
@@ -5428,21 +5775,32 @@ function getFilteredPortfolioMovements() {
   }
 
   return portfolio.filter((item) =>
-    normalizeSearchValue(
-      [
-        item.linea,
-        item.fecha,
-        item.cliente,
-        item.categoria,
-        item.descripcion,
-        item.estadoPago,
-        item.medioPago,
-        item.observaciones,
-        item.valorTotal,
-        item.abono,
-        item.saldoPendiente,
-      ].join(" ")
-    ).includes(query)
+    {
+      const linkedClient = (state.clients || []).find(
+        (client) =>
+          normalizeSearchValue(client.fullName) ===
+          normalizeSearchValue(item.cliente)
+      );
+
+      return normalizeSearchValue(
+        [
+          item.linea,
+          item.fecha,
+          item.cliente,
+          linkedClient?.documentNumber,
+          linkedClient?.phone,
+          linkedClient?.email,
+          item.categoria,
+          item.descripcion,
+          item.estadoPago,
+          item.medioPago,
+          item.observaciones,
+          item.valorTotal,
+          item.abono,
+          item.saldoPendiente,
+        ].join(" ")
+      ).includes(query);
+    }
   );
 }
 
@@ -5754,13 +6112,9 @@ function getFilteredBoxLedgerEntries() {
   });
 }
 
-function validateMovement(payload) {
+function validateMovement(payload, options = {}) {
   if (!payload.fecha) {
     return { valid: false, message: "Selecciona una fecha para el movimiento." };
-  }
-
-  if (!payload.descripcion) {
-    return { valid: false, message: "La descripcion es obligatoria." };
   }
 
   if (payload.valorTotal <= 0) {
@@ -5782,6 +6136,14 @@ function validateMovement(payload) {
     return {
       valid: false,
       message: "No se pudo calcular el estado de pago del movimiento.",
+    };
+  }
+
+  if (options.isEditing && String(payload.observaciones || "").trim().length < 4) {
+    return {
+      valid: false,
+      message:
+        "Cuando editas un movimiento, escribe una observacion de al menos 4 caracteres.",
     };
   }
 
@@ -5824,6 +6186,20 @@ function validateCollection(payload, movement) {
     return {
       valid: false,
       message: "Selecciona un movimiento pendiente antes de registrar el cobro.",
+    };
+  }
+
+  if (movement.tipo !== "Ingreso") {
+    return {
+      valid: false,
+      message: "Solo puedes registrar cobros sobre ingresos pendientes.",
+    };
+  }
+
+  if (!(Number(movement.saldoPendiente || 0) > 0)) {
+    return {
+      valid: false,
+      message: "La cuenta seleccionada ya no tiene saldo pendiente por cobrar.",
     };
   }
 
@@ -5940,6 +6316,278 @@ function getAvailableSelectValues(select) {
   return [...(select?.options || [])].map((option) => option.value);
 }
 
+function handleMovementClientSearchInput() {
+  syncMovementClientSelectionFromSearch();
+  renderMovementClientSuggestions(elements.clienteSearch?.value || "", {
+    forceOpen: true,
+  });
+}
+
+function handleMovementClientSearchKeydown(event) {
+  if (event.key === "Escape") {
+    hideMovementClientSuggestions();
+    return;
+  }
+
+  if (event.key !== "Enter") {
+    return;
+  }
+
+  const suggestions = getMovementClientMatches(
+    elements.clienteSearch?.value || "",
+    {
+      selectedValue: elements.cliente?.value || "",
+    }
+  );
+
+  if (!suggestions.length) {
+    return;
+  }
+
+  const preferredSuggestion =
+    suggestions.find((item) => !item.isEmpty) || suggestions[0];
+
+  event.preventDefault();
+  applyMovementClientSelection(preferredSuggestion);
+}
+
+function handleMovementClientSuggestionClick(event) {
+  const trigger = event.target.closest("[data-client-option-key]");
+  if (!trigger) {
+    return;
+  }
+
+  const selectedClient = getMovementClientRecords(
+    elements.cliente?.value || ""
+  ).find((item) => item.lookupKey === trigger.dataset.clientOptionKey);
+
+  if (!selectedClient) {
+    return;
+  }
+
+  applyMovementClientSelection(selectedClient);
+}
+
+function renderMovementClientSuggestions(query = "", options = {}) {
+  if (!elements.clienteSuggestions) {
+    return;
+  }
+
+  const rawQuery = String(query || "").trim();
+  const forceOpen = Boolean(options.forceOpen);
+  const matches = getMovementClientMatches(rawQuery, {
+    selectedValue: elements.cliente?.value || "",
+  });
+
+  if (!matches.length && !forceOpen) {
+    elements.clienteSuggestions.innerHTML = "";
+    elements.clienteSuggestions.classList.add("is-hidden");
+    return;
+  }
+
+  if (!matches.length) {
+    elements.clienteSuggestions.innerHTML = `
+      <div class="search-suggestion-empty">
+        No encontramos clientes con ese filtro.
+      </div>
+    `;
+    elements.clienteSuggestions.classList.remove("is-hidden");
+    return;
+  }
+
+  elements.clienteSuggestions.innerHTML = matches
+    .slice(0, 10)
+    .map(
+      (item) => `
+        <button
+          class="search-suggestion-item"
+          type="button"
+          data-client-option-key="${escapeHtml(item.lookupKey)}"
+        >
+          <span class="search-suggestion-title">${escapeHtml(
+            item.isEmpty ? "Sin cliente" : item.fullName || ""
+          )}</span>
+          <span class="search-suggestion-meta">${escapeHtml(
+            buildMovementClientSearchMeta(item)
+          )}</span>
+        </button>
+      `
+    )
+    .join("");
+  elements.clienteSuggestions.classList.remove("is-hidden");
+}
+
+function hideMovementClientSuggestions() {
+  if (!elements.clienteSuggestions) {
+    return;
+  }
+
+  elements.clienteSuggestions.classList.add("is-hidden");
+}
+
+function getMovementClientMatches(query = "", options = {}) {
+  const normalizedQuery = normalizeSearchValue(String(query || "").trim());
+  const records = getMovementClientRecords(options.selectedValue || "");
+
+  if (!normalizedQuery) {
+    return records;
+  }
+
+  return records.filter((item) => {
+    const haystack = normalizeSearchValue(
+      [
+        item.isEmpty ? "sin cliente movimiento sin cliente" : "",
+        item.fullName,
+        item.documentNumber,
+        item.phone,
+        item.email,
+        item.notes,
+        item.isHistorical ? "historico" : "",
+      ]
+        .filter(Boolean)
+        .join(" ")
+    );
+    return haystack.includes(normalizedQuery);
+  });
+}
+
+function getMovementClientRecords(selectedValue = elements.cliente?.value || "") {
+  const currentValue = String(selectedValue || "").trim();
+  const activeClients = (state.clients || []).filter((item) => item.isActive);
+  const records = activeClients.map((item) => ({
+    lookupKey: `client:${String(item.id)}`,
+    fullName: String(item.fullName || "").trim(),
+    documentNumber: String(item.documentNumber || "").trim(),
+    phone: String(item.phone || "").trim(),
+    email: String(item.email || "").trim(),
+    notes: String(item.notes || "").trim(),
+    isEmpty: false,
+    isHistorical: false,
+  }));
+
+  if (currentValue && !records.some((item) => item.fullName === currentValue)) {
+    records.push({
+      lookupKey: `historical:${currentValue}`,
+      fullName: currentValue,
+      documentNumber: "",
+      phone: "",
+      email: "",
+      notes: "",
+      isEmpty: false,
+      isHistorical: true,
+    });
+  }
+
+  return [
+    {
+      lookupKey: "empty",
+      fullName: "",
+      documentNumber: "",
+      phone: "",
+      email: "",
+      notes: "",
+      isEmpty: true,
+      isHistorical: false,
+    },
+    ...records,
+  ];
+}
+
+function buildMovementClientSearchMeta(client) {
+  if (!client) {
+    return "";
+  }
+
+  if (client.isEmpty) {
+    return "Movimiento sin cliente asociado.";
+  }
+
+  return (
+    [
+      client.documentNumber || "Sin documento",
+      client.phone,
+      client.email,
+      client.isHistorical ? "Historico" : "Cliente activo",
+    ]
+      .filter(Boolean)
+      .join(" · ") || "Cliente"
+  );
+}
+
+function applyMovementClientSelection(client) {
+  if (!client || !elements.cliente) {
+    return false;
+  }
+
+  elements.cliente.value = client.isEmpty
+    ? ""
+    : String(client.fullName || "").trim();
+
+  if (elements.clienteSearch) {
+    elements.clienteSearch.value = client.isEmpty
+      ? ""
+      : String(client.fullName || "").trim();
+  }
+
+  hideMovementClientSuggestions();
+  return true;
+}
+
+function syncMovementClientSelectionFromSearch(options = {}) {
+  if (!elements.clienteSearch || !elements.cliente) {
+    return false;
+  }
+
+  const rawValue = elements.clienteSearch.value.trim();
+  if (!rawValue) {
+    elements.cliente.value = "";
+    return true;
+  }
+
+  const selectedOptions = getMovementClientMatches(rawValue, {
+    selectedValue: elements.cliente?.value || "",
+  }).filter((item) => !item.isEmpty);
+  const normalizedQuery = normalizeSearchValue(rawValue);
+
+  let matchedClient =
+    selectedOptions.find(
+      (item) =>
+        normalizeSearchValue(String(item.fullName || "")) === normalizedQuery
+    ) || null;
+
+  if (!matchedClient && options.allowSingleMatch && selectedOptions.length === 1) {
+    matchedClient = selectedOptions[0];
+  }
+
+  if (!matchedClient && options.allowClosestMatch) {
+    matchedClient =
+      selectedOptions.find((item) =>
+        normalizeSearchValue(String(item.fullName || "")).startsWith(
+          normalizedQuery
+        )
+      ) || null;
+  }
+
+  if (!matchedClient) {
+    elements.cliente.value = "";
+    return false;
+  }
+
+  return applyMovementClientSelection(matchedClient);
+}
+
+function syncMovementClientSearchFromSelection() {
+  const currentValue = String(elements.cliente?.value || "").trim();
+  const activeClients = (state.clients || []).filter((item) => item.isActive);
+
+  if (elements.clienteSearch) {
+    elements.clienteSearch.value = currentValue;
+    elements.clienteSearch.placeholder = activeClients.length
+      ? "Escribe para buscar un cliente"
+      : "No hay clientes activos disponibles";
+  }
+}
+
 function fillClientOptions(selectedValue = elements.cliente?.value || "") {
   if (!elements.cliente) {
     return;
@@ -5949,17 +6597,22 @@ function fillClientOptions(selectedValue = elements.cliente?.value || "") {
 
   if (elements.cliente.tagName !== "SELECT") {
     elements.cliente.value = currentValue;
+    syncMovementClientSearchFromSelection();
     return;
   }
 
   const activeClients = (state.clients || []).filter((item) => item.isActive);
-  const activeNames = activeClients.map((item) => item.fullName);
+  const activeNames = [
+    ...new Set(
+      activeClients
+        .map((item) => String(item.fullName || "").trim())
+        .filter(Boolean)
+    ),
+  ];
   const emptyLabel = activeClients.length
     ? "Sin cliente"
     : "Sin cliente · crea clientes en Cartera";
-  const options = [
-    `<option value="">${escapeHtml(emptyLabel)}</option>`,
-  ];
+  const options = [`<option value="">${escapeHtml(emptyLabel)}</option>`];
 
   activeNames.forEach((fullName) => {
     options.push(
@@ -5980,6 +6633,7 @@ function fillClientOptions(selectedValue = elements.cliente?.value || "") {
   if (elements.cliente.value !== currentValue) {
     elements.cliente.value = "";
   }
+  syncMovementClientSearchFromSelection();
 }
 
 function setClientSelection(value) {
@@ -6159,8 +6813,16 @@ function resetCollectionForm(resetFeedback = false) {
   elements.collectionForm.reset();
   elements.collectionMovementId.value = "";
   elements.collectionDate.value = getCurrentIsoDate();
+  if (elements.collectionAmount) {
+    elements.collectionAmount.disabled = false;
+    elements.collectionAmount.dataset.selectionMode = "single";
+  }
   if ((state.lists.mediosPago || []).length) {
     elements.collectionMethod.value = state.lists.mediosPago[0];
+  }
+  const submitButton = elements.collectionForm.querySelector('button[type="submit"]');
+  if (submitButton) {
+    submitButton.textContent = "Registrar cobro";
   }
 
   if (resetFeedback) {
@@ -6189,6 +6851,511 @@ function setCollectionFormEnabled(isEnabled) {
   const submitButton = elements.collectionForm.querySelector('button[type="submit"]');
   if (submitButton) {
     submitButton.disabled = !isEnabled;
+  }
+}
+
+function handlePortfolioTableClick(event) {
+  const detailTrigger = event.target.closest("[data-portfolio-detail-id]");
+  const detailId = detailTrigger?.dataset.portfolioDetailId;
+  if (detailId) {
+    if (expandedPortfolioDetailIds.has(String(detailId))) {
+      expandedPortfolioDetailIds.delete(String(detailId));
+    } else {
+      expandedPortfolioDetailIds.add(String(detailId));
+    }
+    renderPortfolioView();
+    return;
+  }
+
+  const collectTrigger = event.target.closest("[data-collect-id]");
+  const movementId = collectTrigger?.dataset.collectId;
+
+  if (!movementId) {
+    return;
+  }
+
+  const movement = getPortfolioMovements().find(
+    (item) => String(item.id) === String(movementId)
+  );
+  if (!movement) {
+    return;
+  }
+
+  selectCollectionClient(movement.cliente, {
+    movementId,
+  });
+  renderPortfolioView();
+  switchView("cartera", {
+    clientPanel: "cobros",
+  });
+  elements.collectionAmount.focus();
+}
+
+function handleCollectionMovementListClick(event) {
+  const actionTrigger = event.target.closest("[data-collection-selection-action]");
+  const checkboxTrigger = event.target.closest("[data-collection-select-id]");
+  const detailTrigger = event.target.closest("[data-collection-detail-id]");
+  const focusTrigger = event.target.closest("[data-collection-movement-id]");
+
+  if (actionTrigger) {
+    const clientMovements = getSelectedCollectionClientMovements();
+    if (!clientMovements.length) {
+      return;
+    }
+
+    const activeId =
+      String(selectedCollectionMovementId || clientMovements[0]?.id || "");
+
+    if (actionTrigger.dataset.collectionSelectionAction === "all") {
+      setSelectedCollectionMovementIds(clientMovements.map((item) => item.id));
+    } else {
+      setSelectedCollectionMovementIds(activeId ? [activeId] : []);
+    }
+
+    renderCollectionManager();
+    return;
+  }
+
+  if (checkboxTrigger) {
+    const movementId = String(checkboxTrigger.dataset.collectionSelectId || "");
+    if (!movementId) {
+      return;
+    }
+
+    const currentIds = new Set(
+      getSelectedCollectionMovementIdsForClient(getSelectedCollectionClientMovements())
+    );
+    if (checkboxTrigger.checked) {
+      currentIds.add(movementId);
+      selectedCollectionMovementId = movementId;
+    } else {
+      currentIds.delete(movementId);
+      if (!currentIds.size) {
+        currentIds.add(movementId);
+      }
+      if (!currentIds.has(String(selectedCollectionMovementId || ""))) {
+        selectedCollectionMovementId = [...currentIds][0] || movementId;
+      }
+    }
+
+    setSelectedCollectionMovementIds([...currentIds]);
+    renderCollectionManager();
+    return;
+  }
+
+  const detailId = detailTrigger?.dataset.collectionDetailId;
+  if (detailId) {
+    if (expandedCollectionAccountIds.has(String(detailId))) {
+      expandedCollectionAccountIds.delete(String(detailId));
+    } else {
+      expandedCollectionAccountIds.add(String(detailId));
+    }
+    renderCollectionManager();
+    return;
+  }
+
+  const movementId = focusTrigger?.dataset.collectionMovementId;
+  if (!movementId) {
+    return;
+  }
+
+  const selectedMovement = getSelectedCollectionClientMovements().find(
+    (item) => String(item.id) === String(movementId)
+  );
+
+  if (!selectedMovement) {
+    return;
+  }
+
+  selectedCollectionMovementId = String(selectedMovement.id);
+  const currentIds = new Set(
+    getSelectedCollectionMovementIdsForClient(getSelectedCollectionClientMovements())
+  );
+  currentIds.add(String(selectedMovement.id));
+  setSelectedCollectionMovementIds([...currentIds]);
+  renderCollectionManager();
+  elements.collectionAmount.focus();
+}
+
+function getSelectedCollectionMovement() {
+  if (!selectedCollectionMovementId) {
+    return null;
+  }
+
+  return (
+    getSelectedCollectionClientMovements().find(
+      (item) => String(item.id) === String(selectedCollectionMovementId)
+    ) ||
+    getPortfolioMovements().find(
+      (item) => String(item.id) === String(selectedCollectionMovementId)
+    ) ||
+    null
+  );
+}
+
+function syncCollectionSelectionState() {
+  const clientMovements = getSelectedCollectionClientMovements();
+
+  if (!clientMovements.length) {
+    selectedCollectionMovementId = null;
+    selectedCollectionClientKey = null;
+    setSelectedCollectionMovementIds([]);
+    resetCollectionForm(false);
+    setCollectionFormEnabled(false);
+    return;
+  }
+
+  const selectedMovement =
+    clientMovements.find(
+      (item) => String(item.id) === String(selectedCollectionMovementId)
+    ) || clientMovements[0];
+
+  selectedCollectionClientKey = getCollectionClientKey(selectedMovement.cliente);
+  selectedCollectionMovementId = String(selectedMovement.id);
+  const validSelectedIds = getSelectedCollectionMovementIdsForClient(clientMovements);
+  setSelectedCollectionMovementIds(
+    validSelectedIds.length ? validSelectedIds : [String(selectedMovement.id)]
+  );
+  elements.collectionMovementId.value = String(selectedMovement.id);
+  elements.collectionDate.value = getCurrentIsoDate();
+  elements.collectionAmount.value = "";
+  elements.collectionNotes.value = "";
+  if ((state.lists.mediosPago || []).length) {
+    elements.collectionMethod.value = state.lists.mediosPago[0];
+  }
+  setCollectionFormEnabled(true);
+}
+
+function renderCollectionManager() {
+  if (!elements.collectionForm) {
+    return;
+  }
+
+  const clientMovements = getSelectedCollectionClientMovements();
+  const selectedMovement = getSelectedCollectionMovement();
+  const selectedPaymentMovements = getSelectedCollectionMovementsForPayment();
+  const collectionHistory = selectedMovement
+    ? getCollectionHistory(selectedMovement.id)
+    : [];
+
+  if (!clientMovements.length || !selectedMovement) {
+    elements.collectionMovementId.value = "";
+    elements.collectionContext.innerHTML = `
+      <strong>Sin selección activa</strong>
+      <small>Elige un cliente desde la cartera para ver todas sus cuentas pendientes y registrar el cobro.</small>
+    `;
+    elements.collectionBalance.innerHTML = `
+      <div class="empty-state collection-empty">
+        Aquí verás el saldo pendiente total del cliente, sus cuentas abiertas y la cuenta que selecciones para cobrar.
+      </div>
+    `;
+    if (elements.collectionMovementList) {
+      elements.collectionMovementList.innerHTML = `
+        <div class="empty-state collection-empty">
+          Aquí aparecerán todas las transacciones pendientes del cliente seleccionado.
+        </div>
+      `;
+    }
+    elements.collectionHistory.innerHTML = `
+      <div class="empty-state">
+        Aquí aparecerán los cobros de la cuenta que selecciones.
+      </div>
+    `;
+    elements.collectionFeedback.textContent =
+      "El cobro actualiza el saldo pendiente y guarda el historial del pago.";
+    setCollectionFormEnabled(false);
+    return;
+  }
+
+  const clientDisplayName = getSelectedCollectionClientDisplayName();
+  const totalPending = sum(clientMovements, "saldoPendiente");
+  const totalInvoiced = sum(clientMovements, "valorTotal");
+  const totalCollected = sum(clientMovements, "abono");
+  const selectedPendingTotal = sum(selectedPaymentMovements, "saldoPendiente");
+  const isBatchSelection = selectedPaymentMovements.length > 1;
+
+  elements.collectionMovementId.value = String(selectedMovement.id);
+  elements.collectionContext.innerHTML = `
+    <strong>${escapeHtml(clientDisplayName)}</strong>
+    <small>${clientMovements.length} cuentas pendientes · ${selectedPaymentMovements.length} seleccionadas · cartera abierta ${formatCurrency(
+      totalPending
+    )}</small>
+  `;
+  elements.collectionBalance.innerHTML = `
+    <div class="mini-stats compact-mini-stats">
+      <div class="mini-stat"><span>Total facturado</span><strong>${formatCurrency(
+        totalInvoiced
+      )}</strong></div>
+      <div class="mini-stat"><span>Cobrado acumulado</span><strong>${formatCurrency(
+        totalCollected
+      )}</strong></div>
+      <div class="mini-stat"><span>Saldo pendiente</span><strong>${formatCurrency(
+        totalPending
+      )}</strong></div>
+      <div class="mini-stat"><span>Seleccionado para cobrar</span><strong>${formatCurrency(
+        selectedPendingTotal
+      )}</strong></div>
+      <div class="mini-stat"><span>Estado actual</span><strong>${escapeHtml(
+        selectedMovement.estadoPago
+      )}</strong></div>
+    </div>
+  `;
+  if (elements.collectionMovementList) {
+    const selectedIdSet = new Set(
+      selectedPaymentMovements.map((item) => String(item.id))
+    );
+    elements.collectionMovementList.innerHTML = `
+      <div class="collection-selection-tools">
+        <button
+          class="ghost-button"
+          type="button"
+          data-collection-selection-action="all"
+        >
+          Seleccionar todas
+        </button>
+        <button
+          class="ghost-button"
+          type="button"
+          data-collection-selection-action="active"
+        >
+          Dejar solo la activa
+        </button>
+        <span>${selectedPaymentMovements.length} cuenta(s) marcadas</span>
+      </div>
+      ${clientMovements
+        .map(
+          (item) => {
+            const isActive = String(item.id) === String(selectedMovement.id);
+            const isChecked = selectedIdSet.has(String(item.id));
+            const isExpanded = expandedCollectionAccountIds.has(String(item.id));
+            return `
+            <article
+              class="collection-account-item ${
+                isActive ? "active" : ""
+              }"
+            >
+              <div class="collection-account-summary">
+                <label class="collection-account-check" title="Incluir en este cobro">
+                  <input
+                    type="checkbox"
+                    data-collection-select-id="${item.id}"
+                    ${isChecked ? "checked" : ""}
+                  />
+                </label>
+                <button
+                  class="collection-account-focus"
+                  type="button"
+                  data-collection-movement-id="${item.id}"
+                >
+                  <strong>${escapeHtml(
+                    item.descripcion || item.categoria || "Cuenta pendiente"
+                  )}</strong>
+                  <span>${formatDate(item.fecha)} · ${escapeHtml(
+                    item.categoria
+                  )} · ${escapeHtml(item.linea)} · ${escapeHtml(
+                    item.medioPago
+                  )}</span>
+                </button>
+                <span class="status-pill ${statusClass(item.estadoPago)} collection-account-status">${escapeHtml(
+                  item.estadoPago
+                )}</span>
+                <strong class="collection-account-amount">${formatCurrency(
+                  item.saldoPendiente
+                )}</strong>
+                ${createDetailToggleButton(
+                  "data-collection-detail-id",
+                  item.id,
+                  isExpanded,
+                  isExpanded ? "Ocultar detalle de la cuenta" : "Ver detalle de la cuenta"
+                )}
+              </div>
+              <div class="collection-account-detail ${isExpanded ? "is-open" : ""}">
+                ${renderCollectionAccountDetail(item)}
+              </div>
+            </article>
+          `;
+          }
+        )
+        .join("")}
+    `;
+  }
+  elements.collectionHistory.innerHTML = collectionHistory.length
+    ? collectionHistory
+        .map(
+          (item) => `
+            <article class="list-item">
+              <strong>${formatCurrency(item.amount)} · ${escapeHtml(
+                item.paymentMethod
+              )}</strong>
+              <small>${formatDate(item.collectionDate)} · ${escapeHtml(
+                item.registeredBy || "Sistema"
+              )}</small>
+              <small>${
+                item.notes
+                  ? escapeHtml(item.notes)
+                  : "<span class='muted'>Sin observaciones</span>"
+              }</small>
+            </article>
+          `
+        )
+        .join("")
+    : `
+      <div class="empty-state">
+        Esta cuenta todavía no tiene cobros registrados.
+      </div>
+    `;
+  if (elements.collectionAmount) {
+    if (isBatchSelection) {
+      elements.collectionAmount.value = String(
+        Number(selectedPendingTotal || 0).toFixed(2)
+      );
+      elements.collectionAmount.disabled = true;
+      elements.collectionAmount.dataset.selectionMode = "batch";
+    } else {
+      if (elements.collectionAmount.dataset.selectionMode === "batch") {
+        elements.collectionAmount.value = "";
+      }
+      elements.collectionAmount.disabled = false;
+      elements.collectionAmount.dataset.selectionMode = "single";
+    }
+  }
+  const submitButton = elements.collectionForm.querySelector('button[type="submit"]');
+  if (submitButton) {
+    submitButton.textContent = isBatchSelection
+      ? `Registrar cobro de ${selectedPaymentMovements.length} cuentas`
+      : "Registrar cobro";
+  }
+  elements.collectionFeedback.textContent = isBatchSelection
+    ? `Se registrará el pago completo de ${selectedPaymentMovements.length} cuentas por ${formatCurrency(
+        selectedPendingTotal
+      )} para ${clientDisplayName}.`
+    : `Registrarás un cobro sobre un saldo pendiente de ${formatCurrency(
+        selectedMovement.saldoPendiente
+      )} para ${clientDisplayName}.`;
+  setCollectionFormEnabled(true);
+  if (isBatchSelection && elements.collectionAmount) {
+    elements.collectionAmount.disabled = true;
+  }
+}
+
+function resetCollectionSelection() {
+  selectedCollectionMovementId = null;
+  selectedCollectionClientKey = null;
+  setSelectedCollectionMovementIds([]);
+  resetCollectionForm(true);
+  renderPortfolioView();
+}
+
+async function handleCollectionSubmit(event) {
+  event.preventDefault();
+
+  const selectedMovements = getSelectedCollectionMovementsForPayment();
+  const selectedMovement = getSelectedCollectionMovement();
+  const isBatchSelection = selectedMovements.length > 1;
+  const clientName = String(selectedMovement?.cliente || "");
+  const clientDisplayName = getSelectedCollectionClientDisplayName();
+
+  if (!selectedMovements.length || !selectedMovement) {
+    elements.collectionFeedback.textContent =
+      "Selecciona al menos una cuenta pendiente del cliente antes de registrar el cobro.";
+    return;
+  }
+
+  if (isBatchSelection) {
+    const basePayload = {
+      collectionDate: elements.collectionDate.value,
+      paymentMethod: elements.collectionMethod.value,
+      notes: elements.collectionNotes.value.trim(),
+    };
+
+    if (!basePayload.collectionDate) {
+      elements.collectionFeedback.textContent =
+        "Selecciona la fecha del cobro para registrar el pago masivo.";
+      return;
+    }
+
+    if (!basePayload.paymentMethod) {
+      elements.collectionFeedback.textContent =
+        "Selecciona la caja o medio de pago que recibió el cobro.";
+      return;
+    }
+
+    let processed = 0;
+
+    try {
+      for (const movement of selectedMovements) {
+        const payload = {
+          ...basePayload,
+          amount: Number(movement.saldoPendiente || 0),
+        };
+        const validation = validateCollection(payload, movement);
+        if (!validation.valid) {
+          throw new Error(validation.message);
+        }
+
+        await apiRequest(`/api/movements/${movement.id}/collections`, {
+          method: "POST",
+          body: JSON.stringify(payload),
+        });
+        processed += 1;
+      }
+
+      await loadBootstrap();
+      selectCollectionClient(clientName);
+      switchView("cartera", {
+        clientPanel: "cobros",
+      });
+      elements.collectionFeedback.textContent = `Se registró el cobro completo de ${processed} cuenta(s) para ${clientDisplayName}.`;
+    } catch (error) {
+      await loadBootstrap();
+      selectCollectionClient(clientName);
+      switchView("cartera", {
+        clientPanel: "cobros",
+      });
+      elements.collectionFeedback.textContent = processed
+        ? `Se registraron ${processed} cobro(s) antes de encontrar un problema: ${error.message}`
+        : error.message;
+    }
+    return;
+  }
+
+  const payload = {
+    collectionDate: elements.collectionDate.value,
+    amount: Number(elements.collectionAmount.value || 0),
+    paymentMethod: elements.collectionMethod.value,
+    notes: elements.collectionNotes.value.trim(),
+  };
+
+  const movementId = Number(elements.collectionMovementId.value || 0);
+
+  if (!movementId) {
+    elements.collectionFeedback.textContent =
+      "Selecciona primero una cuenta pendiente para registrar el cobro.";
+    return;
+  }
+
+  const validation = validateCollection(payload, selectedMovement);
+  if (!validation.valid) {
+    elements.collectionFeedback.textContent = validation.message;
+    return;
+  }
+
+  try {
+    await apiRequest(`/api/movements/${movementId}/collections`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+
+    await loadBootstrap();
+    selectCollectionClient(clientName, {
+      movementId,
+    });
+    switchView("cartera", {
+      clientPanel: "cobros",
+    });
+    elements.collectionFeedback.textContent = `Cobro registrado correctamente para ${clientDisplayName}.`;
+  } catch (error) {
+    elements.collectionFeedback.textContent = error.message;
   }
 }
 
@@ -6243,6 +7410,34 @@ function formatCurrency(value) {
     minimumFractionDigits: hasDecimals ? 2 : 0,
     maximumFractionDigits: 2,
   }).format(numericValue);
+}
+
+function getClientsSearchQuery() {
+  return normalizeSearchValue(elements.clientsQuery?.value || "");
+}
+
+function getFilteredClientsAdminList() {
+  const clients = Array.isArray(state.clients) ? state.clients : [];
+  const query = getClientsSearchQuery();
+
+  if (!query) {
+    return clients;
+  }
+
+  return clients.filter((client) =>
+    normalizeSearchValue(
+      [
+        client.fullName,
+        client.documentNumber,
+        client.phone,
+        client.email,
+        client.notes,
+        client.isActive ? "activo" : "inactivo",
+      ]
+        .filter(Boolean)
+        .join(" ")
+    ).includes(query)
+  );
 }
 
 function getPortfolioSearchQuery() {
