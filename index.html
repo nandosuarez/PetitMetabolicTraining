@@ -156,6 +156,7 @@
           <button class="nav-link" data-view="diario">Informe diario</button>
           <button class="nav-link" data-view="semanal">Informe semanal</button>
           <button class="nav-link" data-view="mensual">Resumen mensual</button>
+          <button class="nav-link" data-view="contabilidad">Contabilidad</button>
           <button class="nav-link" data-view="cartera">Clientes</button>
           <button class="nav-link" data-view="programacion">Programación</button>
           <button class="nav-link" data-view="listas">Listas maestras</button>
@@ -441,15 +442,23 @@
             </section>
           </div>
 
-          <section class="panel">
-            <div class="panel-head">
-              <div>
-                <p class="section-kicker">Libro operativo</p>
-                <h3>Movimientos registrados</h3>
+            <section class="panel">
+              <div class="panel-head">
+                <div>
+                  <p class="section-kicker">Libro operativo</p>
+                  <h3>Movimientos registrados</h3>
+                </div>
+                <label class="inline-label portfolio-search">
+                  Buscar en registros
+                  <input
+                    id="movement-records-query"
+                    type="search"
+                    placeholder="Cliente, alias, categoría, descripción..."
+                  />
+                </label>
               </div>
-            </div>
-            <div class="table-wrap adaptive-table-wrap">
-              <table class="stack-table adaptive-stack-table">
+              <div class="table-wrap adaptive-table-wrap">
+                <table class="stack-table adaptive-stack-table">
                 <thead>
                   <tr>
                     <th>Resumen</th>
@@ -611,6 +620,178 @@
               </table>
             </div>
           </section>
+        </section>
+
+        <section id="contabilidad-view" class="view">
+          <section class="panel">
+            <div class="panel-head">
+              <div>
+                <p class="section-kicker">Revisión contable</p>
+                <h3>Ventas, compras y gastos del día</h3>
+              </div>
+            </div>
+
+            <div class="form-grid accounting-filter-grid">
+              <label>
+                Fecha contable
+                <input id="accounting-date" type="date" />
+              </label>
+
+              <label>
+                Línea
+                <select id="accounting-line">
+                  <option value="">Todas</option>
+                  <option value="Gimnasio">Gimnasio</option>
+                  <option value="Restaurante">Restaurante</option>
+                </select>
+              </label>
+
+              <label class="span-2">
+                Buscar movimiento
+                <input
+                  id="accounting-query"
+                  type="search"
+                  placeholder="Categoría, cliente, descripción o caja"
+                  autocomplete="off"
+                />
+              </label>
+            </div>
+
+            <div id="accounting-summary" class="stats-grid"></div>
+
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Fecha</th>
+                    <th>Línea</th>
+                    <th>Tipo</th>
+                    <th>Categoría</th>
+                    <th>Cliente</th>
+                    <th>Descripción</th>
+                    <th>Caja</th>
+                    <th>Total</th>
+                    <th>Abono</th>
+                    <th>Saldo</th>
+                  </tr>
+                </thead>
+                <tbody id="accounting-table"></tbody>
+              </table>
+            </div>
+          </section>
+
+          <div class="content-grid two-up align-start">
+            <section class="panel">
+              <div class="panel-head">
+                <div>
+                  <p class="section-kicker">Soportes</p>
+                  <h3>Subir documentos contables</h3>
+                </div>
+              </div>
+
+              <form id="accounting-document-form" class="form-grid">
+                <label>
+                  Fecha
+                  <input id="accounting-document-date" type="date" required />
+                </label>
+
+                <label>
+                  Línea
+                  <select id="accounting-document-line" required>
+                    <option value="Gimnasio">Gimnasio</option>
+                    <option value="Restaurante">Restaurante</option>
+                    <option value="General">General</option>
+                  </select>
+                </label>
+
+                <label>
+                  Área
+                  <select id="accounting-document-area" required>
+                    <option value="Venta">Venta</option>
+                    <option value="Compra">Compra</option>
+                    <option value="Gasto">Gasto</option>
+                    <option value="Impuesto">Impuesto</option>
+                    <option value="Nomina">Nómina</option>
+                    <option value="Soporte">Soporte</option>
+                    <option value="Otro">Otro</option>
+                  </select>
+                </label>
+
+                <label>
+                  Tipo de documento
+                  <input
+                    id="accounting-document-type"
+                    type="text"
+                    placeholder="Ej. Factura electrónica"
+                    required
+                  />
+                </label>
+
+                <label class="span-2">
+                  Referencia
+                  <input
+                    id="accounting-document-reference"
+                    type="text"
+                    placeholder="Ej. Factura 000123 o compra proveedor X"
+                  />
+                </label>
+
+                <label class="span-2">
+                  Archivo
+                  <input
+                    id="accounting-document-file"
+                    type="file"
+                    accept=".pdf,.png,.jpg,.jpeg,.webp,.heic,.doc,.docx,.xls,.xlsx"
+                    required
+                  />
+                </label>
+
+                <label class="span-2">
+                  Observaciones
+                  <textarea
+                    id="accounting-document-notes"
+                    rows="3"
+                    placeholder="Notas para el contador o contexto del soporte"
+                  ></textarea>
+                </label>
+
+                <div id="accounting-document-feedback" class="form-note span-2">
+                  Aquí puedes adjuntar facturas, recibos, comprobantes, cuentas de cobro y demás soportes contables.
+                </div>
+
+                <div class="form-actions span-2">
+                  <button class="primary-button" type="submit">Guardar soporte</button>
+                </div>
+              </form>
+            </section>
+
+            <section class="panel">
+              <div class="panel-head">
+                <div>
+                  <p class="section-kicker">Historial</p>
+                  <h3>Documentos cargados</h3>
+                </div>
+              </div>
+
+              <div id="accounting-documents-summary" class="mini-stats"></div>
+
+              <div class="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Fecha</th>
+                      <th>Línea</th>
+                      <th>Área</th>
+                      <th>Documento</th>
+                      <th>Archivo</th>
+                      <th>Subido por</th>
+                    </tr>
+                  </thead>
+                  <tbody id="accounting-documents-table"></tbody>
+                </table>
+              </div>
+            </section>
+          </div>
         </section>
 
         <section id="cajas-view" class="view">
@@ -833,6 +1014,16 @@
                   </label>
 
                   <label>
+                    Alias
+                    <input
+                      id="client-alias"
+                      name="alias"
+                      type="text"
+                      placeholder="Apodo o nombre corto"
+                    />
+                  </label>
+
+                  <label>
                     Documento
                     <input
                       id="client-document"
@@ -913,7 +1104,7 @@
                   <input
                     id="clients-query"
                     type="search"
-                    placeholder="Nombre, documento, teléfono o correo"
+                    placeholder="Nombre, alias, documento, teléfono o correo"
                     autocomplete="off"
                   />
                 </label>
@@ -924,6 +1115,7 @@
                   <thead>
                     <tr>
                       <th>Nombre</th>
+                      <th>Alias</th>
                       <th>Documento</th>
                       <th>Teléfono</th>
                       <th>Correo</th>
@@ -1089,6 +1281,13 @@
                   data-programming-panel="clases"
                 >
                   Clases
+                </button>
+                <button
+                  class="client-menu-button"
+                  type="button"
+                  data-programming-panel="atletas"
+                >
+                  Atletas
                 </button>
                 <button
                   class="client-menu-button"
@@ -1417,6 +1616,266 @@
                 </table>
               </div>
             </section>
+
+            <section class="panel">
+              <div class="panel-head">
+                <div>
+                  <p class="section-kicker">Seguimiento</p>
+                  <h3>Atletas inscritos y resultados</h3>
+                </div>
+              </div>
+
+              <div id="program-roster-class-summary" class="collection-context">
+                Selecciona una clase del tablero semanal para inscribir atletas y guardar peso, tiempo y anotaciones por ejercicio.
+              </div>
+
+              <div class="content-grid two-up align-start">
+                <section class="panel panel-nested">
+                  <div class="panel-head">
+                    <div>
+                      <p class="section-kicker">Inscripción</p>
+                      <h3>Atletas de la clase</h3>
+                    </div>
+                  </div>
+
+                  <div class="form-grid">
+                    <input id="program-athlete-id" type="hidden" />
+
+                    <label class="search-field span-2">
+                      Buscar atleta
+                      <input
+                        id="program-athlete-search"
+                        type="search"
+                        placeholder="Selecciona una clase para habilitar la inscripción"
+                        autocomplete="off"
+                      />
+                      <div
+                        id="program-athlete-suggestions"
+                        class="search-suggestions is-hidden"
+                        role="listbox"
+                        aria-label="Sugerencias de atletas"
+                      ></div>
+                    </label>
+
+                    <div id="program-athlete-feedback" class="form-note span-2">
+                      Inscribe aquí a los atletas que asistirán a esta clase.
+                    </div>
+
+                    <div class="form-actions span-2">
+                      <button
+                        id="program-athlete-add"
+                        class="primary-button"
+                        type="button"
+                      >
+                        Inscribir atleta
+                      </button>
+                    </div>
+                  </div>
+
+                  <div id="program-athlete-summary" class="mini-stats"></div>
+
+                  <div id="program-athlete-list" class="stack-list">
+                    <div class="empty-state">
+                      Aún no has seleccionado una clase.
+                    </div>
+                  </div>
+                </section>
+
+                <section class="panel panel-nested">
+                  <div class="panel-head">
+                    <div>
+                      <p class="section-kicker">Marcas</p>
+                      <h3 id="program-athlete-results-title">Resultados del atleta</h3>
+                    </div>
+                  </div>
+
+                  <form id="program-athlete-results-form" class="form-grid">
+                    <div id="program-athlete-results" class="stack-list span-2">
+                      <div class="empty-state">
+                        Cuando selecciones un atleta, aquí verás los ejercicios de la clase para guardar sus marcas.
+                      </div>
+                    </div>
+
+                    <label class="span-2">
+                      Anotaciones generales del atleta
+                      <textarea
+                        id="program-athlete-general-notes"
+                        rows="3"
+                        placeholder="Sensaciones, ajustes, lesiones, score global o comentarios de la sesión"
+                      ></textarea>
+                    </label>
+
+                    <div id="program-athlete-results-feedback" class="form-note span-2">
+                      Selecciona una clase y un atleta para registrar peso, tiempo y anotaciones.
+                    </div>
+
+                    <div class="form-actions span-2">
+                      <button class="primary-button" type="submit">
+                        Guardar resultados del atleta
+                      </button>
+                    </div>
+                  </form>
+                </section>
+              </div>
+            </section>
+          </div>
+
+          <div id="programming-panel-atletas" class="programming-panel is-hidden">
+            <div class="content-grid two-up align-start">
+              <section class="panel">
+                <div class="panel-head">
+                  <div>
+                    <p class="section-kicker">Base deportiva</p>
+                    <h3 id="program-athlete-form-title">Crear atleta</h3>
+                  </div>
+                </div>
+
+                <form id="program-athlete-form" class="form-grid">
+                  <input id="program-athlete-form-id" type="hidden" />
+
+                  <label class="span-2">
+                    Nombre completo
+                    <input
+                      id="program-athlete-full-name"
+                      type="text"
+                      placeholder="Nombre del atleta"
+                      required
+                    />
+                  </label>
+
+                  <label>
+                    Documento
+                    <input
+                      id="program-athlete-document"
+                      type="text"
+                      placeholder="Cédula o documento"
+                    />
+                  </label>
+
+                  <label>
+                    Fecha de nacimiento
+                    <input id="program-athlete-birth-date" type="date" />
+                  </label>
+
+                  <label>
+                    Teléfono
+                    <input
+                      id="program-athlete-phone"
+                      type="text"
+                      placeholder="Celular o WhatsApp"
+                    />
+                  </label>
+
+                  <label>
+                    Correo
+                    <input
+                      id="program-athlete-email"
+                      type="email"
+                      placeholder="atleta@correo.com"
+                    />
+                  </label>
+
+                  <label>
+                    Contacto de emergencia
+                    <input
+                      id="program-athlete-emergency-name"
+                      type="text"
+                      placeholder="Nombre del contacto"
+                    />
+                  </label>
+
+                  <label>
+                    Teléfono de emergencia
+                    <input
+                      id="program-athlete-emergency-phone"
+                      type="text"
+                      placeholder="Número de emergencia"
+                    />
+                  </label>
+
+                  <label class="span-2">
+                    Notas médicas / restricciones
+                    <textarea
+                      id="program-athlete-medical-notes"
+                      rows="3"
+                      placeholder="Lesiones, observaciones médicas, limitaciones o alertas"
+                    ></textarea>
+                  </label>
+
+                  <label class="span-2">
+                    Notas del atleta
+                    <textarea
+                      id="program-athlete-notes"
+                      rows="3"
+                      placeholder="Objetivo, nivel, preferencias o datos relevantes del proceso"
+                    ></textarea>
+                  </label>
+
+                  <div id="program-athlete-form-feedback" class="form-note span-2">
+                    Aquí puedes construir una base independiente de atletas para el módulo de programación.
+                  </div>
+
+                  <div class="form-actions span-2">
+                    <button class="primary-button" type="submit">
+                      Guardar atleta
+                    </button>
+                    <button
+                      id="cancel-program-athlete-edit"
+                      class="ghost-button"
+                      type="button"
+                    >
+                      Cancelar edición
+                    </button>
+                  </div>
+                </form>
+              </section>
+
+              <section class="panel">
+                <div class="panel-head">
+                  <div>
+                    <p class="section-kicker">Resumen</p>
+                    <h3>Estado de atletas</h3>
+                  </div>
+                </div>
+                <div id="program-athletes-metrics" class="mini-stats"></div>
+              </section>
+            </div>
+
+            <section class="panel">
+              <div class="panel-head">
+                <div>
+                  <p class="section-kicker">Consulta</p>
+                  <h3>Atletas registrados</h3>
+                </div>
+                <label class="inline-label portfolio-search">
+                  Buscar atletas
+                  <input
+                    id="program-athletes-query"
+                    type="search"
+                    placeholder="Nombre, documento, teléfono, correo o restricción"
+                    autocomplete="off"
+                  />
+                </label>
+              </div>
+
+              <div class="table-wrap">
+                <table class="stack-table">
+                  <thead>
+                    <tr>
+                      <th>Nombre</th>
+                      <th>Documento</th>
+                      <th>Contacto</th>
+                      <th>Emergencia</th>
+                      <th>Estado</th>
+                      <th>Notas médicas</th>
+                      <th>Notas</th>
+                      <th>Acciones</th>
+                    </tr>
+                  </thead>
+                  <tbody id="program-athletes-table"></tbody>
+                </table>
+              </div>
+            </section>
           </div>
 
           <div id="programming-panel-biblioteca" class="programming-panel is-hidden">
@@ -1682,6 +2141,7 @@
                   <select id="user-role" name="role" required>
                     <option value="administrador">Administrador</option>
                     <option value="asistente_operativo">Asistente operativo</option>
+                    <option value="contador">Contador</option>
                   </select>
                 </label>
 

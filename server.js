@@ -68,7 +68,7 @@ const programmingExerciseFamilies = new Set([
   "hyrox_oficial",
 ]);
 
-app.use(express.json({ limit: "10mb" }));
+app.use(express.json({ limit: "25mb" }));
 app.use(express.static(rootDir));
 
 app.get("/api/health", asyncHandler(async (_req, res) => {
@@ -325,7 +325,7 @@ app.get("/api/clients", asyncHandler(async (_req, res) => {
   });
 }));
 
-app.post("/api/clients", asyncHandler(async (req, res) => {
+app.post("/api/clients", requireOperationalWriteAccess, asyncHandler(async (req, res) => {
   const payload = normalizeClientPayload(req.body);
   validateClientPayload(payload);
 
@@ -340,17 +340,19 @@ app.post("/api/clients", asyncHandler(async (req, res) => {
     `
       insert into clients (
         full_name,
+        alias,
         document_number,
         phone,
         email,
         notes,
         is_active
       )
-      values ($1, $2, $3, $4, $5, true)
+      values ($1, $2, $3, $4, $5, $6, true)
       returning *
     `,
     [
       payload.fullName,
+      payload.alias,
       payload.documentNumber,
       payload.phone,
       payload.email,
@@ -361,7 +363,7 @@ app.post("/api/clients", asyncHandler(async (req, res) => {
   res.status(201).json(mapClientRow(result.rows[0]));
 }));
 
-app.put("/api/clients/:id", asyncHandler(async (req, res) => {
+app.put("/api/clients/:id", requireOperationalWriteAccess, asyncHandler(async (req, res) => {
   const clientId = Number(req.params.id);
   const payload = normalizeClientPayload(req.body);
   validateClientPayload(payload);
@@ -403,10 +405,11 @@ app.put("/api/clients/:id", asyncHandler(async (req, res) => {
           update clients
           set
             full_name = $2,
-            document_number = $3,
-            phone = $4,
-            email = $5,
-            notes = $6,
+            alias = $3,
+            document_number = $4,
+            phone = $5,
+            email = $6,
+            notes = $7,
             updated_at = now()
           where id = $1
           returning *
@@ -414,6 +417,7 @@ app.put("/api/clients/:id", asyncHandler(async (req, res) => {
         [
           clientId,
           payload.fullName,
+          payload.alias,
           payload.documentNumber,
           payload.phone,
           payload.email,
@@ -461,6 +465,134 @@ app.patch(
     }
 
     res.json(mapClientRow(result.rows[0]));
+  })
+);
+
+app.post(
+  "/api/programming/athletes",
+  requireProgrammingAccess,
+  asyncHandler(async (req, res) => {
+    const payload = normalizeProgrammingAthletePayload(req.body);
+    validateProgrammingAthletePayload(payload);
+    await assertProgrammingAthleteIdentityAvailable(payload);
+
+    const result = await query(
+      `
+        insert into athletes (
+          full_name,
+          document_number,
+          birth_date,
+          phone,
+          email,
+          emergency_contact_name,
+          emergency_contact_phone,
+          medical_notes,
+          athlete_notes,
+          is_active
+        )
+        values ($1, $2, $3, $4, $5, $6, $7, $8, $9, true)
+        returning *
+      `,
+      [
+        payload.fullName,
+        payload.documentNumber,
+        payload.birthDate || null,
+        payload.phone,
+        payload.email,
+        payload.emergencyContactName,
+        payload.emergencyContactPhone,
+        payload.medicalNotes,
+        payload.athleteNotes,
+      ]
+    );
+
+    res.status(201).json(mapProgrammingAthleteRow(result.rows[0]));
+  })
+);
+
+app.put(
+  "/api/programming/athletes/:id",
+  requireProgrammingAccess,
+  asyncHandler(async (req, res) => {
+    const athleteId = Number(req.params.id);
+    const payload = normalizeProgrammingAthletePayload(req.body);
+    validateProgrammingAthletePayload(payload);
+
+    if (!Number.isInteger(athleteId) || athleteId <= 0) {
+      return res.status(400).json({ error: "Atleta invalido." });
+    }
+
+    await assertProgrammingAthleteIdentityAvailable(payload, {
+      excludeId: athleteId,
+    });
+
+    const result = await query(
+      `
+        update athletes
+        set
+          full_name = $2,
+          document_number = $3,
+          birth_date = $4,
+          phone = $5,
+          email = $6,
+          emergency_contact_name = $7,
+          emergency_contact_phone = $8,
+          medical_notes = $9,
+          athlete_notes = $10,
+          updated_at = now()
+        where id = $1
+        returning *
+      `,
+      [
+        athleteId,
+        payload.fullName,
+        payload.documentNumber,
+        payload.birthDate || null,
+        payload.phone,
+        payload.email,
+        payload.emergencyContactName,
+        payload.emergencyContactPhone,
+        payload.medicalNotes,
+        payload.athleteNotes,
+      ]
+    );
+
+    if (!result.rows.length) {
+      return res.status(404).json({ error: "Atleta no encontrado." });
+    }
+
+    res.json(mapProgrammingAthleteRow(result.rows[0]));
+  })
+);
+
+app.patch(
+  "/api/programming/athletes/:id/active",
+  requireProgrammingAccess,
+  asyncHandler(async (req, res) => {
+    const athleteId = Number(req.params.id);
+    const isActive = Boolean(req.body.isActive);
+
+    if (!Number.isInteger(athleteId) || athleteId <= 0) {
+      return res.status(400).json({ error: "Atleta invalido." });
+    }
+
+    const result = await query(
+      `
+        update athletes
+        set
+          is_active = $2,
+          updated_at = now()
+        where id = $1
+        returning *
+      `,
+      [athleteId, isActive]
+    );
+
+    if (!result.rows.length) {
+      return res.status(404).json({ error: "Atleta no encontrado." });
+    }
+
+    res.json(mapProgrammingAthleteRow(result.rows[0]));
   })
 );
 
@@ -751,8 +883,209 @@ app.patch(
   })
 );
 
+app.post(
+  "/api/programming/programs/:id/enrollments",
+  requireProgrammingAccess,
+  asyncHandler(async (req, res) => {
+    const programId = Number(req.params.id);
+    const payload = normalizeProgrammingEnrollmentPayload(req.body);
+    validateProgrammingEnrollmentPayload(payload);
+
+    if (!Number.isInteger(programId) || programId <= 0) {
+      return res.status(400).json({ error: "Programación invalida." });
+    }
+
+    await assertClassProgramExists(programId);
+    await assertAthleteExistsForProgramming(payload.athleteId);
+
+    const userId = Number(req.authUser?.id || 0);
+
+    const existingEnrollmentResult = await query(
+      `
+        select id
+        from class_program_enrollments
+        where class_program_id = $1
+          and athlete_id = $2
+        limit 1
+      `,
+      [programId, payload.athleteId]
+    );
+
+    if (existingEnrollmentResult.rows.length) {
+      await query(
+        `
+          update class_program_enrollments
+          set
+            updated_by_user_id = $3,
+            updated_at = now()
+          where class_program_id = $1
+            and athlete_id = $2
+        `,
+        [programId, payload.athleteId, userId]
+      );
+    } else {
+      await query(
+        `
+          insert into class_program_enrollments (
+            class_program_id,
+            athlete_id,
+            general_notes,
+            created_by_user_id,
+            updated_by_user_id
+          )
+          values ($1, $2, '', $3, $3)
+        `,
+        [programId, payload.athleteId, userId]
+      );
+    }
+
+    const program = await readClassProgramById(programId);
+    res.status(201).json(program);
+  })
+);
+
+app.delete(
+  "/api/programming/programs/:programId/enrollments/:enrollmentId",
+  requireProgrammingAccess,
+  asyncHandler(async (req, res) => {
+    const programId = Number(req.params.programId);
+    const enrollmentId = Number(req.params.enrollmentId);
+
+    if (!Number.isInteger(programId) || programId <= 0) {
+      return res.status(400).json({ error: "Programación invalida." });
+    }
+
+    if (!Number.isInteger(enrollmentId) || enrollmentId <= 0) {
+      return res.status(400).json({ error: "Inscripción invalida." });
+    }
+
+    const result = await query(
+      `
+        delete from class_program_enrollments
+        where id = $1
+          and class_program_id = $2
+        returning id
+      `,
+      [enrollmentId, programId]
+    );
+
+    if (!result.rows.length) {
+      return res.status(404).json({ error: "Inscripción no encontrada." });
+    }
+
+    res.status(204).send();
+  })
+);
+
+app.put(
+  "/api/programming/programs/:programId/enrollments/:enrollmentId/results",
+  requireProgrammingAccess,
+  asyncHandler(async (req, res) => {
+    const programId = Number(req.params.programId);
+    const enrollmentId = Number(req.params.enrollmentId);
+    const payload = normalizeProgrammingEnrollmentResultsPayload(req.body);
+    validateProgrammingEnrollmentResultsPayload(payload);
+
+    if (!Number.isInteger(programId) || programId <= 0) {
+      return res.status(400).json({ error: "Programación invalida." });
+    }
+
+    if (!Number.isInteger(enrollmentId) || enrollmentId <= 0) {
+      return res.status(400).json({ error: "Inscripción invalida." });
+    }
+
+    const userId = Number(req.authUser?.id || 0);
+
+    await withClient(async (client) => {
+      await client.query("begin");
+
+      try {
+        const enrollmentResult = await client.query(
+          `
+            select id
+            from class_program_enrollments
+            where id = $1
+              and class_program_id = $2
+            limit 1
+          `,
+          [enrollmentId, programId]
+        );
+
+        if (!enrollmentResult.rows.length) {
+          throw httpError(404, "Inscripción no encontrada.");
+        }
+
+        const programItemsResult = await client.query(
+          `
+            select
+              cpi.sort_order,
+              pe.name as exercise_name
+            from class_program_items cpi
+            join programming_exercises pe
+              on pe.id = cpi.exercise_id
+            where cpi.class_program_id = $1
+            order by cpi.sort_order asc, cpi.id asc
+          `,
+          [programId]
+        );
+
+        const itemsBySortOrder = new Map(
+          programItemsResult.rows.map((row) => [
+            Number(row.sort_order || 0),
+            String(row.exercise_name || ""),
+          ])
+        );
+
+        const invalidResult = payload.results.find(
+          (item) => !itemsBySortOrder.has(Number(item.itemSortOrder || 0))
+        );
+
+        if (invalidResult) {
+          throw httpError(
+            400,
+            "Uno de los resultados no coincide con un ejercicio vigente de la clase."
+          );
+        }
+
+        await client.query(
+          `
+            update class_program_enrollments
+            set
+              general_notes = $2,
+              updated_by_user_id = $3,
+              updated_at = now()
+            where id = $1
+          `,
+          [enrollmentId, payload.generalNotes, userId]
+        );
+
+        await replaceClassProgramEnrollmentResults(
+          client,
+          enrollmentId,
+          payload.results.map((item) => ({
+            ...item,
+            exerciseNameSnapshot:
+              itemsBySortOrder.get(Number(item.itemSortOrder || 0)) || "",
+          })),
+          userId
+        );
+
+        await client.query("commit");
+      } catch (error) {
+        await client.query("rollback");
+        throw error;
+      }
+    });
+
+    const program = await readClassProgramById(programId);
+    res.json(program);
+  })
+);
+
 app.get("/api/bootstrap", asyncHandler(async (req, res) => {
   const isAssistantOperative = req.authUser?.role === "asistente_operativo";
+  const hasAccountingAccess = userHasAccountingAccess(req.authUser);
+  const hasProgrammingAccess = req.authUser?.role === "administrador";
 
   const [
     catalogResult,
@@ -761,11 +1094,13 @@ app.get("/api/bootstrap", asyncHandler(async (req, res) => {
     portfolioResult,
     notesResult,
     clientResult,
+    athleteResult,
     collectionResult,
     transferResult,
     programmingMethods,
     programmingExercises,
     classPrograms,
+    accountingDocumentsResult,
   ] =
     await Promise.all([
     query(
@@ -814,6 +1149,15 @@ app.get("/api/bootstrap", asyncHandler(async (req, res) => {
         order by is_active desc, full_name asc, id asc
       `
     ),
+    hasProgrammingAccess
+      ? query(
+          `
+            select *
+            from athletes
+            order by is_active desc, full_name asc, id asc
+          `
+        )
+      : Promise.resolve({ rows: [] }),
     query(
       `
         select
@@ -838,9 +1182,23 @@ app.get("/api/bootstrap", asyncHandler(async (req, res) => {
         order by bt.transfer_date desc, bt.created_at desc, bt.id desc
       `
     ),
-    isAssistantOperative ? Promise.resolve([]) : listProgrammingMethods(),
-    isAssistantOperative ? Promise.resolve([]) : listProgrammingExercises(),
-    isAssistantOperative ? Promise.resolve([]) : listClassPrograms(),
+    hasProgrammingAccess ? listProgrammingMethods() : Promise.resolve([]),
+    hasProgrammingAccess ? listProgrammingExercises() : Promise.resolve([]),
+    hasProgrammingAccess ? listClassPrograms() : Promise.resolve([]),
+    hasAccountingAccess
+      ? query(
+          `
+            select
+              ad.*,
+              coalesce(nullif(u.full_name, ''), u.username) as uploaded_by_name,
+              u.username as uploaded_by_username
+            from accounting_documents ad
+            join app_users u
+              on u.id = ad.uploaded_by_user_id
+            order by ad.accounting_date desc, ad.created_at desc, ad.id desc
+          `
+        )
+      : Promise.resolve({ rows: [] }),
   ]);
 
   res.json({
@@ -850,14 +1208,105 @@ app.get("/api/bootstrap", asyncHandler(async (req, res) => {
     boxMovements: boxMovementResult.rows.map(mapMovementRow),
     portfolioMovements: portfolioResult.rows.map(mapMovementRow),
     clients: clientResult.rows.map(mapClientRow),
+    athletes: athleteResult.rows.map(mapProgrammingAthleteRow),
     collections: collectionResult.rows.map(mapCollectionRow),
     boxTransfers: transferResult.rows.map(mapBoxTransferRow),
     programmingMethods,
     programmingExercises,
     classPrograms,
+    accountingDocuments: accountingDocumentsResult.rows.map(mapAccountingDocumentRow),
     notes: mapNotesRows(notesResult.rows),
   });
 }));
+
+app.post(
+  "/api/accounting-documents",
+  requireAccountingAccess,
+  asyncHandler(async (req, res) => {
+    const payload = normalizeAccountingDocumentPayload(req.body);
+    validateAccountingDocumentPayload(payload);
+
+    const fileBuffer = decodeBase64FileData(payload.fileDataBase64);
+    if (!fileBuffer.length) {
+      return res.status(400).json({
+        error: "No se pudo leer el archivo adjunto.",
+      });
+    }
+
+    const result = await query(
+      `
+        insert into accounting_documents (
+          accounting_date,
+          business_line,
+          document_area,
+          document_type,
+          reference,
+          notes,
+          original_name,
+          mime_type,
+          file_size,
+          file_content,
+          uploaded_by_user_id
+        )
+        values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+        returning *,
+          $12::text as uploaded_by_name,
+          $13::text as uploaded_by_username
+      `,
+      [
+        payload.accountingDate,
+        payload.businessLine,
+        payload.documentArea,
+        payload.documentType,
+        payload.reference,
+        payload.notes,
+        payload.originalName,
+        payload.mimeType,
+        payload.fileSize,
+        fileBuffer,
+        Number(req.authUser.id),
+        req.authUser.fullName || req.authUser.username || "Sistema",
+        req.authUser.username || "",
+      ]
+    );
+
+    res.status(201).json(mapAccountingDocumentRow(result.rows[0]));
+  })
+);
+
+app.get(
+  "/api/accounting-documents/:id/file",
+  requireAccountingAccess,
+  asyncHandler(async (req, res) => {
+    const documentId = Number(req.params.id);
+    if (!Number.isInteger(documentId) || documentId <= 0) {
+      return res.status(400).json({ error: "Documento inválido." });
+    }
+
+    const result = await query(
+      `
+        select id, original_name, mime_type, file_content
+        from accounting_documents
+        where id = $1
+        limit 1
+      `,
+      [documentId]
+    );
+
+    if (!result.rows.length) {
+      return res.status(404).json({ error: "Documento no encontrado." });
+    }
+
+    const row = result.rows[0];
+    const safeName = sanitizeDownloadName(row.original_name || `soporte-${documentId}`);
+    res.setHeader("Content-Type", row.mime_type || "application/octet-stream");
+    res.setHeader(
+      "Content-Disposition",
+      `inline; filename="${safeName}"; filename*=UTF-8''${encodeURIComponent(safeName)}`
+    );
+    res.send(row.file_content);
+  })
+);
 
 app.post("/api/import/excel", requireAdmin, asyncHandler(async (req, res) => {
   const payload = normalizeExcelImportPayload(req.body);
@@ -879,7 +1328,7 @@ app.post(
   })
 );
 
-app.post("/api/movements", asyncHandler(async (req, res) => {
+app.post("/api/movements", requireOperationalWriteAccess, asyncHandler(async (req, res) => {
   const payload = normalizeMovementPayload(req.body);
   validateMovementPayload(payload);
 
@@ -932,7 +1381,7 @@ app.post("/api/movements", asyncHandler(async (req, res) => {
   res.status(201).json(mapMovementRow(result.rows[0]));
 }));
 
-app.put("/api/movements/:id", asyncHandler(async (req, res) => {
+app.put("/api/movements/:id", requireOperationalWriteAccess, asyncHandler(async (req, res) => {
   const movementId = Number(req.params.id);
   await assertMovementMutationAllowed(req.authUser, movementId);
 
@@ -1060,7 +1509,7 @@ app.put("/api/movements/:id", asyncHandler(async (req, res) => {
   res.json(updatedMovement);
 }));
 
-app.delete("/api/movements/:id", asyncHandler(async (req, res) => {
+app.delete("/api/movements/:id", requireOperationalWriteAccess, asyncHandler(async (req, res) => {
   await assertMovementMutationAllowed(req.authUser, Number(req.params.id));
 
   const result = await query(
@@ -1075,7 +1524,7 @@ app.delete("/api/movements/:id", asyncHandler(async (req, res) => {
   res.status(204).send();
 }));
 
-app.post("/api/movements/:id/collections", asyncHandler(async (req, res) => {
+app.post("/api/movements/:id/collections", requireOperationalWriteAccess, asyncHandler(async (req, res) => {
   const movementId = Number(req.params.id);
 
   if (!Number.isInteger(movementId) || movementId <= 0) {
@@ -1200,7 +1649,7 @@ app.post("/api/movements/:id/collections", asyncHandler(async (req, res) => {
   });
 }));
 
-app.post("/api/box-transfers", asyncHandler(async (req, res) => {
+app.post("/api/box-transfers", requireOperationalWriteAccess, asyncHandler(async (req, res) => {
   const payload = normalizeBoxTransferPayload(req.body);
   validateBoxTransferPayload(payload);
 
@@ -1448,6 +1897,7 @@ function normalizeUserPayload(body) {
 function normalizeClientPayload(body) {
   return {
     fullName: String(body.fullName || "").trim(),
+    alias: String(body.alias || "").trim(),
     documentNumber: String(body.documentNumber || "").trim(),
     phone: String(body.phone || "").trim(),
     email: String(body.email || "").trim(),
@@ -1571,6 +2021,35 @@ function normalizeUsersClientsImportPayload(body) {
   };
 }
 
+function normalizeAccountingDocumentPayload(body) {
+  return {
+    accountingDate: String(body.accountingDate || "").trim(),
+    businessLine: String(body.businessLine || "").trim(),
+    documentArea: String(body.documentArea || "").trim(),
+    documentType: String(body.documentType || "").trim(),
+    reference: String(body.reference || "").trim(),
+    notes: String(body.notes || "").trim(),
+    originalName: String(body.originalName || "").trim(),
+    mimeType: String(body.mimeType || "").trim(),
+    fileSize: Number(body.fileSize || 0),
+    fileDataBase64: String(body.fileDataBase64 || "").trim(),
+  };
+}
+
+function normalizeProgrammingAthletePayload(body) {
+  return {
+    fullName: String(body.fullName || "").trim(),
+    documentNumber: String(body.documentNumber || "").trim(),
+    birthDate: normalizeDateOnly(body.birthDate),
+    phone: String(body.phone || "").trim(),
+    email: String(body.email || "").trim(),
+    emergencyContactName: String(body.emergencyContactName || "").trim(),
+    emergencyContactPhone: String(body.emergencyContactPhone || "").trim(),
+    medicalNotes: String(body.medicalNotes || "").trim(),
+    athleteNotes: String(body.athleteNotes || "").trim(),
+  };
+}
+
 function normalizeProgrammingExercisePayload(body) {
   return {
     name: String(body.name || "").trim(),
@@ -1605,6 +2084,26 @@ function normalizeClassProgramPayload(body) {
       weightText: String(item?.weightText || "").trim(),
       conditionNotes: String(item?.conditionNotes || "").trim(),
       coachNotes: String(item?.coachNotes || "").trim(),
+    })),
+  };
+}
+
+function normalizeProgrammingEnrollmentPayload(body) {
+  return {
+    athleteId: Number(body.athleteId || 0),
+  };
+}
+
+function normalizeProgrammingEnrollmentResultsPayload(body) {
+  const rawResults = Array.isArray(body.results) ? body.results : [];
+
+  return {
+    generalNotes: String(body.generalNotes || "").trim(),
+    results: rawResults.map((item) => ({
+      itemSortOrder: Number(item?.itemSortOrder || 0),
+      resultWeightText: String(item?.resultWeightText || "").trim(),
+      resultTimeText: String(item?.resultTimeText || "").trim(),
+      resultNotes: String(item?.resultNotes || "").trim(),
     })),
   };
 }
@@ -1678,6 +2177,37 @@ function validateClassProgramPayload(payload) {
       throw httpError(
         400,
         `La dosificación del ejercicio ${index + 1} es obligatoria.`
+      );
+    }
+  });
+}
+
+function validateProgrammingAthletePayload(payload) {
+  if (!payload.fullName) {
+    throw httpError(400, "El nombre del atleta es obligatorio.");
+  }
+
+  if (payload.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(payload.email)) {
+    throw httpError(400, "El correo del atleta no es valido.");
+  }
+}
+
+function validateProgrammingEnrollmentPayload(payload) {
+  if (!Number.isInteger(payload.athleteId) || payload.athleteId <= 0) {
+    throw httpError(400, "Selecciona un atleta válido para inscribir.");
+  }
+}
+
+function validateProgrammingEnrollmentResultsPayload(payload) {
+  if (!Array.isArray(payload.results)) {
+    throw httpError(400, "Los resultados de la clase no tienen un formato válido.");
+  }
+
+  payload.results.forEach((item, index) => {
+    if (!Number.isInteger(item.itemSortOrder) || item.itemSortOrder <= 0) {
+      throw httpError(
+        400,
+        `La fila de resultado ${index + 1} no está asociada a un ejercicio válido.`
       );
     }
   });
@@ -1786,6 +2316,48 @@ function validateBoxTransferPayload(payload) {
 
   if (!(payload.amount > 0)) {
     throw httpError(400, "El valor a mover debe ser mayor que cero.");
+  }
+}
+
+function validateAccountingDocumentPayload(payload) {
+  if (!payload.accountingDate) {
+    throw httpError(400, "La fecha contable es obligatoria.");
+  }
+
+  if (!["Gimnasio", "Restaurante", "General"].includes(payload.businessLine)) {
+    throw httpError(400, "La línea del documento no es válida.");
+  }
+
+  if (
+    !["Venta", "Compra", "Gasto", "Impuesto", "Nomina", "Soporte", "Otro"].includes(
+      payload.documentArea
+    )
+  ) {
+    throw httpError(400, "El área del documento no es válida.");
+  }
+
+  if (!payload.documentType) {
+    throw httpError(400, "El tipo de documento es obligatorio.");
+  }
+
+  if (!payload.originalName) {
+    throw httpError(400, "Debes seleccionar un archivo.");
+  }
+
+  if (!payload.mimeType) {
+    throw httpError(400, "El archivo no tiene un formato válido.");
+  }
+
+  if (!payload.fileDataBase64) {
+    throw httpError(400, "El contenido del archivo es obligatorio.");
+  }
+
+  if (!Number.isFinite(payload.fileSize) || !(payload.fileSize > 0)) {
+    throw httpError(400, "El tamaño del archivo no es válido.");
+  }
+
+  if (payload.fileSize > 8 * 1024 * 1024) {
+    throw httpError(400, "El archivo supera el límite de 8 MB.");
   }
 }
 
@@ -2906,27 +3478,50 @@ async function listClassPrograms(options = {}) {
     return [];
   }
 
-  const itemsResult = await query(
-    `
-      select
-        cpi.*,
-        pe.name as exercise_name,
-        pe.family as exercise_family,
-        pe.category as exercise_category,
-        pe.primary_muscle as exercise_primary_muscle,
-        pe.movement_pattern as exercise_movement_pattern,
-        pe.equipment as exercise_equipment,
-        pm.name as method_name
-      from class_program_items cpi
-      join programming_exercises pe
-        on pe.id = cpi.exercise_id
-      left join programming_methods pm
-        on pm.id = cpi.method_id
-      where cpi.class_program_id = any($1::bigint[])
-      order by cpi.class_program_id asc, cpi.sort_order asc, cpi.id asc
-    `,
-    [programIds]
-  );
+  const [itemsResult, enrollmentsResult] = await Promise.all([
+    query(
+      `
+        select
+          cpi.*,
+          pe.name as exercise_name,
+          pe.family as exercise_family,
+          pe.category as exercise_category,
+          pe.primary_muscle as exercise_primary_muscle,
+          pe.movement_pattern as exercise_movement_pattern,
+          pe.equipment as exercise_equipment,
+          pm.name as method_name
+        from class_program_items cpi
+        join programming_exercises pe
+          on pe.id = cpi.exercise_id
+        left join programming_methods pm
+          on pm.id = cpi.method_id
+        where cpi.class_program_id = any($1::bigint[])
+        order by cpi.class_program_id asc, cpi.sort_order asc, cpi.id asc
+      `,
+      [programIds]
+    ),
+    query(
+      `
+        select
+          cpe.*,
+          a.full_name as athlete_full_name,
+          a.document_number as athlete_document_number,
+          a.birth_date as athlete_birth_date,
+          a.phone as athlete_phone,
+          a.email as athlete_email,
+          a.emergency_contact_name as athlete_emergency_contact_name,
+          a.emergency_contact_phone as athlete_emergency_contact_phone,
+          a.medical_notes as athlete_medical_notes,
+          a.athlete_notes as athlete_notes
+        from class_program_enrollments cpe
+        join athletes a
+          on a.id = cpe.athlete_id
+        where cpe.class_program_id = any($1::bigint[])
+        order by cpe.class_program_id asc, lower(a.full_name) asc, cpe.id asc
+      `,
+      [programIds]
+    ),
+  ]);
 
   const itemsByProgramId = new Map();
   itemsResult.rows.forEach((row) => {
@@ -2936,8 +3531,50 @@ async function listClassPrograms(options = {}) {
     itemsByProgramId.set(currentProgramId, currentItems);
   });
 
+  const enrollmentIds = enrollmentsResult.rows.map((row) => Number(row.id));
+  const enrollmentResultsResult = enrollmentIds.length
+    ? await query(
+        `
+          select
+            cper.*,
+            cpe.class_program_id
+          from class_program_enrollment_results cper
+          join class_program_enrollments cpe
+            on cpe.id = cper.enrollment_id
+          where cper.enrollment_id = any($1::bigint[])
+          order by cpe.class_program_id asc, cper.enrollment_id asc, cper.item_sort_order asc, cper.id asc
+        `,
+        [enrollmentIds]
+      )
+    : { rows: [] };
+
+  const resultsByEnrollmentId = new Map();
+  enrollmentResultsResult.rows.forEach((row) => {
+    const currentEnrollmentId = Number(row.enrollment_id);
+    const currentResults = resultsByEnrollmentId.get(currentEnrollmentId) || [];
+    currentResults.push(mapClassProgramEnrollmentResultRow(row));
+    resultsByEnrollmentId.set(currentEnrollmentId, currentResults);
+  });
+
+  const enrollmentsByProgramId = new Map();
+  enrollmentsResult.rows.forEach((row) => {
+    const currentProgramId = Number(row.class_program_id);
+    const currentEnrollments = enrollmentsByProgramId.get(currentProgramId) || [];
+    currentEnrollments.push(
+      mapClassProgramEnrollmentRow(
+        row,
+        resultsByEnrollmentId.get(Number(row.id)) || []
+      )
+    );
+    enrollmentsByProgramId.set(currentProgramId, currentEnrollments);
+  });
+
   return programResult.rows.map((row) =>
-    mapClassProgramRow(row, itemsByProgramId.get(Number(row.id)) || [])
+    mapClassProgramRow(
+      row,
+      itemsByProgramId.get(Number(row.id)) || [],
+      enrollmentsByProgramId.get(Number(row.id)) || []
+    )
   );
 }
 
@@ -2989,6 +3626,128 @@ async function replaceClassProgramItems(client, programId, items) {
         item.conditionNotes,
         item.coachNotes,
       ]
+    );
+  }
+
+  await syncClassProgramEnrollmentResultSnapshots(client, programId, items);
+}
+
+async function replaceClassProgramEnrollmentResults(
+  client,
+  enrollmentId,
+  results,
+  userId
+) {
+  await client.query(
+    `
+      delete from class_program_enrollment_results
+      where enrollment_id = $1
+    `,
+    [enrollmentId]
+  );
+
+  const normalizedResults = Array.isArray(results) ? results : [];
+  for (const item of normalizedResults) {
+    const hasUsefulData = Boolean(
+      String(item.resultWeightText || "").trim() ||
+        String(item.resultTimeText || "").trim() ||
+        String(item.resultNotes || "").trim()
+    );
+
+    if (!hasUsefulData) {
+      continue;
+    }
+
+    await client.query(
+      `
+        insert into class_program_enrollment_results (
+          enrollment_id,
+          item_sort_order,
+          exercise_name_snapshot,
+          result_weight_text,
+          result_time_text,
+          result_notes,
+          updated_by_user_id
+        )
+        values ($1, $2, $3, $4, $5, $6, $7)
+      `,
+      [
+        enrollmentId,
+        item.itemSortOrder,
+        item.exerciseNameSnapshot || "",
+        item.resultWeightText || "",
+        item.resultTimeText || "",
+        item.resultNotes || "",
+        userId,
+      ]
+    );
+  }
+}
+
+async function syncClassProgramEnrollmentResultSnapshots(client, programId, items) {
+  const normalizedItems = Array.isArray(items) ? items : [];
+  const itemRowsResult = normalizedItems.length
+    ? await client.query(
+        `
+          select
+            cpi.sort_order,
+            pe.name as exercise_name
+          from class_program_items cpi
+          join programming_exercises pe
+            on pe.id = cpi.exercise_id
+          where cpi.class_program_id = $1
+          order by cpi.sort_order asc, cpi.id asc
+        `,
+        [programId]
+      )
+    : { rows: [] };
+  const validSortOrders = itemRowsResult.rows
+    .map((row) => Number(row.sort_order || 0))
+    .filter((value) => Number.isInteger(value) && value > 0);
+
+  if (!validSortOrders.length) {
+    await client.query(
+      `
+        delete from class_program_enrollment_results
+        where enrollment_id in (
+          select id
+          from class_program_enrollments
+          where class_program_id = $1
+        )
+      `,
+      [programId]
+    );
+    return;
+  }
+
+  await client.query(
+    `
+      delete from class_program_enrollment_results
+      where enrollment_id in (
+        select id
+        from class_program_enrollments
+        where class_program_id = $1
+      )
+      and not (item_sort_order = any($2::integer[]))
+    `,
+    [programId, validSortOrders]
+  );
+
+  for (const row of itemRowsResult.rows) {
+    await client.query(
+      `
+        update class_program_enrollment_results
+        set
+          exercise_name_snapshot = $3,
+          updated_at = now()
+        where enrollment_id in (
+          select id
+          from class_program_enrollments
+          where class_program_id = $1
+        )
+        and item_sort_order = $2
+      `,
+      [programId, Number(row.sort_order || 0), String(row.exercise_name || "")]
     );
   }
 }
@@ -3069,6 +3828,75 @@ async function assertProgrammingReferencesExist(payload) {
   }
 }
 
+async function assertClassProgramExists(programId) {
+  const result = await query(
+    `
+      select id
+      from class_programs
+      where id = $1
+      limit 1
+    `,
+    [programId]
+  );
+
+  if (!result.rows.length) {
+    throw httpError(404, "Programación no encontrada.");
+  }
+}
+
+async function assertAthleteExistsForProgramming(athleteId) {
+  const result = await query(
+    `
+      select id
+      from athletes
+      where id = $1
+        and is_active = true
+      limit 1
+    `,
+    [athleteId]
+  );
+
+  if (!result.rows.length) {
+    throw httpError(404, "El atleta seleccionado no existe o está inactivo.");
+  }
+}
+
+async function assertProgrammingAthleteIdentityAvailable(payload, options = {}) {
+  const excludeId = Number(options.excludeId || 0);
+
+  if (payload.documentNumber) {
+    const documentResult = await query(
+      `
+        select id
+        from athletes
+        where document_number = $1
+          and ($2::bigint <= 0 or id <> $2::bigint)
+        limit 1
+      `,
+      [payload.documentNumber, excludeId]
+    );
+
+    if (documentResult.rows.length) {
+      throw httpError(409, "Ya existe un atleta registrado con ese documento.");
+    }
+  }
+
+  const nameResult = await query(
+    `
+      select id
+      from athletes
+      where lower(full_name) = lower($1)
+        and ($2::bigint <= 0 or id <> $2::bigint)
+      limit 1
+    `,
+    [payload.fullName, excludeId]
+  );
+
+  if (nameResult.rows.length) {
+    throw httpError(409, "Ya existe un atleta registrado con ese nombre.");
+  }
+}
+
 function mapProgrammingMethodRow(row) {
   return {
     id: Number(row.id),
@@ -3100,6 +3928,24 @@ function mapProgrammingExerciseRow(row) {
   };
 }
 
+function mapProgrammingAthleteRow(row) {
+  return {
+    id: row.id,
+    fullName: row.full_name,
+    documentNumber: row.document_number || "",
+    birthDate: normalizeDateOnly(row.birth_date),
+    phone: row.phone || "",
+    email: row.email || "",
+    emergencyContactName: row.emergency_contact_name || "",
+    emergencyContactPhone: row.emergency_contact_phone || "",
+    medicalNotes: row.medical_notes || "",
+    athleteNotes: row.athlete_notes || "",
+    isActive: Boolean(row.is_active),
+    createdAt: row.created_at || null,
+    updatedAt: row.updated_at || null,
+  };
+}
+
 function mapClassProgramItemRow(row) {
   return {
     id: Number(row.id),
@@ -3124,7 +3970,45 @@ function mapClassProgramItemRow(row) {
   };
 }
 
-function mapClassProgramRow(row, items = []) {
+function mapClassProgramEnrollmentResultRow(row) {
+  return {
+    id: Number(row.id),
+    enrollmentId: Number(row.enrollment_id),
+    itemSortOrder: Number(row.item_sort_order || 0),
+    exerciseNameSnapshot: row.exercise_name_snapshot || "",
+    resultWeightText: row.result_weight_text || "",
+    resultTimeText: row.result_time_text || "",
+    resultNotes: row.result_notes || "",
+    updatedByUserId: Number(row.updated_by_user_id || 0),
+    createdAt: row.created_at || null,
+    updatedAt: row.updated_at || null,
+  };
+}
+
+function mapClassProgramEnrollmentRow(row, results = []) {
+  return {
+    id: Number(row.id),
+    classProgramId: Number(row.class_program_id),
+    athleteId: Number(row.athlete_id || 0),
+    athleteFullName: row.athlete_full_name || "",
+    athleteDocumentNumber: row.athlete_document_number || "",
+    athleteBirthDate: normalizeDateOnly(row.athlete_birth_date),
+    athletePhone: row.athlete_phone || "",
+    athleteEmail: row.athlete_email || "",
+    athleteEmergencyContactName: row.athlete_emergency_contact_name || "",
+    athleteEmergencyContactPhone: row.athlete_emergency_contact_phone || "",
+    athleteMedicalNotes: row.athlete_medical_notes || "",
+    athleteNotes: row.athlete_notes || "",
+    generalNotes: row.general_notes || "",
+    createdByUserId: Number(row.created_by_user_id || 0),
+    updatedByUserId: Number(row.updated_by_user_id || 0),
+    createdAt: row.created_at || null,
+    updatedAt: row.updated_at || null,
+    results,
+  };
+}
+
+function mapClassProgramRow(row, items = [], enrollments = []) {
   return {
     id: Number(row.id),
     classDate: normalizeDateOnly(row.class_date),
@@ -3144,6 +4028,7 @@ function mapClassProgramRow(row, items = []) {
     createdAt: row.created_at || null,
     updatedAt: row.updated_at || null,
     items,
+    enrollments,
   };
 }
 
@@ -3343,6 +4228,7 @@ function mapClientRow(row) {
   return {
     id: row.id,
     fullName: row.full_name,
+    alias: row.alias || "",
     documentNumber: row.document_number || "",
     phone: row.phone || "",
     email: row.email || "",
@@ -3432,6 +4318,44 @@ function mapBoxTransferRow(row) {
       "Sistema",
     createdAt: row.created_at || null,
   };
+}
+
+function mapAccountingDocumentRow(row) {
+  return {
+    id: row.id,
+    accountingDate: normalizeDateOnly(row.accounting_date),
+    businessLine: row.business_line,
+    documentArea: row.document_area,
+    documentType: row.document_type,
+    reference: row.reference || "",
+    notes: row.notes || "",
+    originalName: row.original_name,
+    mimeType: row.mime_type,
+    fileSize: Number(row.file_size || 0),
+    uploadedBy:
+      row.uploaded_by_name ||
+      row.uploaded_by_username ||
+      "Sistema",
+    createdAt: row.created_at || null,
+    fileUrl: `/api/accounting-documents/${row.id}/file`,
+  };
+}
+
+function decodeBase64FileData(value) {
+  const raw = String(value || "").trim();
+  if (!raw) {
+    return Buffer.alloc(0);
+  }
+
+  const cleanValue = raw.includes(",") ? raw.slice(raw.indexOf(",") + 1) : raw;
+  return Buffer.from(cleanValue, "base64");
+}
+
+function sanitizeDownloadName(value) {
+  return String(value || "")
+    .replace(/[^\w\s.\-()]/g, "_")
+    .replace(/\s+/g, " ")
+    .trim() || "soporte-contable";
 }
 
 function resolvePaymentStatus(paidAmount, totalAmount) {
@@ -3539,6 +4463,34 @@ function requireAdmin(req, res, next) {
   if (req.authUser?.role !== "administrador") {
     return res.status(403).json({
       error: "Solo el perfil administrador puede realizar esta operacion.",
+    });
+  }
+
+  next();
+}
+
+function userHasAccountingAccess(user) {
+  return ["administrador", "contador"].includes(user?.role);
+}
+
+function userHasOperationalWriteAccess(user) {
+  return ["administrador", "asistente_operativo"].includes(user?.role);
+}
+
+function requireAccountingAccess(req, res, next) {
+  if (!userHasAccountingAccess(req.authUser)) {
+    return res.status(403).json({
+      error: "Tu perfil no tiene acceso al módulo de contabilidad.",
+    });
+  }
+
+  next();
+}
+
+function requireOperationalWriteAccess(req, res, next) {
+  if (!userHasOperationalWriteAccess(req.authUser)) {
+    return res.status(403).json({
+      error: "Tu perfil no tiene permisos para modificar la operación.",
     });
   }
 

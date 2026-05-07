@@ -56,6 +56,7 @@ create table if not exists report_notes (
 create table if not exists clients (
   id bigserial primary key,
   full_name text not null,
+  alias text,
   document_number text,
   phone text,
   email text,
@@ -65,11 +66,57 @@ create table if not exists clients (
   updated_at timestamptz not null default now()
 );
 
+alter table clients
+  add column if not exists alias text;
+
+create table if not exists athletes (
+  id bigserial primary key,
+  full_name text not null,
+  document_number text,
+  birth_date date,
+  phone text,
+  email text,
+  emergency_contact_name text not null default '',
+  emergency_contact_phone text not null default '',
+  medical_notes text not null default '',
+  athlete_notes text not null default '',
+  is_active boolean not null default true,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+alter table athletes
+  add column if not exists document_number text;
+
+alter table athletes
+  add column if not exists birth_date date;
+
+alter table athletes
+  add column if not exists phone text;
+
+alter table athletes
+  add column if not exists email text;
+
+alter table athletes
+  add column if not exists emergency_contact_name text not null default '';
+
+alter table athletes
+  add column if not exists emergency_contact_phone text not null default '';
+
+alter table athletes
+  add column if not exists medical_notes text not null default '';
+
+alter table athletes
+  add column if not exists athlete_notes text not null default '';
+
+alter table athletes
+  add column if not exists is_active boolean not null default true;
+
 create table if not exists app_users (
   id bigserial primary key,
   username text not null unique,
   full_name text not null default '',
-  role text not null default 'administrador' check (role in ('administrador', 'asistente_operativo')),
+  role text not null default 'administrador' check (role in ('administrador', 'asistente_operativo', 'contador')),
   password_hash text not null,
   password_salt text not null,
   password_iterations integer not null,
@@ -91,7 +138,10 @@ alter table app_users
 
 update app_users
 set role = 'administrador'
-where role is null or role not in ('administrador', 'asistente_operativo');
+where role is null or role not in ('administrador', 'asistente_operativo', 'contador');
+
+alter table app_users
+  drop constraint if exists app_users_role_check;
 
 do $$
 begin
@@ -102,7 +152,7 @@ begin
   ) then
     alter table app_users
       add constraint app_users_role_check
-      check (role in ('administrador', 'asistente_operativo'));
+      check (role in ('administrador', 'asistente_operativo', 'contador'));
   end if;
 end $$;
 
@@ -269,6 +319,70 @@ create table if not exists class_program_items (
   prescription text not null default '',
   condition_notes text not null default '',
   coach_notes text not null default '',
+  created_at timestamptz not null default now()
+);
+
+create table if not exists class_program_enrollments (
+  id bigserial primary key,
+  class_program_id bigint not null references class_programs(id) on delete cascade,
+  athlete_id bigint not null references athletes(id),
+  general_notes text not null default '',
+  created_by_user_id bigint not null references app_users(id),
+  updated_by_user_id bigint not null references app_users(id),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique (class_program_id, athlete_id)
+);
+
+alter table class_program_enrollments
+  add column if not exists athlete_id bigint references athletes(id);
+
+do $$
+begin
+  if exists (
+    select 1
+    from information_schema.columns
+    where table_schema = 'public'
+      and table_name = 'class_program_enrollments'
+      and column_name = 'client_id'
+  ) then
+    execute 'alter table class_program_enrollments alter column client_id drop not null';
+  end if;
+end
+$$;
+
+drop index if exists class_program_enrollments_program_athlete_unique;
+
+create unique index if not exists class_program_enrollments_program_athlete_unique
+  on class_program_enrollments (class_program_id, athlete_id);
+
+create table if not exists class_program_enrollment_results (
+  id bigserial primary key,
+  enrollment_id bigint not null references class_program_enrollments(id) on delete cascade,
+  item_sort_order integer not null check (item_sort_order > 0),
+  exercise_name_snapshot text not null default '',
+  result_weight_text text not null default '',
+  result_time_text text not null default '',
+  result_notes text not null default '',
+  updated_by_user_id bigint not null references app_users(id),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique (enrollment_id, item_sort_order)
+);
+
+create table if not exists accounting_documents (
+  id bigserial primary key,
+  accounting_date date not null,
+  business_line text not null check (business_line in ('Gimnasio', 'Restaurante', 'General')),
+  document_area text not null check (document_area in ('Venta', 'Compra', 'Gasto', 'Impuesto', 'Nomina', 'Soporte', 'Otro')),
+  document_type text not null,
+  reference text not null default '',
+  notes text not null default '',
+  original_name text not null,
+  mime_type text not null,
+  file_size integer not null check (file_size > 0),
+  file_content bytea not null,
+  uploaded_by_user_id bigint not null references app_users(id),
   created_at timestamptz not null default now()
 );
 

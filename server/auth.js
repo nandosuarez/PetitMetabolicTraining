@@ -7,7 +7,7 @@ const SESSION_TTL_DAYS = 10;
 const PASSWORD_ITERATIONS = 210000;
 const PASSWORD_KEY_LENGTH = 32;
 const PASSWORD_DIGEST = "sha256";
-const USER_ROLES = ["administrador", "asistente_operativo"];
+const USER_ROLES = ["administrador", "asistente_operativo", "contador"];
 
 function normalizeUsername(username) {
   return String(username || "").trim().toLowerCase();
@@ -463,6 +463,7 @@ function roleLabel(role) {
   return {
     administrador: "Administrador",
     asistente_operativo: "Asistente operativo",
+    contador: "Contador",
   }[normalizeRole(role)] || "Sin perfil";
 }
 

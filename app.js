@@ -19,7 +19,9 @@ const emptyState = {
   collections: [],
   boxTransfers: [],
   clients: [],
+  athletes: [],
   users: [],
+  accountingDocuments: [],
   programmingMethods: [],
   programmingExercises: [],
   classPrograms: [],
@@ -74,6 +76,8 @@ const COMPACT_SIDEBAR_BREAKPOINT = 1180;
 let lastImportReport = null;
 let lastUsersClientsImportReport = null;
 let programDraftItems = [];
+let selectedProgramRosterId = null;
+let selectedProgramEnrollmentId = null;
 let authState = {
   authenticated: false,
   user: null,
@@ -105,6 +109,7 @@ const elements = {
     diario: document.getElementById("diario-view"),
     semanal: document.getElementById("semanal-view"),
     mensual: document.getElementById("mensual-view"),
+    contabilidad: document.getElementById("contabilidad-view"),
     cartera: document.getElementById("cartera-view"),
     programacion: document.getElementById("programacion-view"),
     listas: document.getElementById("listas-view"),
@@ -126,6 +131,22 @@ const elements = {
   dailyBoxReport: document.getElementById("daily-box-report"),
   weeklyBoxReport: document.getElementById("weekly-box-report"),
   monthlyBoxReport: document.getElementById("monthly-box-report"),
+  accountingDate: document.getElementById("accounting-date"),
+  accountingLine: document.getElementById("accounting-line"),
+  accountingQuery: document.getElementById("accounting-query"),
+  accountingSummary: document.getElementById("accounting-summary"),
+  accountingTable: document.getElementById("accounting-table"),
+  accountingDocumentForm: document.getElementById("accounting-document-form"),
+  accountingDocumentDate: document.getElementById("accounting-document-date"),
+  accountingDocumentLine: document.getElementById("accounting-document-line"),
+  accountingDocumentArea: document.getElementById("accounting-document-area"),
+  accountingDocumentType: document.getElementById("accounting-document-type"),
+  accountingDocumentReference: document.getElementById("accounting-document-reference"),
+  accountingDocumentFile: document.getElementById("accounting-document-file"),
+  accountingDocumentNotes: document.getElementById("accounting-document-notes"),
+  accountingDocumentFeedback: document.getElementById("accounting-document-feedback"),
+  accountingDocumentsSummary: document.getElementById("accounting-documents-summary"),
+  accountingDocumentsTable: document.getElementById("accounting-documents-table"),
   movementForm: document.getElementById("movement-form"),
   movementFormTitle: document.getElementById("movement-form-title"),
   movementId: document.getElementById("movement-id"),
@@ -151,6 +172,7 @@ const elements = {
   filterLine: document.getElementById("filter-line"),
   filterStatus: document.getElementById("filter-status"),
   filterQuery: document.getElementById("filter-query"),
+  movementRecordsQuery: document.getElementById("movement-records-query"),
   movementMetrics: document.getElementById("movement-metrics"),
   movementTable: document.getElementById("movements-table"),
   dailyDate: document.getElementById("daily-date"),
@@ -188,6 +210,7 @@ const elements = {
   clientId: document.getElementById("client-id"),
   clientFormTitle: document.getElementById("client-form-title"),
   clientName: document.getElementById("client-name"),
+  clientAlias: document.getElementById("client-alias"),
   clientDocument: document.getElementById("client-document"),
   clientPhone: document.getElementById("client-phone"),
   clientEmail: document.getElementById("client-email"),
@@ -222,6 +245,7 @@ const elements = {
   programmingMenuButtons: [...document.querySelectorAll("[data-programming-panel]")],
   programmingPanels: {
     clases: document.getElementById("programming-panel-clases"),
+    atletas: document.getElementById("programming-panel-atletas"),
     biblioteca: document.getElementById("programming-panel-biblioteca"),
     metodos: document.getElementById("programming-panel-metodos"),
   },
@@ -265,6 +289,23 @@ const elements = {
   programsMetrics: document.getElementById("programs-metrics"),
   programsTable: document.getElementById("programs-table"),
   programWeekBoard: document.getElementById("program-week-board"),
+  programAthleteForm: document.getElementById("program-athlete-form"),
+  programAthleteFormTitle: document.getElementById("program-athlete-form-title"),
+  programAthleteFormId: document.getElementById("program-athlete-form-id"),
+  programAthleteFullName: document.getElementById("program-athlete-full-name"),
+  programAthleteDocument: document.getElementById("program-athlete-document"),
+  programAthleteBirthDate: document.getElementById("program-athlete-birth-date"),
+  programAthletePhone: document.getElementById("program-athlete-phone"),
+  programAthleteEmail: document.getElementById("program-athlete-email"),
+  programAthleteEmergencyName: document.getElementById("program-athlete-emergency-name"),
+  programAthleteEmergencyPhone: document.getElementById("program-athlete-emergency-phone"),
+  programAthleteMedicalNotes: document.getElementById("program-athlete-medical-notes"),
+  programAthleteNotes: document.getElementById("program-athlete-notes"),
+  programAthleteFormFeedback: document.getElementById("program-athlete-form-feedback"),
+  cancelProgramAthleteEdit: document.getElementById("cancel-program-athlete-edit"),
+  programAthletesMetrics: document.getElementById("program-athletes-metrics"),
+  programAthletesQuery: document.getElementById("program-athletes-query"),
+  programAthletesTable: document.getElementById("program-athletes-table"),
   programExerciseForm: document.getElementById("program-exercise-form"),
   programExerciseFormTitle: document.getElementById("program-exercise-form-title"),
   programExerciseId: document.getElementById("program-exercise-id"),
@@ -282,6 +323,19 @@ const elements = {
   programExercisesMetrics: document.getElementById("program-exercises-metrics"),
   programExercisesTable: document.getElementById("program-exercises-table"),
   programmingMethodsGrid: document.getElementById("programming-methods-grid"),
+  programRosterClassSummary: document.getElementById("program-roster-class-summary"),
+  programAthleteSearch: document.getElementById("program-athlete-search"),
+  programAthleteSuggestions: document.getElementById("program-athlete-suggestions"),
+  programAthleteId: document.getElementById("program-athlete-id"),
+  programAthleteAdd: document.getElementById("program-athlete-add"),
+  programAthleteFeedback: document.getElementById("program-athlete-feedback"),
+  programAthleteSummary: document.getElementById("program-athlete-summary"),
+  programAthleteList: document.getElementById("program-athlete-list"),
+  programAthleteResultsForm: document.getElementById("program-athlete-results-form"),
+  programAthleteResultsTitle: document.getElementById("program-athlete-results-title"),
+  programAthleteResults: document.getElementById("program-athlete-results"),
+  programAthleteGeneralNotes: document.getElementById("program-athlete-general-notes"),
+  programAthleteResultsFeedback: document.getElementById("program-athlete-results-feedback"),
   userForm: document.getElementById("user-form"),
   userFullName: document.getElementById("user-full-name"),
   userUsername: document.getElementById("user-username"),
@@ -508,7 +562,12 @@ function bindEvents() {
   addListener(elements.abono, "input", syncComputedPaymentStatus);
   addListener(elements.boxTransferForm, "submit", handleBoxTransferSubmit);
 
-  [elements.filterLine, elements.filterStatus, elements.filterQuery].forEach(
+  [
+    elements.filterLine,
+    elements.filterStatus,
+    elements.filterQuery,
+    elements.movementRecordsQuery,
+  ].forEach(
     (input) => input.addEventListener("input", renderMovementsView)
   );
   [elements.boxFilter, elements.boxQuery].forEach((input) =>
@@ -519,9 +578,20 @@ function bindEvents() {
   elements.weeklyStart.addEventListener("input", renderWeeklyView);
   elements.weeklyEnd.addEventListener("input", renderWeeklyView);
   elements.monthlyYear.addEventListener("input", renderMonthlyView);
+  [elements.accountingDate, elements.accountingLine, elements.accountingQuery].forEach(
+    (input) => {
+      addListener(input, "input", renderAccountingView);
+      addListener(input, "change", renderAccountingView);
+    }
+  );
 
   elements.saveDailyNotes.addEventListener("click", saveDailyNote);
   elements.saveWeeklyNotes.addEventListener("click", saveWeeklyNote);
+  addListener(
+    elements.accountingDocumentForm,
+    "submit",
+    handleAccountingDocumentSubmit
+  );
   addListener(elements.movementTable, "click", handleMovementTableClick);
   addListener(elements.clienteSearch, "input", handleMovementClientSearchInput);
   addListener(elements.clienteSearch, "focus", () =>
@@ -649,6 +719,57 @@ function bindEvents() {
   addListener(elements.programsTable, "click", handleProgramsTableClick);
   addListener(elements.programWeekBoard, "click", handleProgramsTableClick);
   addListener(elements.programDraftItems, "click", handleProgramDraftItemsClick);
+  addListener(elements.programAthleteAdd, "click", handleProgramAthleteAdd);
+  addListener(elements.programAthleteSearch, "input", handleProgramAthleteSearchInput);
+  addListener(elements.programAthleteSearch, "focus", () =>
+    renderProgramAthleteSuggestions(elements.programAthleteSearch?.value || "", {
+      forceOpen: true,
+    })
+  );
+  addListener(elements.programAthleteSearch, "click", () =>
+    renderProgramAthleteSuggestions(elements.programAthleteSearch?.value || "", {
+      forceOpen: true,
+    })
+  );
+  addListener(elements.programAthleteSearch, "keydown", (event) =>
+    handleProgramAthleteSearchKeydown(event)
+  );
+  addListener(elements.programAthleteSearch, "blur", () => {
+    window.setTimeout(hideProgramAthleteSuggestions, 120);
+  });
+  addListener(elements.programAthleteSearch, "change", () =>
+    syncProgramAthleteSelectionFromSearch({
+      allowClosestMatch: true,
+      allowSingleMatch: true,
+    })
+  );
+  addListener(
+    elements.programAthleteSuggestions,
+    "click",
+    handleProgramAthleteSuggestionClick
+  );
+  addListener(elements.programAthleteList, "click", handleProgramAthleteListClick);
+  addListener(
+    elements.programAthleteResultsForm,
+    "submit",
+    handleProgramAthleteResultsSubmit
+  );
+  addListener(elements.programAthleteForm, "submit", handleProgrammingAthleteSubmit);
+  addListener(
+    elements.cancelProgramAthleteEdit,
+    "click",
+    resetProgrammingAthleteForm
+  );
+  addListener(
+    elements.programAthletesTable,
+    "click",
+    handleProgrammingAthletesTableClick
+  );
+  addListener(
+    elements.programAthletesQuery,
+    "input",
+    renderProgrammingAthletesAdmin
+  );
   addListener(elements.programExerciseForm, "submit", handleProgramExerciseSubmit);
   addListener(
     elements.cancelProgramExerciseEdit,
@@ -918,7 +1039,11 @@ async function loadBootstrap() {
       boxMovements: normalizeMovements(data.boxMovements),
       collections: normalizeCollections(data.collections),
       boxTransfers: normalizeBoxTransfers(data.boxTransfers),
+      accountingDocuments: Array.isArray(data.accountingDocuments)
+        ? data.accountingDocuments
+        : [],
       clients: Array.isArray(data.clients) ? data.clients : [],
+      athletes: normalizeProgrammingAthletes(data.athletes),
       users: Array.isArray(usersPayload?.users) ? usersPayload.users : [],
       notes: {
         daily: data.notes?.daily || {},
@@ -1064,6 +1189,18 @@ function isAssistantUser() {
   return authState.user?.role === "asistente_operativo";
 }
 
+function isAccountantUser() {
+  return authState.user?.role === "contador";
+}
+
+function hasAccountingAccess() {
+  return isAdminUser() || isAccountantUser();
+}
+
+function canWriteOperations() {
+  return isAdminUser() || isAssistantUser();
+}
+
 function getAllowedViews() {
   if (isAdminUser()) {
     return [
@@ -1073,6 +1210,7 @@ function getAllowedViews() {
       "diario",
       "semanal",
       "mensual",
+      "contabilidad",
       "cartera",
       "programacion",
       "listas",
@@ -1085,11 +1223,23 @@ function getAllowedViews() {
     return ["movimientos", "cajas", "cartera"];
   }
 
+  if (isAccountantUser()) {
+    return ["dashboard", "diario", "semanal", "mensual", "contabilidad"];
+  }
+
   return [];
 }
 
 function defaultViewForCurrentUser() {
-  return isAssistantUser() ? "movimientos" : "dashboard";
+  if (isAssistantUser()) {
+    return "movimientos";
+  }
+
+  if (isAccountantUser()) {
+    return "contabilidad";
+  }
+
+  return "dashboard";
 }
 
 function defaultClientPanelForCurrentUser() {
@@ -1102,6 +1252,10 @@ function defaultBoxPanelForCurrentUser() {
 
 function defaultProgrammingPanelForCurrentUser() {
   return "clases";
+}
+
+function defaultAccountingDateForCurrentUser() {
+  return getCurrentIsoDate();
 }
 
 function hasViewAccess(view) {
@@ -1119,6 +1273,10 @@ function applyRoleVisibility() {
     element.classList.toggle("is-hidden", !isAdminUser());
   });
 
+  if (elements.quickMovement) {
+    elements.quickMovement.classList.toggle("is-hidden", !canWriteOperations());
+  }
+
   if (!hasViewAccess(activeView)) {
     switchView(defaultViewForCurrentUser());
   }
@@ -1128,6 +1286,7 @@ function roleLabel(role) {
   return {
     administrador: "Administrador",
     asistente_operativo: "Asistente operativo",
+    contador: "Contador",
   }[role] || "Sin perfil";
 }
 
@@ -1144,6 +1303,12 @@ function hydrateDefaultDates() {
   }
   if (elements.collectionDate) {
     elements.collectionDate.value = today;
+  }
+  if (elements.accountingDate) {
+    elements.accountingDate.value = defaultAccountingDateForCurrentUser();
+  }
+  if (elements.accountingDocumentDate) {
+    elements.accountingDocumentDate.value = today;
   }
   if (elements.boxTransferDate) {
     elements.boxTransferDate.value = today;
@@ -1302,6 +1467,7 @@ function switchView(view, options = {}) {
     diario: "Informe diario",
     semanal: "Informe semanal",
     mensual: "Resumen mensual",
+    contabilidad: "Contabilidad",
     cartera: "Clientes",
     programacion: "Programación",
     listas: "Listas maestras",
@@ -1346,7 +1512,7 @@ function setClientPanel(panel) {
 }
 
 function normalizeProgrammingPanel(panel) {
-  return ["clases", "biblioteca", "metodos"].includes(panel)
+  return ["clases", "atletas", "biblioteca", "metodos"].includes(panel)
     ? panel
     : defaultProgrammingPanelForCurrentUser();
 }
@@ -1452,6 +1618,7 @@ function renderAll() {
   renderDailyView();
   renderWeeklyView();
   renderMonthlyView();
+  renderAccountingView();
   renderPortfolioView();
   renderProgrammingView();
   renderListsView();
@@ -2080,6 +2247,199 @@ function renderMonthlyView() {
     .join("");
 }
 
+function getAccountingSelectedDate() {
+  return elements.accountingDate?.value || getCurrentIsoDate();
+}
+
+function getFilteredAccountingMovements() {
+  const selectedDate = getAccountingSelectedDate();
+  const selectedLine = String(elements.accountingLine?.value || "");
+  const query = normalizeSearchValue(elements.accountingQuery?.value || "");
+
+  return getSortedMovements(
+    state.movements.filter((item) => {
+      if (selectedDate && normalizeDateOnly(item.fecha) !== selectedDate) {
+        return false;
+      }
+
+      if (selectedLine && item.linea !== selectedLine) {
+        return false;
+      }
+
+      if (!query) {
+        return true;
+      }
+
+      return [
+        item.linea,
+        item.tipo,
+        item.categoria,
+        item.cliente,
+        item.descripcion,
+        item.medioPago,
+        item.observaciones,
+      ]
+        .map((value) => normalizeSearchValue(value))
+        .some((value) => value.includes(query));
+    })
+  );
+}
+
+function getFilteredAccountingDocuments() {
+  const selectedDate = getAccountingSelectedDate();
+  const selectedLine = String(elements.accountingLine?.value || "");
+  const query = normalizeSearchValue(elements.accountingQuery?.value || "");
+
+  return [...(state.accountingDocuments || [])].filter((item) => {
+    if (selectedDate && normalizeDateOnly(item.accountingDate) !== selectedDate) {
+      return false;
+    }
+
+    if (selectedLine && item.businessLine !== selectedLine) {
+      return false;
+    }
+
+    if (!query) {
+      return true;
+    }
+
+    return [
+      item.businessLine,
+      item.documentArea,
+      item.documentType,
+      item.reference,
+      item.notes,
+      item.originalName,
+      item.uploadedBy,
+    ]
+      .map((value) => normalizeSearchValue(value))
+      .some((value) => value.includes(query));
+  });
+}
+
+function renderAccountingView() {
+  if (
+    !elements.accountingSummary ||
+    !elements.accountingTable ||
+    !elements.accountingDocumentsTable ||
+    !elements.accountingDocumentsSummary ||
+    !elements.accountingDocumentFeedback
+  ) {
+    return;
+  }
+
+  if (!hasAccountingAccess()) {
+    elements.accountingSummary.innerHTML = "";
+    elements.accountingTable.innerHTML = "";
+    elements.accountingDocumentsTable.innerHTML = "";
+    elements.accountingDocumentsSummary.innerHTML = "";
+    return;
+  }
+
+  if (!elements.accountingDate.value) {
+    elements.accountingDate.value = defaultAccountingDateForCurrentUser();
+  }
+
+  const movements = getFilteredAccountingMovements();
+  const documents = getFilteredAccountingDocuments();
+  const sales = movements.filter((item) => item.tipo === "Ingreso");
+  const purchases = movements.filter((item) => item.tipo === "Costo");
+  const expenses = movements.filter((item) => item.tipo === "Gasto");
+  const netCash = movements.reduce(
+    (acc, item) => acc + Number(item.flujoNeto || 0),
+    0
+  );
+
+  elements.accountingSummary.innerHTML = [
+    createStatCard(
+      "Ventas del día",
+      formatCurrency(sum(sales, "valorTotal")),
+      `${sales.length} movimiento(s) · Cobrado ${formatCurrency(sum(sales, "abono"))}`
+    ),
+    createStatCard(
+      "Compras / costos",
+      formatCurrency(sum(purchases, "valorTotal")),
+      `${purchases.length} movimiento(s)`
+    ),
+    createStatCard(
+      "Gastos",
+      formatCurrency(sum(expenses, "valorTotal")),
+      `${expenses.length} movimiento(s)`
+    ),
+    createStatCard(
+      "Flujo neto",
+      formatCurrency(netCash),
+      `Saldo pendiente ${formatCurrency(sum(movements, "saldoPendiente"))}`
+    ),
+  ].join("");
+
+  elements.accountingTable.innerHTML = movements.length
+    ? movements
+        .map(
+          (item) => `
+            <tr>
+              <td>${formatDate(item.fecha)}</td>
+              <td>${escapeHtml(item.linea)}</td>
+              <td>${escapeHtml(item.tipo)}</td>
+              <td>${escapeHtml(item.categoria)}</td>
+              <td>${item.cliente ? escapeHtml(item.cliente) : "<span class='muted'>Sin cliente</span>"}</td>
+              <td>${item.descripcion ? escapeHtml(item.descripcion) : "<span class='muted'>Sin descripción</span>"}</td>
+              <td>${escapeHtml(item.medioPago)}</td>
+              <td>${formatCurrency(item.valorTotal)}</td>
+              <td>${formatCurrency(item.abono)}</td>
+              <td>${formatCurrency(item.saldoPendiente)}</td>
+            </tr>
+          `
+        )
+        .join("")
+    : `
+      <tr>
+        <td colspan="10" class="empty-state">
+          No hay movimientos para la fecha y filtros seleccionados.
+        </td>
+      </tr>
+    `;
+
+  elements.accountingDocumentsSummary.innerHTML = `
+    <div class="mini-stat"><span>Soportes visibles</span><strong>${documents.length}</strong></div>
+    <div class="mini-stat"><span>Total cargados</span><strong>${(state.accountingDocuments || []).length}</strong></div>
+  `;
+
+  elements.accountingDocumentsTable.innerHTML = documents.length
+    ? documents
+        .map(
+          (item) => `
+            <tr>
+              <td>${formatDate(item.accountingDate)}</td>
+              <td>${escapeHtml(item.businessLine)}</td>
+              <td>${escapeHtml(item.documentArea)}</td>
+              <td>
+                <strong>${escapeHtml(item.documentType)}</strong>
+                ${
+                  item.reference
+                    ? `<small class="muted table-subcopy">${escapeHtml(item.reference)}</small>`
+                    : ""
+                }
+              </td>
+              <td>
+                <a class="table-link-button" href="${escapeHtml(item.fileUrl)}" target="_blank" rel="noopener">
+                  ${escapeHtml(item.originalName)}
+                </a>
+              </td>
+              <td>${escapeHtml(item.uploadedBy || "Sistema")}</td>
+            </tr>
+          `
+        )
+        .join("")
+    : `
+      <tr>
+        <td colspan="6" class="empty-state">
+          No hay soportes contables cargados para esos filtros.
+        </td>
+      </tr>
+    `;
+}
+
 function getCollectionClientKey(clientName = "") {
   return normalizeSearchValue(clientName) || "__sin_cliente__";
 }
@@ -2373,7 +2733,7 @@ function renderClientsAdmin() {
   if (!clients.length) {
     elements.clientsTable.innerHTML = `
       <tr>
-        <td colspan="8" class="empty-state">
+        <td colspan="9" class="empty-state">
           Aún no hay clientes registrados.
         </td>
       </tr>
@@ -2384,7 +2744,7 @@ function renderClientsAdmin() {
   if (!filteredClients.length) {
     elements.clientsTable.innerHTML = `
       <tr>
-        <td colspan="8" class="empty-state">
+        <td colspan="9" class="empty-state">
           No encontramos clientes que coincidan con esa búsqueda.
         </td>
       </tr>
@@ -2400,6 +2760,7 @@ function renderClientsAdmin() {
       return `
         <tr>
           <td>${escapeHtml(client.fullName)}</td>
+          <td>${client.alias ? escapeHtml(client.alias) : "<span class='muted'>Sin alias</span>"}</td>
           <td>${client.documentNumber ? escapeHtml(client.documentNumber) : "<span class='muted'>Sin documento</span>"}</td>
           <td>${client.phone ? escapeHtml(client.phone) : "<span class='muted'>Sin teléfono</span>"}</td>
           <td>${client.email ? escapeHtml(client.email) : "<span class='muted'>Sin correo</span>"}</td>
@@ -2548,12 +2909,14 @@ function renderUsersView() {
   const assistants = users.filter(
     (item) => item.role === "asistente_operativo"
   );
+  const accountants = users.filter((item) => item.role === "contador");
 
   elements.usersMetrics.innerHTML = `
     <div class="mini-stat"><span>Total usuarios</span><strong>${users.length}</strong></div>
     <div class="mini-stat"><span>Activos</span><strong>${activeUsers.length}</strong></div>
     <div class="mini-stat"><span>Administradores</span><strong>${admins.length}</strong></div>
     <div class="mini-stat"><span>Asistentes operativos</span><strong>${assistants.length}</strong></div>
+    <div class="mini-stat"><span>Contadores</span><strong>${accountants.length}</strong></div>
   `;
 
   if (!users.length) {
@@ -2835,6 +3198,59 @@ async function handleUsersClientsImportSubmit(event) {
   }
 }
 
+async function handleAccountingDocumentSubmit(event) {
+  event.preventDefault();
+
+  if (!hasAccountingAccess()) {
+    elements.accountingDocumentFeedback.textContent =
+      "Tu perfil no tiene permiso para cargar soportes contables.";
+    return;
+  }
+
+  const file = elements.accountingDocumentFile?.files?.[0];
+  if (!file) {
+    elements.accountingDocumentFeedback.textContent =
+      "Selecciona el archivo del soporte antes de guardarlo.";
+    return;
+  }
+
+  elements.accountingDocumentFeedback.textContent =
+    "Cargando soporte contable y guardándolo en el sistema...";
+
+  try {
+    const fileBuffer = await file.arrayBuffer();
+    const base64 = arrayBufferToBase64(fileBuffer);
+    await apiRequest("/api/accounting-documents", {
+      method: "POST",
+      body: JSON.stringify({
+        accountingDate: elements.accountingDocumentDate.value,
+        businessLine: elements.accountingDocumentLine.value,
+        documentArea: elements.accountingDocumentArea.value,
+        documentType: elements.accountingDocumentType.value,
+        reference: elements.accountingDocumentReference.value.trim(),
+        notes: elements.accountingDocumentNotes.value.trim(),
+        originalName: file.name,
+        mimeType: file.type || "application/octet-stream",
+        fileSize: Number(file.size || 0),
+        fileDataBase64: base64,
+      }),
+    });
+
+    elements.accountingDocumentForm.reset();
+    elements.accountingDocumentDate.value = getCurrentIsoDate();
+    elements.accountingDocumentLine.value = "Gimnasio";
+    elements.accountingDocumentArea.value = "Venta";
+    elements.accountingDocumentFeedback.textContent =
+      "Soporte contable guardado correctamente.";
+
+    await loadBootstrap();
+    switchView("contabilidad");
+  } catch (error) {
+    elements.accountingDocumentFeedback.textContent =
+      error.message || "No se pudo guardar el soporte contable.";
+  }
+}
+
 function renderReportCards(movements) {
   const gym = movements.filter((item) => item.linea === "Gimnasio");
   const restaurant = movements.filter((item) => item.linea === "Restaurante");
@@ -3081,6 +3497,7 @@ async function handleClientSubmit(event) {
   const clientId = Number(elements.clientId.value || 0);
   const payload = {
     fullName: elements.clientName.value.trim(),
+    alias: elements.clientAlias.value.trim(),
     documentNumber: elements.clientDocument.value.trim(),
     phone: elements.clientPhone.value.trim(),
     email: elements.clientEmail.value.trim(),
@@ -3140,6 +3557,7 @@ async function handleClientsTableClick(event) {
     elements.clientId.value = String(client.id);
     elements.clientFormTitle.textContent = "Editar cliente";
     elements.clientName.value = client.fullName || "";
+    elements.clientAlias.value = client.alias || "";
     elements.clientDocument.value = client.documentNumber || "";
     elements.clientPhone.value = client.phone || "";
     elements.clientEmail.value = client.email || "";
@@ -3479,28 +3897,38 @@ async function saveWeeklyNote() {
 function getFilteredMovements() {
   const line = elements.filterLine.value;
   const status = elements.filterStatus.value;
-  const query = elements.filterQuery.value.trim().toLowerCase();
+  const query = normalizeSearchValue(elements.filterQuery.value || "");
+  const recordsQuery = normalizeSearchValue(
+    elements.movementRecordsQuery?.value || ""
+  );
 
   return state.movements.filter((item) => {
     const lineMatches = line === "Todas" || item.linea === line;
     const statusMatches = status === "Todos" || item.estadoPago === status;
-    const queryMatches =
-      !query ||
+    const linkedClient = getLinkedClientRecord(item.cliente);
+    const searchText = normalizeSearchValue(
       [
         item.linea,
         item.tipo,
         item.categoria,
         item.cliente,
+        linkedClient?.alias,
+        linkedClient?.documentNumber,
+        linkedClient?.phone,
+        linkedClient?.email,
         item.descripcion,
         item.estadoPago,
         item.medioPago,
         item.observaciones,
-      ]
-        .join(" ")
-        .toLowerCase()
-        .includes(query);
+      ].join(" ")
+    );
+    const queryMatches =
+      !query ||
+      searchText.includes(query);
+    const recordsQueryMatches =
+      !recordsQuery || searchText.includes(recordsQuery);
 
-    return lineMatches && statusMatches && queryMatches;
+    return lineMatches && statusMatches && queryMatches && recordsQueryMatches;
   });
 }
 
@@ -3508,6 +3936,8 @@ function renderProgrammingView() {
   renderProgrammingPanels();
   renderProgrammingSummary();
   renderProgrammingPrograms();
+  renderProgramRosterManager();
+  renderProgrammingAthletesAdmin();
   renderProgrammingExercisesLibrary();
   renderProgrammingMethodsReference();
   renderProgramDraftState();
@@ -3524,6 +3954,8 @@ function renderProgrammingSummary() {
     ? state.programmingExercises
     : [];
   const activeExercises = exercises.filter((item) => item.isActive);
+  const athletes = Array.isArray(state.athletes) ? state.athletes : [];
+  const activeAthletes = athletes.filter((item) => item.isActive);
   const methods = Array.isArray(state.programmingMethods) ? state.programmingMethods : [];
   const { start, end } = getCurrentWeekRange();
   const weekPrograms = activePrograms.filter((item) =>
@@ -3545,6 +3977,11 @@ function renderProgrammingSummary() {
       "Ejercicios activos",
       String(activeExercises.length),
       `${exercises.length} ejercicios en biblioteca`
+    ),
+    createStatCard(
+      "Atletas activos",
+      String(activeAthletes.length),
+      `${athletes.length} atletas en base deportiva`
     ),
     createStatCard(
       "Métodos disponibles",
@@ -3571,6 +4008,15 @@ function renderProgrammingPrograms() {
     0
   );
   const weekDays = getWeekBoardDays(referenceDate, programs);
+  const visibleProgramIds = new Set(programs.map((item) => String(item.id)));
+
+  if (
+    selectedProgramRosterId &&
+    !visibleProgramIds.has(String(selectedProgramRosterId))
+  ) {
+    selectedProgramRosterId = null;
+    selectedProgramEnrollmentId = null;
+  }
 
   elements.programsMetrics.innerHTML = `
     <div class="mini-stat"><span>Semana visible</span><strong>${escapeHtml(formatDate(referenceWeek.start))}</strong></div>
@@ -3705,6 +4151,145 @@ function renderProgrammingPrograms() {
       `;
     })
     .join("");
+}
+
+function renderProgrammingAthletesAdmin() {
+  if (!elements.programAthletesMetrics || !elements.programAthletesTable) {
+    return;
+  }
+
+  const athletes = Array.isArray(state.athletes) ? state.athletes : [];
+  const filteredAthletes = getFilteredProgrammingAthletes();
+  const query = getProgrammingAthletesSearchQuery();
+  const activeAthletes = athletes.filter((item) => item.isActive);
+  const withMedicalNotes = athletes.filter((item) => item.medicalNotes).length;
+
+  elements.programAthletesMetrics.innerHTML = `
+    <div class="mini-stat"><span>Total atletas</span><strong>${athletes.length}</strong></div>
+    <div class="mini-stat"><span>Activos</span><strong>${activeAthletes.length}</strong></div>
+    <div class="mini-stat"><span>Con alerta médica</span><strong>${withMedicalNotes}</strong></div>
+    <div class="mini-stat"><span>${query ? "Coincidencias" : "Inactivos"}</span><strong>${query ? filteredAthletes.length : Math.max(athletes.length - activeAthletes.length, 0)}</strong></div>
+  `;
+
+  if (!athletes.length) {
+    elements.programAthletesTable.innerHTML = `
+      <tr>
+        <td colspan="8" class="empty-state">
+          Aún no hay atletas registrados en la base deportiva.
+        </td>
+      </tr>
+    `;
+    return;
+  }
+
+  if (!filteredAthletes.length) {
+    elements.programAthletesTable.innerHTML = `
+      <tr>
+        <td colspan="8" class="empty-state">
+          No encontramos atletas que coincidan con esa búsqueda.
+        </td>
+      </tr>
+    `;
+    return;
+  }
+
+  elements.programAthletesTable.innerHTML = filteredAthletes
+    .map((athlete) => {
+      const nextActive = athlete.isActive ? "false" : "true";
+      const statusTitle = athlete.isActive ? "Inactivar atleta" : "Activar atleta";
+      const contactMarkup =
+        athlete.phone || athlete.email
+          ? [athlete.phone, athlete.email]
+              .filter(Boolean)
+              .map((item) => escapeHtml(item))
+              .join("<br />")
+          : "<span class='muted'>Sin contacto</span>";
+      const emergencyMarkup =
+        athlete.emergencyContactName || athlete.emergencyContactPhone
+          ? [athlete.emergencyContactName, athlete.emergencyContactPhone]
+              .filter(Boolean)
+              .map((item) => escapeHtml(item))
+              .join("<br />")
+          : "<span class='muted'>Sin emergencia</span>";
+
+      return `
+        <tr>
+          <td>
+            <strong>${escapeHtml(athlete.fullName)}</strong>
+            ${athlete.birthDate ? `<small class="muted table-subcopy">Nació: ${escapeHtml(formatDate(athlete.birthDate))}</small>` : ""}
+          </td>
+          <td>${athlete.documentNumber ? escapeHtml(athlete.documentNumber) : "<span class='muted'>Sin documento</span>"}</td>
+          <td>${contactMarkup}</td>
+          <td>${emergencyMarkup}</td>
+          <td><span class="status-pill ${athlete.isActive ? "user-status-active" : "user-status-inactive"}">${athlete.isActive ? "Activo" : "Inactivo"}</span></td>
+          <td>${athlete.medicalNotes ? escapeHtml(athlete.medicalNotes) : "<span class='muted'>Sin alertas</span>"}</td>
+          <td>${athlete.athleteNotes ? escapeHtml(athlete.athleteNotes) : "<span class='muted'>Sin notas</span>"}</td>
+          <td>
+            <div class="row-actions">
+              <button
+                class="table-button icon-button"
+                type="button"
+                data-program-athlete-edit-id="${athlete.id}"
+                title="Editar atleta"
+                aria-label="Editar atleta"
+              >
+                <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                  <path d="M4 20h4l10-10-4-4L4 16v4Z"></path>
+                  <path d="m12 6 4 4"></path>
+                </svg>
+              </button>
+              <button
+                class="table-button ${athlete.isActive ? "danger" : ""} icon-button"
+                type="button"
+                data-program-athlete-status-id="${athlete.id}"
+                data-program-athlete-next-active="${nextActive}"
+                title="${statusTitle}"
+                aria-label="${statusTitle}"
+              >
+                <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                  <path d="M12 3v7"></path>
+                  <path d="M7.8 5.8A9 9 0 1 0 16.2 5.8"></path>
+                </svg>
+              </button>
+            </div>
+          </td>
+        </tr>
+      `;
+    })
+    .join("");
+  applyStackTableLabels(elements.appShell);
+}
+
+function getProgrammingAthletesSearchQuery() {
+  return normalizeSearchValue(elements.programAthletesQuery?.value || "");
+}
+
+function getFilteredProgrammingAthletes() {
+  const athletes = Array.isArray(state.athletes) ? state.athletes : [];
+  const query = getProgrammingAthletesSearchQuery();
+
+  if (!query) {
+    return athletes;
+  }
+
+  return athletes.filter((athlete) =>
+    normalizeSearchValue(
+      [
+        athlete.fullName,
+        athlete.documentNumber,
+        athlete.birthDate,
+        athlete.phone,
+        athlete.email,
+        athlete.emergencyContactName,
+        athlete.emergencyContactPhone,
+        athlete.medicalNotes,
+        athlete.athleteNotes,
+        athlete.isActive ? "activo" : "inactivo",
+      ]
+        .filter(Boolean)
+        .join(" ")
+    ).includes(query)
+  );
 }
 
 function renderProgrammingExercisesLibrary() {
@@ -4252,11 +4837,18 @@ function handleProgramDraftItemsClick(event) {
 }
 
 async function handleProgramsTableClick(event) {
+  const rosterButton = event.target.closest("[data-program-roster-id]");
   const editButton = event.target.closest("[data-program-edit-id]");
   const statusButton = event.target.closest("[data-program-status-id]");
+  const rosterProgramId = rosterButton?.dataset.programRosterId;
   const editProgramId = editButton?.dataset.programEditId;
   const programId = statusButton?.dataset.programStatusId;
   const nextActive = statusButton?.dataset.programNextActive;
+
+  if (rosterProgramId) {
+    selectProgramRoster(rosterProgramId);
+    return;
+  }
 
   if (editProgramId) {
     const program = (state.classPrograms || []).find(
@@ -4811,6 +5403,18 @@ function resetProgramExerciseForm() {
     "Usa familia + categoría + músculo para que luego la búsqueda y la programación sean rápidas.";
 }
 
+function resetProgrammingAthleteForm() {
+  if (!elements.programAthleteForm) {
+    return;
+  }
+
+  elements.programAthleteForm.reset();
+  elements.programAthleteFormId.value = "";
+  elements.programAthleteFormTitle.textContent = "Crear atleta";
+  elements.programAthleteFormFeedback.textContent =
+    "Aquí puedes construir una base independiente de atletas para el módulo de programación.";
+}
+
 function buildProgramPayload() {
   return {
     classDate: elements.programDate.value,
@@ -5308,6 +5912,21 @@ function getFilteredClassPrograms() {
           program.methodName,
           program.objective,
           program.generalNotes,
+          ...(program.enrollments || []).map((enrollment) =>
+            [
+              enrollment.athleteFullName,
+              enrollment.athleteDocumentNumber,
+              enrollment.generalNotes,
+              ...(enrollment.results || []).map((result) =>
+                [
+                  result.exerciseNameSnapshot,
+                  result.resultWeightText,
+                  result.resultTimeText,
+                  result.resultNotes,
+                ].join(" ")
+              ),
+            ].join(" ")
+          ),
           ...(program.items || []).map((item) =>
             [
               item.blockName,
@@ -5538,6 +6157,8 @@ function renderProgramWeekCard(program) {
     isActive: program.isActive,
     statusTitle,
     nextActive,
+    isSelected: String(selectedProgramRosterId || "") === String(program.id),
+    enrollmentsCount: Array.isArray(program.enrollments) ? program.enrollments.length : 0,
   });
 }
 
@@ -5554,6 +6175,8 @@ function renderProgramPreviewCard({
   statusTitle = "",
   nextActive = "",
   isDraft = false,
+  isSelected = false,
+  enrollmentsCount = 0,
 } = {}) {
   const normalizedItems = Array.isArray(items) ? items : [];
   const notesHtml = escapeHtml(String(generalNotes || "").trim()).replace(
@@ -5564,6 +6187,20 @@ function renderProgramPreviewCard({
     ? ""
     : `
         <div class="program-card-actions">
+          <button
+            class="table-button icon-button"
+            type="button"
+            data-program-roster-id="${escapeHtml(String(programId))}"
+            title="Gestionar atletas"
+            aria-label="Gestionar atletas"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+              <path d="M16 21v-2a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4v2"></path>
+              <path d="M9.5 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z"></path>
+              <path d="M20 8v6"></path>
+              <path d="M17 11h6"></path>
+            </svg>
+          </button>
           <button
             class="table-button icon-button"
             type="button"
@@ -5593,7 +6230,7 @@ function renderProgramPreviewCard({
       `;
 
   return `
-    <article class="program-week-card ${isDraft ? "program-preview-card" : ""} ${isActive ? "" : "program-week-card-inactive"}">
+    <article class="program-week-card ${isDraft ? "program-preview-card" : ""} ${isActive ? "" : "program-week-card-inactive"} ${isSelected ? "program-week-card-selected" : ""}">
       <div class="program-card-top">
         <div class="program-card-day">
           ${dayLabel ? `<span class="program-card-day-name">${escapeHtml(dayLabel)}</span>` : ""}
@@ -5602,6 +6239,13 @@ function renderProgramPreviewCard({
         ${actionsMarkup}
       </div>
       <div class="program-card-badge">${escapeHtml(title || "Clase sin nombre")}</div>
+      ${
+        !isDraft
+          ? `<div class="program-card-athletes">${escapeHtml(
+              `${enrollmentsCount} atleta${enrollmentsCount === 1 ? "" : "s"} inscrito${enrollmentsCount === 1 ? "" : "s"}`
+            )}</div>`
+          : ""
+      }
       ${
         methodName
           ? `<div class="program-card-method">${escapeHtml(methodName)}</div>`
@@ -5638,6 +6282,850 @@ function renderProgramPreviewCard({
       }
     </article>
   `;
+}
+
+function getSelectedProgramRoster() {
+  return (
+    (state.classPrograms || []).find(
+      (program) => String(program.id) === String(selectedProgramRosterId || "")
+    ) || null
+  );
+}
+
+function getSelectedProgramEnrollment(program = getSelectedProgramRoster()) {
+  if (!program) {
+    return null;
+  }
+
+  return (
+    (program.enrollments || []).find(
+      (item) => String(item.id) === String(selectedProgramEnrollmentId || "")
+    ) || null
+  );
+}
+
+function syncProgramRosterSelectionState() {
+  const selectedProgram = getSelectedProgramRoster();
+
+  if (!selectedProgram) {
+    selectedProgramRosterId = null;
+    selectedProgramEnrollmentId = null;
+    return;
+  }
+
+  const enrollments = Array.isArray(selectedProgram.enrollments)
+    ? selectedProgram.enrollments
+    : [];
+
+  if (
+    selectedProgramEnrollmentId &&
+    !enrollments.some(
+      (item) => String(item.id) === String(selectedProgramEnrollmentId)
+    )
+  ) {
+    selectedProgramEnrollmentId = null;
+  }
+
+  if (!selectedProgramEnrollmentId && enrollments.length) {
+    selectedProgramEnrollmentId = enrollments[0].id;
+  }
+}
+
+function clearProgramAthleteSearchSelection() {
+  if (elements.programAthleteId) {
+    elements.programAthleteId.value = "";
+  }
+  if (elements.programAthleteSearch) {
+    elements.programAthleteSearch.value = "";
+  }
+  hideProgramAthleteSuggestions();
+}
+
+function selectProgramRoster(programId, options = {}) {
+  const nextProgramId = Number(programId || 0);
+  selectedProgramRosterId =
+    Number.isInteger(nextProgramId) && nextProgramId > 0 ? nextProgramId : null;
+
+  syncProgramRosterSelectionState();
+
+  const selectedProgram = getSelectedProgramRoster();
+  if (!selectedProgram) {
+    renderProgrammingPrograms();
+    renderProgramRosterManager();
+    return;
+  }
+
+  const requestedEnrollmentId = Number(options.enrollmentId || 0);
+  if (
+    Number.isInteger(requestedEnrollmentId) &&
+    requestedEnrollmentId > 0 &&
+    (selectedProgram.enrollments || []).some(
+      (item) => Number(item.id || 0) === requestedEnrollmentId
+    )
+  ) {
+    selectedProgramEnrollmentId = requestedEnrollmentId;
+  } else if (
+    !selectedProgramEnrollmentId &&
+    Array.isArray(selectedProgram.enrollments) &&
+    selectedProgram.enrollments.length
+  ) {
+    selectedProgramEnrollmentId = selectedProgram.enrollments[0].id;
+  }
+
+  renderProgrammingPrograms();
+  renderProgramRosterManager();
+
+  if (options.scroll !== false) {
+    elements.programRosterClassSummary?.scrollIntoView({
+      behavior: "smooth",
+      block: "start",
+    });
+  }
+}
+
+function selectProgramEnrollment(enrollmentId) {
+  const nextEnrollmentId = Number(enrollmentId || 0);
+  selectedProgramEnrollmentId =
+    Number.isInteger(nextEnrollmentId) && nextEnrollmentId > 0
+      ? nextEnrollmentId
+      : null;
+  renderProgramRosterManager();
+}
+
+function renderProgramRosterManager() {
+  if (
+    !elements.programRosterClassSummary ||
+    !elements.programAthleteSummary ||
+    !elements.programAthleteList ||
+    !elements.programAthleteResults ||
+    !elements.programAthleteResultsTitle ||
+    !elements.programAthleteResultsFeedback
+  ) {
+    return;
+  }
+
+  syncProgramRosterSelectionState();
+
+  const selectedProgram = getSelectedProgramRoster();
+  if (!selectedProgram) {
+    elements.programRosterClassSummary.innerHTML =
+      "Selecciona una clase del tablero semanal para inscribir atletas y guardar sus resultados.";
+    elements.programAthleteSummary.innerHTML = "";
+    elements.programAthleteList.innerHTML = `
+      <div class="empty-state">
+        Aún no has elegido una clase para gestionar atletas.
+      </div>
+    `;
+    elements.programAthleteResultsTitle.textContent = "Resultados del atleta";
+    elements.programAthleteResults.innerHTML = `
+      <div class="empty-state">
+        Cuando selecciones una clase, aquí verás los ejercicios y podrás guardar peso, tiempo y anotaciones por atleta.
+      </div>
+    `;
+    if (elements.programAthleteGeneralNotes) {
+      elements.programAthleteGeneralNotes.value = "";
+    }
+    if (elements.programAthleteResultsFeedback) {
+      elements.programAthleteResultsFeedback.textContent =
+        "Primero selecciona una clase del tablero semanal.";
+    }
+    if (elements.programAthleteSearch) {
+      elements.programAthleteSearch.placeholder =
+        "Selecciona una clase para habilitar la inscripción";
+    }
+    clearProgramAthleteSearchSelection();
+    return;
+  }
+
+  const enrollments = Array.isArray(selectedProgram.enrollments)
+    ? selectedProgram.enrollments
+    : [];
+  const selectedEnrollment = getSelectedProgramEnrollment(selectedProgram);
+  const athletesWithResults = enrollments.filter((item) =>
+    (item.results || []).some(
+      (result) =>
+        result.resultWeightText || result.resultTimeText || result.resultNotes
+    )
+  );
+
+  elements.programRosterClassSummary.innerHTML = `
+    <strong>${escapeHtml(selectedProgram.title || "Clase sin nombre")}</strong>
+    <small>
+      ${formatDate(selectedProgram.classDate)} ·
+      ${escapeHtml(selectedProgram.methodName || "Sin método")} ·
+      ${escapeHtml(selectedProgram.focusArea || "Sin enfoque")}
+    </small>
+  `;
+
+  elements.programAthleteSummary.innerHTML = `
+    <div class="mini-stat"><span>Inscritos</span><strong>${enrollments.length}</strong></div>
+    <div class="mini-stat"><span>Con resultados</span><strong>${athletesWithResults.length}</strong></div>
+    <div class="mini-stat"><span>Ejercicios de la clase</span><strong>${(selectedProgram.items || []).length}</strong></div>
+  `;
+
+  if (elements.programAthleteSearch) {
+    elements.programAthleteSearch.placeholder = getAvailableProgramAthleteRecords()
+      .length
+      ? "Escribe para buscar un atleta"
+      : "No hay atletas activos disponibles para inscribir";
+  }
+
+  elements.programAthleteList.innerHTML = enrollments.length
+    ? enrollments
+        .map((item) => {
+          const isSelected =
+            String(item.id) === String(selectedProgramEnrollmentId || "");
+          const resultCount = (item.results || []).filter(
+            (result) =>
+              result.resultWeightText ||
+              result.resultTimeText ||
+              result.resultNotes
+          ).length;
+
+          return `
+            <article class="program-athlete-card ${isSelected ? "is-selected" : ""}">
+              <div class="program-athlete-card-copy">
+                <strong>${escapeHtml(item.athleteFullName || "Atleta sin nombre")}</strong>
+                <small>${escapeHtml(buildProgramAthleteMeta(item))}</small>
+              </div>
+              <div class="program-athlete-card-side">
+                <span class="status-pill method-pill">${resultCount} resultado${resultCount === 1 ? "" : "s"}</span>
+                <div class="table-actions">
+                  <button
+                    class="table-button icon-button"
+                    type="button"
+                    data-program-enrollment-select-id="${escapeHtml(String(item.id))}"
+                    title="Abrir resultados"
+                    aria-label="Abrir resultados"
+                  >
+                    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                      <path d="M5 12h14"></path>
+                      <path d="m12 5 7 7-7 7"></path>
+                    </svg>
+                  </button>
+                  <button
+                    class="table-button icon-button danger"
+                    type="button"
+                    data-program-enrollment-remove-id="${escapeHtml(String(item.id))}"
+                    title="Quitar atleta"
+                    aria-label="Quitar atleta"
+                  >
+                    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                      <path d="M3 6h18"></path>
+                      <path d="M8 6V4h8v2"></path>
+                      <path d="M19 6l-1 14H6L5 6"></path>
+                    </svg>
+                  </button>
+                </div>
+              </div>
+            </article>
+          `;
+        })
+        .join("")
+    : `
+      <div class="empty-state">
+        Esta clase aún no tiene atletas inscritos.
+      </div>
+    `;
+
+  if (!selectedEnrollment) {
+    elements.programAthleteResultsTitle.textContent = "Resultados del atleta";
+    elements.programAthleteResults.innerHTML = `
+      <div class="empty-state">
+        Inscribe un atleta o selecciona uno de la lista para cargar sus marcas.
+      </div>
+    `;
+    if (elements.programAthleteGeneralNotes) {
+      elements.programAthleteGeneralNotes.value = "";
+    }
+    elements.programAthleteResultsFeedback.textContent =
+      "Selecciona un atleta para registrar peso, tiempo y anotaciones por ejercicio.";
+    return;
+  }
+
+  const resultMap = new Map(
+    (selectedEnrollment.results || []).map((item) => [
+      Number(item.itemSortOrder || 0),
+      item,
+    ])
+  );
+
+  elements.programAthleteResultsTitle.textContent = `Resultados de ${selectedEnrollment.athleteFullName || "Atleta"}`;
+  elements.programAthleteResults.innerHTML = (selectedProgram.items || []).length
+    ? (selectedProgram.items || [])
+        .map((item, index) => {
+          const currentResult =
+            resultMap.get(Number(item.sortOrder || 0)) || {};
+
+          return `
+            <article
+              class="program-athlete-result-card"
+              data-program-result-row
+              data-item-sort-order="${escapeHtml(String(item.sortOrder || index + 1))}"
+            >
+              <div class="program-athlete-result-head">
+                <strong>${index + 1}. ${escapeHtml(item.exerciseName || "Ejercicio")}</strong>
+                <small>${escapeHtml(buildProgramDisplayLine(item))}</small>
+              </div>
+              <div class="form-grid compact-program-result-grid">
+                <label>
+                  Peso realizado
+                  <input
+                    type="text"
+                    data-program-result-weight
+                    value="${escapeHtml(currentResult.resultWeightText || "")}"
+                    placeholder="Ej. 20 kg, 2 x 15 lb"
+                  />
+                </label>
+                <label>
+                  Tiempo / score
+                  <input
+                    type="text"
+                    data-program-result-time
+                    value="${escapeHtml(currentResult.resultTimeText || "")}"
+                    placeholder="Ej. 4:32, 12 rounds, 220 m"
+                  />
+                </label>
+                <label class="span-2">
+                  Anotaciones
+                  <textarea
+                    rows="2"
+                    data-program-result-notes
+                    placeholder="Cómo lo ejecutó, ajustes, observaciones..."
+                  >${escapeHtml(currentResult.resultNotes || "")}</textarea>
+                </label>
+              </div>
+            </article>
+          `;
+        })
+        .join("")
+    : `
+      <div class="empty-state">
+        Esta clase todavía no tiene ejercicios guardados.
+      </div>
+    `;
+
+  if (elements.programAthleteGeneralNotes) {
+    elements.programAthleteGeneralNotes.value =
+      selectedEnrollment.generalNotes || "";
+  }
+  elements.programAthleteResultsFeedback.textContent =
+    "Guarda aquí las marcas del atleta por ejercicio y cualquier observación general de la clase.";
+}
+
+function buildProgramAthleteMeta(enrollment) {
+  if (!enrollment) {
+    return "";
+  }
+
+  return (
+    [
+      enrollment.athleteDocumentNumber || "Sin documento",
+      enrollment.athletePhone,
+      enrollment.athleteEmail,
+    ]
+      .filter(Boolean)
+      .join(" · ") || "Atleta activo"
+  );
+}
+
+function getAvailableProgramAthleteRecords() {
+  const selectedProgram = getSelectedProgramRoster();
+  const enrolledIds = new Set(
+    (selectedProgram?.enrollments || []).map((item) => Number(item.athleteId || 0))
+  );
+
+  return (state.athletes || [])
+    .filter((item) => item.isActive)
+    .filter((item) => !enrolledIds.has(Number(item.id || 0)))
+    .map((item) => ({
+      lookupKey: `athlete:${String(item.id)}`,
+      athleteId: Number(item.id || 0),
+      fullName: String(item.fullName || "").trim(),
+      documentNumber: String(item.documentNumber || "").trim(),
+      birthDate: normalizeDateOnly(item.birthDate),
+      phone: String(item.phone || "").trim(),
+      email: String(item.email || "").trim(),
+      emergencyContactName: String(item.emergencyContactName || "").trim(),
+      emergencyContactPhone: String(item.emergencyContactPhone || "").trim(),
+      medicalNotes: String(item.medicalNotes || "").trim(),
+      athleteNotes: String(item.athleteNotes || "").trim(),
+    }));
+}
+
+function getProgramAthleteMatches(query = "") {
+  const normalizedQuery = normalizeSearchValue(String(query || "").trim());
+  const records = getAvailableProgramAthleteRecords();
+
+  if (!normalizedQuery) {
+    return records;
+  }
+
+  return records.filter((item) =>
+    normalizeSearchValue(
+      [
+        item.fullName,
+        item.documentNumber,
+        item.birthDate,
+        item.phone,
+        item.email,
+        item.emergencyContactName,
+        item.emergencyContactPhone,
+        item.medicalNotes,
+        item.athleteNotes,
+      ]
+        .filter(Boolean)
+        .join(" ")
+    ).includes(normalizedQuery)
+  );
+}
+
+function renderProgramAthleteSuggestions(query = "", options = {}) {
+  if (!elements.programAthleteSuggestions) {
+    return;
+  }
+
+  const forceOpen = Boolean(options.forceOpen);
+  const matches = getProgramAthleteMatches(query);
+
+  if (!matches.length && !forceOpen) {
+    elements.programAthleteSuggestions.innerHTML = "";
+    elements.programAthleteSuggestions.classList.add("is-hidden");
+    return;
+  }
+
+  if (!matches.length) {
+    elements.programAthleteSuggestions.innerHTML = `
+      <div class="search-suggestion-empty">
+        No hay atletas disponibles con ese filtro.
+      </div>
+    `;
+    elements.programAthleteSuggestions.classList.remove("is-hidden");
+    return;
+  }
+
+  elements.programAthleteSuggestions.innerHTML = matches
+    .slice(0, 10)
+    .map(
+      (item) => `
+        <button
+          class="search-suggestion-item"
+          type="button"
+          data-program-athlete-key="${escapeHtml(item.lookupKey)}"
+        >
+          <span class="search-suggestion-title">${escapeHtml(item.fullName || "")}</span>
+          <span class="search-suggestion-meta">${escapeHtml(buildProgramAthleteSuggestionMeta(item))}</span>
+        </button>
+      `
+    )
+    .join("");
+  elements.programAthleteSuggestions.classList.remove("is-hidden");
+}
+
+function hideProgramAthleteSuggestions() {
+  if (!elements.programAthleteSuggestions) {
+    return;
+  }
+
+  elements.programAthleteSuggestions.classList.add("is-hidden");
+}
+
+function buildProgramAthleteSuggestionMeta(item) {
+  return (
+    [
+      item.documentNumber || "Sin documento",
+      item.phone,
+      item.email,
+      item.medicalNotes ? "Con alerta médica" : "",
+    ]
+      .filter(Boolean)
+      .join(" · ") || "Atleta activo"
+  );
+}
+
+function applyProgramAthleteSelection(record) {
+  if (!record) {
+    return false;
+  }
+
+  if (elements.programAthleteId) {
+    elements.programAthleteId.value = String(record.athleteId || "");
+  }
+  if (elements.programAthleteSearch) {
+    elements.programAthleteSearch.value = String(record.fullName || "");
+  }
+  hideProgramAthleteSuggestions();
+  return true;
+}
+
+function syncProgramAthleteSelectionFromSearch(options = {}) {
+  if (!elements.programAthleteSearch || !elements.programAthleteId) {
+    return false;
+  }
+
+  const rawValue = elements.programAthleteSearch.value.trim();
+  if (!rawValue) {
+    elements.programAthleteId.value = "";
+    return true;
+  }
+
+  const matches = getProgramAthleteMatches(rawValue);
+  const normalizedQuery = normalizeSearchValue(rawValue);
+
+  let matchedRecord =
+    matches.find(
+      (item) => normalizeSearchValue(String(item.fullName || "")) === normalizedQuery
+    ) || null;
+
+  if (!matchedRecord && options.allowSingleMatch && matches.length === 1) {
+    matchedRecord = matches[0];
+  }
+
+  if (!matchedRecord && options.allowClosestMatch) {
+    matchedRecord =
+      matches.find((item) =>
+        normalizeSearchValue(String(item.fullName || "")).startsWith(
+          normalizedQuery
+        )
+      ) || null;
+  }
+
+  if (!matchedRecord) {
+    elements.programAthleteId.value = "";
+    return false;
+  }
+
+  return applyProgramAthleteSelection(matchedRecord);
+}
+
+function handleProgramAthleteSearchInput() {
+  syncProgramAthleteSelectionFromSearch();
+  renderProgramAthleteSuggestions(elements.programAthleteSearch?.value || "", {
+    forceOpen: true,
+  });
+}
+
+function handleProgramAthleteSearchKeydown(event) {
+  if (event.key === "Escape") {
+    hideProgramAthleteSuggestions();
+    return;
+  }
+
+  if (event.key !== "Enter") {
+    return;
+  }
+
+  const matches = getProgramAthleteMatches(
+    elements.programAthleteSearch?.value || ""
+  );
+
+  if (!matches.length) {
+    return;
+  }
+
+  event.preventDefault();
+  applyProgramAthleteSelection(matches[0]);
+}
+
+function handleProgramAthleteSuggestionClick(event) {
+  const trigger = event.target.closest("[data-program-athlete-key]");
+  if (!trigger) {
+    return;
+  }
+
+  const selectedRecord = getAvailableProgramAthleteRecords().find(
+    (item) => item.lookupKey === trigger.dataset.programAthleteKey
+  );
+
+  if (!selectedRecord) {
+    return;
+  }
+
+  applyProgramAthleteSelection(selectedRecord);
+}
+
+async function handleProgramAthleteAdd() {
+  const selectedProgram = getSelectedProgramRoster();
+  if (!selectedProgram) {
+    if (elements.programAthleteFeedback) {
+      elements.programAthleteFeedback.textContent =
+        "Selecciona primero una clase para poder inscribir atletas.";
+    }
+    return;
+  }
+
+  syncProgramAthleteSelectionFromSearch({
+    allowClosestMatch: true,
+    allowSingleMatch: true,
+  });
+
+  const athleteId = Number(elements.programAthleteId?.value || 0);
+  if (!Number.isInteger(athleteId) || athleteId <= 0) {
+    if (elements.programAthleteFeedback) {
+      elements.programAthleteFeedback.textContent =
+        "Selecciona un atleta válido de la lista antes de inscribirlo.";
+    }
+    return;
+  }
+
+  try {
+    await apiRequest(`/api/programming/programs/${selectedProgram.id}/enrollments`, {
+      method: "POST",
+      body: JSON.stringify({ athleteId }),
+    });
+
+    await loadBootstrap();
+    const refreshedProgram = (state.classPrograms || []).find(
+      (item) => String(item.id) === String(selectedProgram.id)
+    );
+    const enrollment = (refreshedProgram?.enrollments || []).find(
+      (item) => Number(item.athleteId || 0) === athleteId
+    );
+
+    clearProgramAthleteSearchSelection();
+    if (elements.programAthleteFeedback) {
+      elements.programAthleteFeedback.textContent =
+        "Atleta inscrito correctamente en la clase.";
+    }
+    selectProgramRoster(selectedProgram.id, {
+      enrollmentId: enrollment?.id || null,
+      scroll: false,
+    });
+  } catch (error) {
+    if (elements.programAthleteFeedback) {
+      elements.programAthleteFeedback.textContent =
+        error.message || "No se pudo inscribir el atleta.";
+    }
+  }
+}
+
+async function handleProgramAthleteListClick(event) {
+  const selectButton = event.target.closest("[data-program-enrollment-select-id]");
+  const removeButton = event.target.closest("[data-program-enrollment-remove-id]");
+
+  if (selectButton) {
+    selectProgramEnrollment(selectButton.dataset.programEnrollmentSelectId);
+    return;
+  }
+
+  if (!removeButton) {
+    return;
+  }
+
+  const selectedProgram = getSelectedProgramRoster();
+  const enrollmentId = Number(removeButton.dataset.programEnrollmentRemoveId || 0);
+  const enrollment = (selectedProgram?.enrollments || []).find(
+    (item) => Number(item.id || 0) === enrollmentId
+  );
+
+  if (!selectedProgram || !enrollmentId || !enrollment) {
+    return;
+  }
+
+  const confirmed = window.confirm(
+    `¿Deseas retirar a ${enrollment.athleteFullName || "este atleta"} de la clase?`
+  );
+  if (!confirmed) {
+    return;
+  }
+
+  try {
+    await apiRequest(
+      `/api/programming/programs/${selectedProgram.id}/enrollments/${enrollmentId}`,
+      {
+        method: "DELETE",
+      }
+    );
+
+    await loadBootstrap();
+    if (elements.programAthleteFeedback) {
+      elements.programAthleteFeedback.textContent =
+        "Atleta retirado de la clase.";
+    }
+    selectProgramRoster(selectedProgram.id, { scroll: false });
+  } catch (error) {
+    if (elements.programAthleteFeedback) {
+      elements.programAthleteFeedback.textContent =
+        error.message || "No se pudo retirar el atleta de la clase.";
+    }
+  }
+}
+
+async function handleProgramAthleteResultsSubmit(event) {
+  event.preventDefault();
+
+  const selectedProgram = getSelectedProgramRoster();
+  const selectedEnrollment = getSelectedProgramEnrollment(selectedProgram);
+
+  if (!selectedProgram || !selectedEnrollment) {
+    elements.programAthleteResultsFeedback.textContent =
+      "Selecciona una clase y un atleta antes de guardar resultados.";
+    return;
+  }
+
+  const results = [...elements.programAthleteResults.querySelectorAll("[data-program-result-row]")]
+    .map((row) => ({
+      itemSortOrder: Number(row.dataset.itemSortOrder || 0),
+      resultWeightText:
+        row.querySelector("[data-program-result-weight]")?.value.trim() || "",
+      resultTimeText:
+        row.querySelector("[data-program-result-time]")?.value.trim() || "",
+      resultNotes:
+        row.querySelector("[data-program-result-notes]")?.value.trim() || "",
+    }));
+
+  try {
+    await apiRequest(
+      `/api/programming/programs/${selectedProgram.id}/enrollments/${selectedEnrollment.id}/results`,
+      {
+        method: "PUT",
+        body: JSON.stringify({
+          generalNotes: elements.programAthleteGeneralNotes?.value.trim() || "",
+          results,
+        }),
+      }
+    );
+
+    await loadBootstrap();
+    elements.programAthleteResultsFeedback.textContent =
+      "Resultados del atleta guardados correctamente.";
+    selectProgramRoster(selectedProgram.id, {
+      enrollmentId: selectedEnrollment.id,
+      scroll: false,
+    });
+  } catch (error) {
+    elements.programAthleteResultsFeedback.textContent =
+      error.message || "No se pudieron guardar los resultados del atleta.";
+  }
+}
+
+async function handleProgrammingAthleteSubmit(event) {
+  event.preventDefault();
+
+  const athleteId = Number(elements.programAthleteFormId?.value || 0);
+  const payload = {
+    fullName: elements.programAthleteFullName?.value.trim() || "",
+    documentNumber: elements.programAthleteDocument?.value.trim() || "",
+    birthDate: elements.programAthleteBirthDate?.value || "",
+    phone: elements.programAthletePhone?.value.trim() || "",
+    email: elements.programAthleteEmail?.value.trim() || "",
+    emergencyContactName:
+      elements.programAthleteEmergencyName?.value.trim() || "",
+    emergencyContactPhone:
+      elements.programAthleteEmergencyPhone?.value.trim() || "",
+    medicalNotes: elements.programAthleteMedicalNotes?.value.trim() || "",
+    athleteNotes: elements.programAthleteNotes?.value.trim() || "",
+  };
+
+  if (!payload.fullName) {
+    if (elements.programAthleteFormFeedback) {
+      elements.programAthleteFormFeedback.textContent =
+        "El nombre del atleta es obligatorio.";
+    }
+    return;
+  }
+
+  try {
+    if (athleteId > 0) {
+      await apiRequest(`/api/programming/athletes/${athleteId}`, {
+        method: "PUT",
+        body: JSON.stringify(payload),
+      });
+    } else {
+      await apiRequest("/api/programming/athletes", {
+        method: "POST",
+        body: JSON.stringify(payload),
+      });
+    }
+
+    resetProgrammingAthleteForm();
+    await loadBootstrap();
+    switchView("programacion", {
+      programmingPanel: "atletas",
+    });
+    elements.programAthleteFormFeedback.textContent =
+      athleteId > 0
+        ? "Atleta actualizado correctamente."
+        : "Atleta registrado correctamente.";
+  } catch (error) {
+    if (elements.programAthleteFormFeedback) {
+      elements.programAthleteFormFeedback.textContent = error.message;
+    }
+  }
+}
+
+async function handleProgrammingAthletesTableClick(event) {
+  const editButton = event.target.closest("[data-program-athlete-edit-id]");
+  const statusButton = event.target.closest("[data-program-athlete-status-id]");
+  const editAthleteId = editButton?.dataset.programAthleteEditId;
+  const athleteId = statusButton?.dataset.programAthleteStatusId;
+  const nextActive = statusButton?.dataset.programAthleteNextActive;
+
+  if (editAthleteId) {
+    const athlete = (state.athletes || []).find(
+      (item) => String(item.id) === String(editAthleteId)
+    );
+
+    if (!athlete) {
+      elements.programAthleteFormFeedback.textContent =
+        "No encontré el atleta que quieres editar.";
+      return;
+    }
+
+    elements.programAthleteFormId.value = String(athlete.id);
+    elements.programAthleteFormTitle.textContent = "Editar atleta";
+    elements.programAthleteFullName.value = athlete.fullName || "";
+    elements.programAthleteDocument.value = athlete.documentNumber || "";
+    elements.programAthleteBirthDate.value = athlete.birthDate || "";
+    elements.programAthletePhone.value = athlete.phone || "";
+    elements.programAthleteEmail.value = athlete.email || "";
+    elements.programAthleteEmergencyName.value =
+      athlete.emergencyContactName || "";
+    elements.programAthleteEmergencyPhone.value =
+      athlete.emergencyContactPhone || "";
+    elements.programAthleteMedicalNotes.value = athlete.medicalNotes || "";
+    elements.programAthleteNotes.value = athlete.athleteNotes || "";
+    elements.programAthleteFormFeedback.textContent =
+      "Actualiza la ficha del atleta y guarda para aplicar el cambio.";
+    switchView("programacion", {
+      programmingPanel: "atletas",
+    });
+    elements.programAthleteFullName.focus();
+    return;
+  }
+
+  if (!athleteId || !nextActive) {
+    return;
+  }
+
+  const activate = nextActive === "true";
+  const confirmed = window.confirm(
+    activate
+      ? "¿Deseas activar este atleta?"
+      : "¿Deseas inactivar este atleta?"
+  );
+
+  if (!confirmed) {
+    return;
+  }
+
+  try {
+    await apiRequest(`/api/programming/athletes/${athleteId}/active`, {
+      method: "PATCH",
+      body: JSON.stringify({
+        isActive: activate,
+      }),
+    });
+    await loadBootstrap();
+    switchView("programacion", {
+      programmingPanel: "atletas",
+    });
+    elements.programAthleteFormFeedback.textContent = activate
+      ? "Atleta activado correctamente."
+      : "Atleta inactivado correctamente.";
+  } catch (error) {
+    elements.programAthleteFormFeedback.textContent = error.message;
+  }
 }
 
 function getCurrentWeekRange() {
@@ -5678,6 +7166,19 @@ function normalizeProgrammingExercises(items) {
   }));
 }
 
+function normalizeProgrammingAthletes(items) {
+  if (!Array.isArray(items)) {
+    return [];
+  }
+
+  return items.map((item) => ({
+    ...item,
+    id: Number(item.id || 0),
+    birthDate: normalizeDateOnly(item.birthDate),
+    isActive: Boolean(item.isActive),
+  }));
+}
+
 function normalizeClassPrograms(items) {
   if (!Array.isArray(items)) {
     return [];
@@ -5698,6 +7199,23 @@ function normalizeClassPrograms(items) {
           sortOrder: Number(entry.sortOrder || 0),
           exerciseId: Number(entry.exerciseId || 0),
           methodId: entry.methodId ? Number(entry.methodId) : null,
+        }))
+      : [],
+    enrollments: Array.isArray(item.enrollments)
+      ? item.enrollments.map((entry) => ({
+          ...entry,
+          id: Number(entry.id || 0),
+          classProgramId: Number(entry.classProgramId || 0),
+          athleteId: Number(entry.athleteId || 0),
+          athleteBirthDate: normalizeDateOnly(entry.athleteBirthDate),
+          results: Array.isArray(entry.results)
+            ? entry.results.map((result) => ({
+                ...result,
+                id: Number(result.id || 0),
+                enrollmentId: Number(result.enrollmentId || 0),
+                itemSortOrder: Number(result.itemSortOrder || 0),
+              }))
+            : [],
         }))
       : [],
   }));
@@ -6438,6 +7956,7 @@ function getMovementClientMatches(query = "", options = {}) {
       [
         item.isEmpty ? "sin cliente movimiento sin cliente" : "",
         item.fullName,
+        item.alias,
         item.documentNumber,
         item.phone,
         item.email,
@@ -6457,6 +7976,7 @@ function getMovementClientRecords(selectedValue = elements.cliente?.value || "")
   const records = activeClients.map((item) => ({
     lookupKey: `client:${String(item.id)}`,
     fullName: String(item.fullName || "").trim(),
+    alias: String(item.alias || "").trim(),
     documentNumber: String(item.documentNumber || "").trim(),
     phone: String(item.phone || "").trim(),
     email: String(item.email || "").trim(),
@@ -6504,6 +8024,7 @@ function buildMovementClientSearchMeta(client) {
 
   return (
     [
+      client.alias ? `Alias: ${client.alias}` : "",
       client.documentNumber || "Sin documento",
       client.phone,
       client.email,
@@ -6553,6 +8074,7 @@ function syncMovementClientSelectionFromSearch(options = {}) {
     selectedOptions.find(
       (item) =>
         normalizeSearchValue(String(item.fullName || "")) === normalizedQuery
+          || normalizeSearchValue(String(item.alias || "")) === normalizedQuery
     ) || null;
 
   if (!matchedClient && options.allowSingleMatch && selectedOptions.length === 1) {
@@ -6563,6 +8085,9 @@ function syncMovementClientSelectionFromSearch(options = {}) {
     matchedClient =
       selectedOptions.find((item) =>
         normalizeSearchValue(String(item.fullName || "")).startsWith(
+          normalizedQuery
+        ) ||
+        normalizeSearchValue(String(item.alias || "")).startsWith(
           normalizedQuery
         )
       ) || null;
@@ -7428,6 +8953,7 @@ function getFilteredClientsAdminList() {
     normalizeSearchValue(
       [
         client.fullName,
+        client.alias,
         client.documentNumber,
         client.phone,
         client.email,
@@ -7442,6 +8968,135 @@ function getFilteredClientsAdminList() {
 
 function getPortfolioSearchQuery() {
   return normalizeSearchValue(elements.portfolioQuery?.value || "");
+}
+
+function getLinkedClientRecord(clientName = "") {
+  const normalizedClientName = normalizeSearchValue(clientName);
+  if (!normalizedClientName) {
+    return null;
+  }
+
+  return (
+    (state.clients || []).find(
+      (client) =>
+        normalizeSearchValue(client.fullName) === normalizedClientName
+    ) ||
+    (state.clients || []).find(
+      (client) => normalizeSearchValue(client.alias) === normalizedClientName
+    ) ||
+    null
+  );
+}
+
+function getClientPrimaryName(clientName = "") {
+  const linkedClient = getLinkedClientRecord(clientName);
+  return (
+    String(linkedClient?.fullName || clientName || "").trim() ||
+    "Cliente sin nombre"
+  );
+}
+
+function getClientAliasMeta(clientName = "") {
+  const linkedClient = getLinkedClientRecord(clientName);
+  const alias = String(linkedClient?.alias || "").trim();
+  const primaryName = getClientPrimaryName(clientName);
+
+  if (!alias || normalizeSearchValue(alias) === normalizeSearchValue(primaryName)) {
+    return "";
+  }
+
+  return `Alias: ${alias}`;
+}
+
+function formatClientDisplayName(clientName = "") {
+  const primaryName = getClientPrimaryName(clientName);
+  const aliasMeta = getClientAliasMeta(clientName);
+
+  if (!aliasMeta) {
+    return primaryName;
+  }
+
+  return `${primaryName} (${aliasMeta.replace(/^Alias:\s*/, "")})`;
+}
+
+function renderPortfolioSummary(item, isExpanded) {
+  const clientName = getClientPrimaryName(item.cliente);
+  const clientAliasMeta = getClientAliasMeta(item.cliente);
+  const summaryText = item.descripcion || item.categoria || "Cuenta pendiente";
+  const summaryMeta = [
+    clientAliasMeta,
+    summaryText,
+    formatDate(item.fecha),
+    item.linea,
+    item.categoria,
+  ]
+    .filter(Boolean)
+    .map((value) => escapeHtml(String(value)))
+    .join(" · ");
+
+  return `
+    <div class="compact-summary">
+      <div class="compact-summary-head">
+        <div class="compact-summary-copy">
+          ${
+            item.cliente
+              ? `<button
+                  class="table-link-button compact-client-button"
+                  type="button"
+                  data-collect-client="${escapeHtml(item.cliente)}"
+                  data-collect-id="${item.id}"
+                >${escapeHtml(clientName)}</button>`
+              : "<strong>Sin cliente</strong>"
+          }
+        </div>
+        ${createDetailToggleButton(
+          "data-portfolio-detail-id",
+          item.id,
+          isExpanded,
+          isExpanded ? "Ocultar detalle de la cuenta" : "Ver detalle de la cuenta"
+        )}
+      </div>
+      <small class="compact-summary-meta">${summaryMeta}</small>
+    </div>
+  `;
+}
+
+function getSelectedCollectionClientDisplayName() {
+  const movements = getSelectedCollectionClientMovements();
+  return formatClientDisplayName(movements[0]?.cliente);
+}
+
+function getFilteredPortfolioMovements() {
+  const query = getPortfolioSearchQuery();
+  const portfolio = getPortfolioMovements();
+
+  if (!query) {
+    return portfolio;
+  }
+
+  return portfolio.filter((item) => {
+    const linkedClient = getLinkedClientRecord(item.cliente);
+
+    return normalizeSearchValue(
+      [
+        item.linea,
+        item.fecha,
+        item.cliente,
+        linkedClient?.alias,
+        linkedClient?.documentNumber,
+        linkedClient?.phone,
+        linkedClient?.email,
+        item.categoria,
+        item.descripcion,
+        item.estadoPago,
+        item.medioPago,
+        item.observaciones,
+        item.valorTotal,
+        item.abono,
+        item.saldoPendiente,
+      ].join(" ")
+    ).includes(query);
+  });
 }
 
 function normalizeSearchValue(value) {
