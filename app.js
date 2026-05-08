@@ -131,12 +131,14 @@ const elements = {
   dailyBoxReport: document.getElementById("daily-box-report"),
   weeklyBoxReport: document.getElementById("weekly-box-report"),
   monthlyBoxReport: document.getElementById("monthly-box-report"),
-  accountingDate: document.getElementById("accounting-date"),
+  accountingDateFrom: document.getElementById("accounting-date-from"),
+  accountingDateTo: document.getElementById("accounting-date-to"),
   accountingLine: document.getElementById("accounting-line"),
   accountingQuery: document.getElementById("accounting-query"),
   accountingSummary: document.getElementById("accounting-summary"),
   accountingTable: document.getElementById("accounting-table"),
   accountingDocumentForm: document.getElementById("accounting-document-form"),
+  accountingDocumentId: document.getElementById("accounting-document-id"),
   accountingDocumentDate: document.getElementById("accounting-document-date"),
   accountingDocumentLine: document.getElementById("accounting-document-line"),
   accountingDocumentArea: document.getElementById("accounting-document-area"),
@@ -144,9 +146,15 @@ const elements = {
   accountingDocumentReference: document.getElementById("accounting-document-reference"),
   accountingDocumentFile: document.getElementById("accounting-document-file"),
   accountingDocumentNotes: document.getElementById("accounting-document-notes"),
+  accountingDocumentCancelEdit: document.getElementById(
+    "accounting-document-cancel-edit"
+  ),
   accountingDocumentFeedback: document.getElementById("accounting-document-feedback"),
   accountingDocumentsSummary: document.getElementById("accounting-documents-summary"),
   accountingDocumentsTable: document.getElementById("accounting-documents-table"),
+  accountingDocumentsDownloadsHead: document.getElementById(
+    "accounting-documents-downloads-head"
+  ),
   movementForm: document.getElementById("movement-form"),
   movementFormTitle: document.getElementById("movement-form-title"),
   movementId: document.getElementById("movement-id"),
@@ -555,7 +563,10 @@ function bindEvents() {
     await loadBootstrap();
   });
 
-  elements.linea.addEventListener("change", syncCategoryOptions);
+  elements.linea.addEventListener("change", () =>
+    syncCategoryOptions({ applySuggestedAmount: true })
+  );
+  addListener(elements.categoria, "change", syncCategorySuggestedAmount);
   elements.movementForm.addEventListener("submit", handleMovementSubmit);
   elements.cancelEdit.addEventListener("click", resetMovementForm);
   addListener(elements.valorTotal, "input", syncComputedPaymentStatus);
@@ -578,7 +589,12 @@ function bindEvents() {
   elements.weeklyStart.addEventListener("input", renderWeeklyView);
   elements.weeklyEnd.addEventListener("input", renderWeeklyView);
   elements.monthlyYear.addEventListener("input", renderMonthlyView);
-  [elements.accountingDate, elements.accountingLine, elements.accountingQuery].forEach(
+  [
+    elements.accountingDateFrom,
+    elements.accountingDateTo,
+    elements.accountingLine,
+    elements.accountingQuery,
+  ].forEach(
     (input) => {
       addListener(input, "input", renderAccountingView);
       addListener(input, "change", renderAccountingView);
@@ -591,6 +607,16 @@ function bindEvents() {
     elements.accountingDocumentForm,
     "submit",
     handleAccountingDocumentSubmit
+  );
+  addListener(
+    elements.accountingDocumentCancelEdit,
+    "click",
+    resetAccountingDocumentForm
+  );
+  addListener(
+    elements.accountingDocumentsTable,
+    "click",
+    handleAccountingDocumentsTableClick
   );
   addListener(elements.movementTable, "click", handleMovementTableClick);
   addListener(elements.clienteSearch, "input", handleMovementClientSearchInput);
@@ -1258,6 +1284,14 @@ function defaultAccountingDateForCurrentUser() {
   return getCurrentIsoDate();
 }
 
+function getAccountingDefaultDateRange() {
+  const today = defaultAccountingDateForCurrentUser();
+  return {
+    from: today,
+    to: today,
+  };
+}
+
 function hasViewAccess(view) {
   return getAllowedViews().includes(view);
 }
@@ -1304,8 +1338,10 @@ function hydrateDefaultDates() {
   if (elements.collectionDate) {
     elements.collectionDate.value = today;
   }
-  if (elements.accountingDate) {
-    elements.accountingDate.value = defaultAccountingDateForCurrentUser();
+  if (elements.accountingDateFrom && elements.accountingDateTo) {
+    const { from, to } = getAccountingDefaultDateRange();
+    elements.accountingDateFrom.value = from;
+    elements.accountingDateTo.value = to;
   }
   if (elements.accountingDocumentDate) {
     elements.accountingDocumentDate.value = today;
@@ -2247,18 +2283,30 @@ function renderMonthlyView() {
     .join("");
 }
 
-function getAccountingSelectedDate() {
-  return elements.accountingDate?.value || getCurrentIsoDate();
+function getAccountingSelectedDateRange() {
+  const rawFrom = normalizeDateOnly(elements.accountingDateFrom?.value);
+  const rawTo = normalizeDateOnly(elements.accountingDateTo?.value);
+  const fallback = defaultAccountingDateForCurrentUser();
+  const from = rawFrom || rawTo || fallback;
+  const to = rawTo || rawFrom || fallback;
+
+  return from <= to
+    ? { from, to }
+    : {
+        from: to,
+        to: from,
+      };
 }
 
 function getFilteredAccountingMovements() {
-  const selectedDate = getAccountingSelectedDate();
+  const { from, to } = getAccountingSelectedDateRange();
   const selectedLine = String(elements.accountingLine?.value || "");
   const query = normalizeSearchValue(elements.accountingQuery?.value || "");
 
   return getSortedMovements(
     state.movements.filter((item) => {
-      if (selectedDate && normalizeDateOnly(item.fecha) !== selectedDate) {
+      const movementDate = normalizeDateOnly(item.fecha);
+      if (movementDate && (movementDate < from || movementDate > to)) {
         return false;
       }
 
@@ -2286,12 +2334,13 @@ function getFilteredAccountingMovements() {
 }
 
 function getFilteredAccountingDocuments() {
-  const selectedDate = getAccountingSelectedDate();
+  const { from, to } = getAccountingSelectedDateRange();
   const selectedLine = String(elements.accountingLine?.value || "");
   const query = normalizeSearchValue(elements.accountingQuery?.value || "");
 
   return [...(state.accountingDocuments || [])].filter((item) => {
-    if (selectedDate && normalizeDateOnly(item.accountingDate) !== selectedDate) {
+    const documentDate = normalizeDateOnly(item.accountingDate);
+    if (documentDate && (documentDate < from || documentDate > to)) {
       return false;
     }
 
@@ -3242,6 +3291,450 @@ async function handleAccountingDocumentSubmit(event) {
     elements.accountingDocumentArea.value = "Venta";
     elements.accountingDocumentFeedback.textContent =
       "Soporte contable guardado correctamente.";
+
+    await loadBootstrap();
+    switchView("contabilidad");
+  } catch (error) {
+    elements.accountingDocumentFeedback.textContent =
+      error.message || "No se pudo guardar el soporte contable.";
+  }
+}
+
+function getAccountingDocumentById(documentId) {
+  return (state.accountingDocuments || []).find(
+    (item) => String(item.id) === String(documentId)
+  ) || null;
+}
+
+function formatFileSize(bytes) {
+  const size = Number(bytes || 0);
+  if (!(size > 0)) {
+    return "Sin tamaño";
+  }
+  if (size < 1024) {
+    return `${size} B`;
+  }
+  if (size < 1024 * 1024) {
+    return `${(size / 1024).toFixed(1)} KB`;
+  }
+  return `${(size / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function resetAccountingDocumentForm(preserveFeedback = false) {
+  if (!elements.accountingDocumentForm) {
+    return;
+  }
+
+  elements.accountingDocumentForm.reset();
+  elements.accountingDocumentId.value = "";
+  elements.accountingDocumentDate.value = getCurrentIsoDate();
+  elements.accountingDocumentLine.value = "Gimnasio";
+  elements.accountingDocumentArea.value = "Venta";
+  if (elements.accountingDocumentFile) {
+    elements.accountingDocumentFile.required = true;
+  }
+  if (elements.accountingDocumentCancelEdit) {
+    elements.accountingDocumentCancelEdit.classList.add("is-hidden");
+  }
+  const submitButton = elements.accountingDocumentForm.querySelector(
+    'button[type="submit"]'
+  );
+  if (submitButton) {
+    submitButton.textContent = "Guardar soporte";
+  }
+  if (!preserveFeedback && elements.accountingDocumentFeedback) {
+    elements.accountingDocumentFeedback.textContent =
+      "Aqui puedes adjuntar facturas, recibos, comprobantes, cuentas de cobro y demas soportes contables.";
+  }
+}
+
+function startEditingAccountingDocument(documentId) {
+  const document = getAccountingDocumentById(documentId);
+  if (!document) {
+    if (elements.accountingDocumentFeedback) {
+      elements.accountingDocumentFeedback.textContent =
+        "No encontramos el soporte que intentas editar.";
+    }
+    return;
+  }
+
+  elements.accountingDocumentId.value = String(document.id);
+  elements.accountingDocumentDate.value =
+    normalizeDateOnly(document.accountingDate) || getCurrentIsoDate();
+  elements.accountingDocumentLine.value = document.businessLine || "Gimnasio";
+  elements.accountingDocumentArea.value = document.documentArea || "Venta";
+  elements.accountingDocumentType.value = document.documentType || "";
+  elements.accountingDocumentReference.value = document.reference || "";
+  elements.accountingDocumentNotes.value = document.notes || "";
+  if (elements.accountingDocumentFile) {
+    elements.accountingDocumentFile.value = "";
+    elements.accountingDocumentFile.required = false;
+  }
+  if (elements.accountingDocumentCancelEdit) {
+    elements.accountingDocumentCancelEdit.classList.remove("is-hidden");
+  }
+  const submitButton = elements.accountingDocumentForm.querySelector(
+    'button[type="submit"]'
+  );
+  if (submitButton) {
+    submitButton.textContent = "Guardar cambios";
+  }
+  elements.accountingDocumentFeedback.textContent =
+    `Editando ${document.originalName}. Si el archivo estaba mal, puedes reemplazarlo cargando uno nuevo.`;
+  elements.accountingDocumentType.focus();
+}
+
+async function triggerAccountingDocumentDownload(documentId) {
+  const document = getAccountingDocumentById(documentId);
+  if (!document) {
+    elements.accountingDocumentFeedback.textContent =
+      "No encontramos el soporte que intentas descargar.";
+    return;
+  }
+
+  const downloadUrl = `/api/accounting-documents/${document.id}/file`;
+  const newWindow = window.open(downloadUrl, "_blank", "noopener");
+  if (!newWindow) {
+    window.location.href = downloadUrl;
+  }
+
+  setTimeout(() => {
+    loadBootstrap().catch(() => {});
+  }, 700);
+}
+
+async function handleAccountingDocumentsTableClick(event) {
+  const editButton = event.target.closest("[data-accounting-edit-id]");
+  if (editButton) {
+    startEditingAccountingDocument(editButton.dataset.accountingEditId);
+    return;
+  }
+
+  const downloadButton = event.target.closest("[data-accounting-download-id]");
+  if (downloadButton) {
+    await triggerAccountingDocumentDownload(
+      downloadButton.dataset.accountingDownloadId
+    );
+  }
+}
+
+function getAccountingSelectedDateRange() {
+  const rawFrom = normalizeDateOnly(elements.accountingDateFrom?.value);
+  const rawTo = normalizeDateOnly(elements.accountingDateTo?.value);
+  const fallback = defaultAccountingDateForCurrentUser();
+  const from = rawFrom || rawTo || fallback;
+  const to = rawTo || rawFrom || fallback;
+
+  return from <= to ? { from, to } : { from: to, to: from };
+}
+
+function getFilteredAccountingMovements() {
+  const { from, to } = getAccountingSelectedDateRange();
+  const selectedLine = String(elements.accountingLine?.value || "");
+  const query = normalizeSearchValue(elements.accountingQuery?.value || "");
+
+  return getSortedMovements(
+    state.movements.filter((item) => {
+      const movementDate = normalizeDateOnly(item.fecha);
+      if (movementDate && (movementDate < from || movementDate > to)) {
+        return false;
+      }
+
+      if (selectedLine && item.linea !== selectedLine) {
+        return false;
+      }
+
+      if (!query) {
+        return true;
+      }
+
+      return [
+        item.linea,
+        item.tipo,
+        item.categoria,
+        item.cliente,
+        item.descripcion,
+        item.medioPago,
+        item.observaciones,
+      ]
+        .map((value) => normalizeSearchValue(value))
+        .some((value) => value.includes(query));
+    })
+  );
+}
+
+function getFilteredAccountingDocuments() {
+  const { from, to } = getAccountingSelectedDateRange();
+  const selectedLine = String(elements.accountingLine?.value || "");
+  const query = normalizeSearchValue(elements.accountingQuery?.value || "");
+
+  return [...(state.accountingDocuments || [])].filter((item) => {
+    const documentDate = normalizeDateOnly(item.accountingDate);
+    if (documentDate && (documentDate < from || documentDate > to)) {
+      return false;
+    }
+
+    if (selectedLine && item.businessLine !== selectedLine) {
+      return false;
+    }
+
+    if (!query) {
+      return true;
+    }
+
+    return [
+      item.businessLine,
+      item.documentArea,
+      item.documentType,
+      item.reference,
+      item.notes,
+      item.originalName,
+      item.uploadedBy,
+      item.lastDownloadedBy,
+    ]
+      .map((value) => normalizeSearchValue(value))
+      .some((value) => value.includes(query));
+  });
+}
+
+function renderAccountingView() {
+  if (
+    !elements.accountingSummary ||
+    !elements.accountingTable ||
+    !elements.accountingDocumentsTable ||
+    !elements.accountingDocumentsSummary ||
+    !elements.accountingDocumentFeedback
+  ) {
+    return;
+  }
+
+  if (!hasAccountingAccess()) {
+    elements.accountingSummary.innerHTML = "";
+    elements.accountingTable.innerHTML = "";
+    elements.accountingDocumentsTable.innerHTML = "";
+    elements.accountingDocumentsSummary.innerHTML = "";
+    return;
+  }
+
+  if (!elements.accountingDateFrom?.value || !elements.accountingDateTo?.value) {
+    const { from, to } = getAccountingDefaultDateRange();
+    if (elements.accountingDateFrom) {
+      elements.accountingDateFrom.value = elements.accountingDateFrom.value || from;
+    }
+    if (elements.accountingDateTo) {
+      elements.accountingDateTo.value = elements.accountingDateTo.value || to;
+    }
+  }
+
+  const { from, to } = getAccountingSelectedDateRange();
+  const movements = getFilteredAccountingMovements();
+  const documents = getFilteredAccountingDocuments();
+  const sales = movements.filter((item) => item.tipo === "Ingreso");
+  const purchases = movements.filter((item) => item.tipo === "Costo");
+  const expenses = movements.filter((item) => item.tipo === "Gasto");
+  const netCash = movements.reduce(
+    (acc, item) => acc + Number(item.flujoNeto || 0),
+    0
+  );
+
+  elements.accountingSummary.innerHTML = [
+    createStatCard(
+      "Ventas del periodo",
+      formatCurrency(sum(sales, "valorTotal")),
+      `${sales.length} movimiento(s) · Cobrado ${formatCurrency(sum(sales, "abono"))}`
+    ),
+    createStatCard(
+      "Compras / costos",
+      formatCurrency(sum(purchases, "valorTotal")),
+      `${purchases.length} movimiento(s)`
+    ),
+    createStatCard(
+      "Gastos",
+      formatCurrency(sum(expenses, "valorTotal")),
+      `${expenses.length} movimiento(s)`
+    ),
+    createStatCard(
+      "Flujo neto",
+      formatCurrency(netCash),
+      `${formatDate(from)} a ${formatDate(to)} · Saldo pendiente ${formatCurrency(
+        sum(movements, "saldoPendiente")
+      )}`
+    ),
+  ].join("");
+
+  elements.accountingTable.innerHTML = movements.length
+    ? movements
+        .map(
+          (item) => `
+            <tr>
+              <td>${formatDate(item.fecha)}</td>
+              <td>${escapeHtml(item.linea)}</td>
+              <td>${escapeHtml(item.tipo)}</td>
+              <td>${escapeHtml(item.categoria)}</td>
+              <td>${item.cliente ? escapeHtml(item.cliente) : "<span class='muted'>Sin cliente</span>"}</td>
+              <td>${item.descripcion ? escapeHtml(item.descripcion) : "<span class='muted'>Sin descripcion</span>"}</td>
+              <td>${escapeHtml(item.medioPago)}</td>
+              <td>${formatCurrency(item.valorTotal)}</td>
+              <td>${formatCurrency(item.abono)}</td>
+              <td>${formatCurrency(item.saldoPendiente)}</td>
+            </tr>
+          `
+        )
+        .join("")
+    : `
+      <tr>
+        <td colspan="10" class="empty-state">
+          No hay movimientos para el rango de fechas y filtros seleccionados.
+        </td>
+      </tr>
+    `;
+
+  elements.accountingDocumentsSummary.innerHTML = [
+    `<div class="mini-stat"><span>Soportes visibles</span><strong>${documents.length}</strong></div>`,
+    `<div class="mini-stat"><span>Total cargados</span><strong>${(state.accountingDocuments || []).length}</strong></div>`,
+    isAdminUser()
+      ? `<div class="mini-stat"><span>Descargas registradas</span><strong>${documents.reduce(
+          (acc, item) => acc + Number(item.downloadCount || 0),
+          0
+        )}</strong></div>`
+      : "",
+  ]
+    .filter(Boolean)
+    .join("");
+
+  if (elements.accountingDocumentsDownloadsHead) {
+    elements.accountingDocumentsDownloadsHead.classList.toggle(
+      "is-hidden",
+      !isAdminUser()
+    );
+  }
+
+  elements.accountingDocumentsTable.innerHTML = documents.length
+    ? documents
+        .map(
+          (item) => `
+            <tr>
+              <td>${formatDate(item.accountingDate)}</td>
+              <td>${escapeHtml(item.businessLine)}</td>
+              <td>${escapeHtml(item.documentArea)}</td>
+              <td>
+                <strong>${escapeHtml(item.documentType)}</strong>
+                ${
+                  item.reference
+                    ? `<small class="muted table-subcopy">${escapeHtml(item.reference)}</small>`
+                    : ""
+                }
+              </td>
+              <td>
+                <strong>${escapeHtml(item.originalName)}</strong>
+                <small class="muted table-subcopy">${formatFileSize(item.fileSize)}</small>
+              </td>
+              <td>${escapeHtml(item.uploadedBy || "Sistema")}</td>
+              ${
+                isAdminUser()
+                  ? `<td>
+                      ${
+                        Number(item.downloadCount || 0) > 0
+                          ? `<strong>${Number(item.downloadCount || 0)} descarga(s)</strong>
+                             <small class="muted table-subcopy">${escapeHtml(
+                               item.lastDownloadedBy || "Sistema"
+                             )} · ${formatDateTime(item.lastDownloadedAt)}</small>`
+                          : "<span class='muted'>Sin descargas</span>"
+                      }
+                    </td>`
+                  : ""
+              }
+              <td>
+                <div class="row-actions row-actions--compact">
+                  <button
+                    class="table-button"
+                    type="button"
+                    data-accounting-download-id="${item.id}"
+                  >
+                    Descargar
+                  </button>
+                  <button
+                    class="table-button"
+                    type="button"
+                    data-accounting-edit-id="${item.id}"
+                  >
+                    Editar
+                  </button>
+                </div>
+              </td>
+            </tr>
+          `
+        )
+        .join("")
+    : `
+      <tr>
+        <td colspan="${isAdminUser() ? 8 : 7}" class="empty-state">
+          No hay soportes contables cargados para esos filtros.
+        </td>
+      </tr>
+    `;
+}
+
+async function handleAccountingDocumentSubmit(event) {
+  event.preventDefault();
+
+  if (!hasAccountingAccess()) {
+    elements.accountingDocumentFeedback.textContent =
+      "Tu perfil no tiene permiso para cargar soportes contables.";
+    return;
+  }
+
+  const documentId = Number(elements.accountingDocumentId?.value || 0);
+  const isEditing = Number.isInteger(documentId) && documentId > 0;
+  const file = elements.accountingDocumentFile?.files?.[0] || null;
+
+  if (!isEditing && !file) {
+    elements.accountingDocumentFeedback.textContent =
+      "Selecciona el archivo del soporte antes de guardarlo.";
+    return;
+  }
+
+  elements.accountingDocumentFeedback.textContent = isEditing
+    ? "Actualizando soporte contable..."
+    : "Cargando soporte contable y guardandolo en el sistema...";
+
+  try {
+    let base64 = "";
+    if (file) {
+      const fileBuffer = await file.arrayBuffer();
+      base64 = arrayBufferToBase64(fileBuffer);
+    }
+
+    const payload = {
+      accountingDate: elements.accountingDocumentDate.value,
+      businessLine: elements.accountingDocumentLine.value,
+      documentArea: elements.accountingDocumentArea.value,
+      documentType: elements.accountingDocumentType.value,
+      reference: elements.accountingDocumentReference.value.trim(),
+      notes: elements.accountingDocumentNotes.value.trim(),
+    };
+
+    if (file) {
+      payload.originalName = file.name;
+      payload.mimeType = file.type || "application/octet-stream";
+      payload.fileSize = Number(file.size || 0);
+      payload.fileDataBase64 = base64;
+    }
+
+    await apiRequest(
+      isEditing
+        ? `/api/accounting-documents/${documentId}`
+        : "/api/accounting-documents",
+      {
+        method: isEditing ? "PUT" : "POST",
+        body: JSON.stringify(payload),
+      }
+    );
+
+    resetAccountingDocumentForm(true);
+    elements.accountingDocumentFeedback.textContent = isEditing
+      ? "Soporte contable actualizado correctamente."
+      : "Soporte contable guardado correctamente.";
 
     await loadBootstrap();
     switchView("contabilidad");
@@ -9017,6 +9510,324 @@ function formatClientDisplayName(clientName = "") {
   }
 
   return `${primaryName} (${aliasMeta.replace(/^Alias:\s*/, "")})`;
+}
+
+function isCategoryPricingGroup(group) {
+  return ["gimnasioCategorias", "restauranteCategorias"].includes(
+    String(group || "")
+  );
+}
+
+function getCategoryCatalogKey(selectedLine = elements.linea?.value || "") {
+  return selectedLine === "Gimnasio"
+    ? "gimnasioCategorias"
+    : "restauranteCategorias";
+}
+
+function getCategoryCatalogItem(lineOrGroup, categoryValue) {
+  const group = CATALOG_KEYS.includes(String(lineOrGroup || ""))
+    ? String(lineOrGroup || "")
+    : getCategoryCatalogKey(lineOrGroup);
+  const normalizedCategory = normalizeSearchValue(categoryValue);
+
+  if (!normalizedCategory) {
+    return null;
+  }
+
+  return (state.catalogItems[group] || []).find(
+    (item) => normalizeSearchValue(item.value) === normalizedCategory
+  ) || null;
+}
+
+function syncCategorySuggestedAmount(options = {}) {
+  const categoryValue =
+    options.categoryValue ?? elements.categoria?.value ?? "";
+  const categoryItem = getCategoryCatalogItem(
+    options.group || elements.linea?.value || "",
+    categoryValue
+  );
+
+  if (!categoryItem || !(Number(categoryItem.defaultAmount || 0) > 0)) {
+    return;
+  }
+
+  if (!elements.valorTotal) {
+    return;
+  }
+
+  elements.valorTotal.value = String(Number(categoryItem.defaultAmount));
+  syncComputedPaymentStatus();
+}
+
+function renderListsView() {
+  CATALOG_KEYS.forEach((key) => {
+    const container = document.getElementById(`list-${key}`);
+    const form = document.querySelector(`[data-list-form="${key}"]`);
+    const items = state.catalogItems[key] || [];
+    const isProtectedGroup = isCatalogGroupProtected(key);
+
+    if (form) {
+      [...form.elements].forEach((field) => {
+        field.disabled = isProtectedGroup;
+      });
+    }
+
+    if (!container) {
+      return;
+    }
+
+    container.classList.add("catalog-items");
+
+    if (!items.length) {
+      container.innerHTML = `
+        <div class="empty-state">
+          ${
+            isProtectedGroup
+              ? "Este catalogo es administrado por el sistema."
+              : "Aun no hay items registrados en esta lista."
+          }
+        </div>
+      `;
+      return;
+    }
+
+    container.innerHTML = items
+      .map((item) => {
+        const nextActive = item.isActive ? "false" : "true";
+        const statusLabel = item.isActive ? "Activo" : "Inactivo";
+        const actionLabel = item.isActive ? "Inactivar" : "Activar";
+        const pricingMeta =
+          item.defaultAmount > 0
+            ? ` · Valor sugerido ${formatCurrency(item.defaultAmount)}`
+            : "";
+
+        return `
+          <article class="catalog-item ${item.isActive ? "" : "catalog-item-inactive"}">
+            <div class="catalog-item-copy">
+              <strong>${escapeHtml(item.value)}</strong>
+              <small>${escapeHtml(
+                `${statusLabel}${isProtectedGroup ? " · Fijo del sistema" : ""}${pricingMeta}`
+              )}</small>
+            </div>
+            <div class="row-actions">
+              ${
+                isProtectedGroup
+                  ? "<span class='muted'>Sin edicion manual</span>"
+                  : `
+                    <button
+                      class="table-button icon-button"
+                      type="button"
+                      data-catalog-edit-id="${item.id}"
+                      data-catalog-group="${key}"
+                      data-catalog-value="${encodeURIComponent(item.value)}"
+                      data-catalog-default-amount="${item.defaultAmount}"
+                      title="Editar item"
+                      aria-label="Editar item"
+                    >
+                      <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                        <path d="M4 20h4l10-10-4-4L4 16v4Z"></path>
+                        <path d="m12 6 4 4"></path>
+                      </svg>
+                    </button>
+                    <button
+                      class="table-button ${item.isActive ? "danger" : ""} icon-button"
+                      type="button"
+                      data-catalog-toggle-id="${item.id}"
+                      data-catalog-group="${key}"
+                      data-catalog-next-active="${nextActive}"
+                      title="${actionLabel} item"
+                      aria-label="${actionLabel} item"
+                    >
+                      <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                        <path d="M12 3v7"></path>
+                        <path d="M7.8 5.8A9 9 0 1 0 16.2 5.8"></path>
+                      </svg>
+                    </button>
+                  `
+              }
+            </div>
+          </article>
+        `;
+      })
+      .join("");
+  });
+}
+
+async function handleListSubmit(event) {
+  event.preventDefault();
+
+  const form = event.currentTarget;
+  const key = form.dataset.listForm;
+  const value = form.elements.value.value.trim();
+  const defaultAmount = Math.max(
+    Number(form.elements.defaultAmount?.value || 0),
+    0
+  );
+
+  if (isCatalogGroupProtected(key)) {
+    setStatus(
+      "Este catalogo es estructural del sistema y no admite altas manuales."
+    );
+    return;
+  }
+
+  if (!value) {
+    return;
+  }
+
+  try {
+    await apiRequest(`/api/catalogs/${key}/items`, {
+      method: "POST",
+      body: JSON.stringify({ value, defaultAmount }),
+    });
+    form.reset();
+    await loadBootstrap();
+    setStatus("Item de lista guardado correctamente.");
+  } catch (error) {
+    setStatus(error.message);
+  }
+}
+
+async function handleCatalogItemAction(event) {
+  const editButton = event.target.closest("[data-catalog-edit-id]");
+  const toggleButton = event.target.closest("[data-catalog-toggle-id]");
+
+  if (editButton) {
+    const key = editButton.dataset.catalogGroup;
+    const itemId = editButton.dataset.catalogEditId;
+    const currentValue = decodeURIComponent(editButton.dataset.catalogValue || "");
+    const currentDefaultAmount = Number(
+      editButton.dataset.catalogDefaultAmount || 0
+    );
+
+    if (!key || !itemId) {
+      return;
+    }
+
+    const nextValue = window.prompt(
+      "Escribe el nuevo nombre para este item de lista.",
+      currentValue
+    );
+
+    if (nextValue === null) {
+      return;
+    }
+
+    const cleanValue = nextValue.trim();
+    if (!cleanValue) {
+      setStatus("El nombre del item no puede quedar vacio.");
+      return;
+    }
+
+    let nextDefaultAmount = currentDefaultAmount;
+    if (isCategoryPricingGroup(key)) {
+      const amountPrompt = window.prompt(
+        "Escribe el valor sugerido para este item. Usa 0 si no aplica.",
+        currentDefaultAmount > 0 ? String(currentDefaultAmount) : "0"
+      );
+
+      if (amountPrompt === null) {
+        return;
+      }
+
+      nextDefaultAmount = Math.max(Number(amountPrompt || 0), 0);
+      if (!Number.isFinite(nextDefaultAmount)) {
+        setStatus("El valor sugerido debe ser numérico.");
+        return;
+      }
+    }
+
+    if (
+      cleanValue === currentValue &&
+      Number(nextDefaultAmount) === Number(currentDefaultAmount)
+    ) {
+      return;
+    }
+
+    try {
+      await apiRequest(`/api/catalogs/${key}/items/${itemId}`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          value: cleanValue,
+          defaultAmount: nextDefaultAmount,
+        }),
+      });
+      await loadBootstrap();
+      switchView("listas");
+      setStatus("Item de lista actualizado correctamente.");
+    } catch (error) {
+      setStatus(error.message);
+    }
+    return;
+  }
+
+  if (!toggleButton) {
+    return;
+  }
+
+  const key = toggleButton.dataset.catalogGroup;
+  const itemId = toggleButton.dataset.catalogToggleId;
+  const nextActive = toggleButton.dataset.catalogNextActive;
+
+  if (!key || !itemId || !nextActive) {
+    return;
+  }
+
+  const activate = nextActive === "true";
+  const confirmed = window.confirm(
+    activate
+      ? "Deseas reactivar este item de lista?"
+      : "Deseas inactivar este item de lista?"
+  );
+
+  if (!confirmed) {
+    return;
+  }
+
+  try {
+    await apiRequest(`/api/catalogs/${key}/items/${itemId}`, {
+      method: "PATCH",
+      body: JSON.stringify({
+        isActive: activate,
+      }),
+    });
+    await loadBootstrap();
+    switchView("listas");
+    setStatus(
+      activate
+        ? "Item de lista activado correctamente."
+        : "Item de lista inactivado correctamente."
+    );
+  } catch (error) {
+    setStatus(error.message);
+  }
+}
+
+function syncCategoryOptions(options = {}) {
+  const key = getCategoryCatalogKey(options.line || elements.linea?.value || "");
+  const previous = options.includeValue ?? elements.categoria.value;
+  const activeItems = (state.catalogItems[key] || [])
+    .filter((item) => item.isActive)
+    .sort((a, b) => Number(a.sortOrder || 0) - Number(b.sortOrder || 0));
+
+  fillSelect(
+    elements.categoria,
+    activeItems.map((item) => item.value),
+    {
+      includeValue: previous,
+    }
+  );
+
+  if (getAvailableSelectValues(elements.categoria).includes(previous)) {
+    elements.categoria.value = previous;
+  }
+
+  if (options.applySuggestedAmount) {
+    syncCategorySuggestedAmount({
+      group: key,
+      categoryValue: elements.categoria.value,
+    });
+  }
 }
 
 function renderPortfolioSummary(item, isExpanded) {

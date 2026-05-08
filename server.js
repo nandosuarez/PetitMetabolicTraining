@@ -1191,10 +1191,31 @@ app.get("/api/bootstrap", asyncHandler(async (req, res) => {
             select
               ad.*,
               coalesce(nullif(u.full_name, ''), u.username) as uploaded_by_name,
-              u.username as uploaded_by_username
+              u.username as uploaded_by_username,
+              coalesce(download_counts.download_count, 0) as download_count,
+              latest_download.created_at as last_downloaded_at,
+              latest_download.downloaded_by_name as last_downloaded_by_name,
+              latest_download.downloaded_by_username as last_downloaded_by_username
             from accounting_documents ad
             join app_users u
               on u.id = ad.uploaded_by_user_id
+            left join lateral (
+              select count(*)::int as download_count
+              from accounting_document_downloads addl
+              where addl.accounting_document_id = ad.id
+            ) download_counts on true
+            left join lateral (
+              select
+                addl.created_at,
+                coalesce(nullif(du.full_name, ''), du.username) as downloaded_by_name,
+                du.username as downloaded_by_username
+              from accounting_document_downloads addl
+              join app_users du
+                on du.id = addl.downloaded_by_user_id
+              where addl.accounting_document_id = ad.id
+              order by addl.created_at desc, addl.id desc
+              limit 1
+            ) latest_download on true
             order by ad.accounting_date desc, ad.created_at desc, ad.id desc
           `
         )
@@ -1246,12 +1267,13 @@ app.post(
           mime_type,
           file_size,
           file_content,
-          uploaded_by_user_id
+          uploaded_by_user_id,
+          updated_by_user_id
         )
-        values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+        values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
         returning *,
-          $12::text as uploaded_by_name,
-          $13::text as uploaded_by_username
+          $13::text as uploaded_by_name,
+          $14::text as uploaded_by_username
       `,
       [
         payload.accountingDate,
@@ -1265,12 +1287,94 @@ app.post(
         payload.fileSize,
         fileBuffer,
         Number(req.authUser.id),
+        Number(req.authUser.id),
         req.authUser.fullName || req.authUser.username || "Sistema",
         req.authUser.username || "",
       ]
     );
 
     res.status(201).json(mapAccountingDocumentRow(result.rows[0]));
+  })
+);
+
+app.put(
+  "/api/accounting-documents/:id",
+  requireAccountingAccess,
+  asyncHandler(async (req, res) => {
+    const documentId = Number(req.params.id);
+    if (!Number.isInteger(documentId) || documentId <= 0) {
+      return res.status(400).json({ error: "Documento inválido." });
+    }
+
+    const payload = normalizeAccountingDocumentPayload(req.body);
+    validateAccountingDocumentMetadataPayload(payload);
+
+    const existingResult = await query(
+      `
+        select *
+        from accounting_documents
+        where id = $1
+        limit 1
+      `,
+      [documentId]
+    );
+
+    if (!existingResult.rows.length) {
+      return res.status(404).json({ error: "Documento no encontrado." });
+    }
+
+    const existing = existingResult.rows[0];
+    const hasReplacementFile = Boolean(payload.fileDataBase64);
+    const fileBuffer = hasReplacementFile
+      ? decodeBase64FileData(payload.fileDataBase64)
+      : Buffer.alloc(0);
+
+    if (hasReplacementFile && !fileBuffer.length) {
+      return res.status(400).json({
+        error: "No se pudo leer el archivo adjunto para reemplazar el soporte.",
+      });
+    }
+
+    const result = await query(
+      `
+        update accounting_documents
+        set
+          accounting_date = $1,
+          business_line = $2,
+          document_area = $3,
+          document_type = $4,
+          reference = $5,
+          notes = $6,
+          original_name = $7,
+          mime_type = $8,
+          file_size = $9,
+          file_content = $10,
+          updated_by_user_id = $11,
+          updated_at = now()
+        where id = $12
+        returning *,
+          $13::text as uploaded_by_name,
+          $14::text as uploaded_by_username
+      `,
+      [
+        payload.accountingDate,
+        payload.businessLine,
+        payload.documentArea,
+        payload.documentType,
+        payload.reference,
+        payload.notes,
+        hasReplacementFile ? payload.originalName : existing.original_name,
+        hasReplacementFile ? payload.mimeType : existing.mime_type,
+        hasReplacementFile ? payload.fileSize : existing.file_size,
+        hasReplacementFile ? fileBuffer : existing.file_content,
+        Number(req.authUser.id),
+        documentId,
+        req.authUser.fullName || req.authUser.username || "Sistema",
+        req.authUser.username || "",
+      ]
+    );
+
+    res.json(mapAccountingDocumentRow(result.rows[0]));
   })
 );
 
@@ -1298,6 +1402,16 @@ app.get(
     }
 
     const row = result.rows[0];
+    await query(
+      `
+        insert into accounting_document_downloads (
+          accounting_document_id,
+          downloaded_by_user_id
+        )
+        values ($1, $2)
+      `,
+      [documentId, Number(req.authUser.id)]
+    );
     const safeName = sanitizeDownloadName(row.original_name || `soporte-${documentId}`);
     res.setHeader("Content-Type", row.mime_type || "application/octet-stream");
     res.setHeader(
@@ -1743,6 +1857,7 @@ app.post("/api/notes", requireAdmin, asyncHandler(async (req, res) => {
 app.post("/api/catalogs/:group/items", requireAdmin, asyncHandler(async (req, res) => {
   const group = String(req.params.group || "");
   const value = String(req.body.value || "").trim();
+  const defaultAmount = Math.max(Number(req.body.defaultAmount || 0), 0);
 
   if (!catalogGroups.has(group)) {
     return res.status(400).json({ error: "Grupo de catalogo invalido." });
@@ -1761,10 +1876,18 @@ app.post("/api/catalogs/:group/items", requireAdmin, asyncHandler(async (req, re
 
   const result = await query(
     `
-      insert into catalog_items (group_name, value, sort_order, is_active, updated_at)
+      insert into catalog_items (
+        group_name,
+        value,
+        default_amount,
+        sort_order,
+        is_active,
+        updated_at
+      )
       values (
         $1,
         $2,
+        $3,
         coalesce((select max(sort_order) + 1 from catalog_items where group_name = $1), 1),
         true,
         now()
@@ -1772,10 +1895,11 @@ app.post("/api/catalogs/:group/items", requireAdmin, asyncHandler(async (req, re
       on conflict (group_name, value)
       do update set
         is_active = true,
+        default_amount = $3,
         updated_at = now()
       returning *
     `,
-    [group, value]
+    [group, value, defaultAmount]
   );
 
   res.status(201).json(mapCatalogItemRow(result.rows[0]));
@@ -1786,8 +1910,15 @@ app.patch("/api/catalogs/:group/items/:id", requireAdmin, asyncHandler(async (re
   const itemId = Number(req.params.id);
   const hasValue = Object.prototype.hasOwnProperty.call(req.body || {}, "value");
   const hasActive = Object.prototype.hasOwnProperty.call(req.body || {}, "isActive");
+  const hasDefaultAmount = Object.prototype.hasOwnProperty.call(
+    req.body || {},
+    "defaultAmount"
+  );
   const nextValue = hasValue ? String(req.body.value || "").trim() : null;
   const nextActive = hasActive ? Boolean(req.body.isActive) : null;
+  const nextDefaultAmount = hasDefaultAmount
+    ? Math.max(Number(req.body.defaultAmount || 0), 0)
+    : null;
 
   if (!catalogGroups.has(group)) {
     return res.status(400).json({ error: "Grupo de catalogo invalido." });
@@ -1797,9 +1928,9 @@ app.patch("/api/catalogs/:group/items/:id", requireAdmin, asyncHandler(async (re
     return res.status(400).json({ error: "Item de catalogo invalido." });
   }
 
-  if (!hasValue && !hasActive) {
+  if (!hasValue && !hasActive && !hasDefaultAmount) {
     return res.status(400).json({
-      error: "Debes enviar un nuevo nombre o un cambio de estado.",
+      error: "Debes enviar un nuevo nombre, valor sugerido o un cambio de estado.",
     });
   }
 
@@ -1837,6 +1968,9 @@ app.patch("/api/catalogs/:group/items/:id", requireAdmin, asyncHandler(async (re
         const currentValue = String(currentRow.value || "");
         const finalValue = hasValue ? nextValue : currentValue;
         const finalActive = hasActive ? nextActive : Boolean(currentRow.is_active);
+        const finalDefaultAmount = hasDefaultAmount
+          ? nextDefaultAmount
+          : Number(currentRow.default_amount || 0);
 
         const result = await client.query(
           `
@@ -1844,11 +1978,12 @@ app.patch("/api/catalogs/:group/items/:id", requireAdmin, asyncHandler(async (re
             set
               value = $3,
               is_active = $4,
+              default_amount = $5,
               updated_at = now()
             where id = $1 and group_name = $2
             returning *
           `,
-          [itemId, group, finalValue, finalActive]
+          [itemId, group, finalValue, finalActive, finalDefaultAmount]
         );
 
         if (hasValue && finalValue !== currentValue) {
@@ -3402,6 +3537,7 @@ function mapCatalogItemRow(row) {
     id: Number(row.id),
     group: row.group_name,
     value: row.value,
+    defaultAmount: Number(row.default_amount || 0),
     sortOrder: Number(row.sort_order || 0),
     isActive: Boolean(row.is_active),
     createdAt: row.created_at || null,
@@ -4337,6 +4473,76 @@ function mapAccountingDocumentRow(row) {
       row.uploaded_by_username ||
       "Sistema",
     createdAt: row.created_at || null,
+    fileUrl: `/api/accounting-documents/${row.id}/file`,
+  };
+}
+
+function validateAccountingDocumentPayload(payload) {
+  validateAccountingDocumentMetadataPayload(payload);
+
+  if (!payload.originalName) {
+    throw httpError(400, "Debes seleccionar un archivo.");
+  }
+
+  if (!payload.mimeType) {
+    throw httpError(400, "El archivo no tiene un formato válido.");
+  }
+
+  if (!payload.fileDataBase64) {
+    throw httpError(400, "El contenido del archivo es obligatorio.");
+  }
+
+  if (!Number.isFinite(payload.fileSize) || !(payload.fileSize > 0)) {
+    throw httpError(400, "El tamaño del archivo no es válido.");
+  }
+}
+
+function validateAccountingDocumentMetadataPayload(payload) {
+  if (!payload.accountingDate) {
+    throw httpError(400, "La fecha contable es obligatoria.");
+  }
+
+  if (!["Gimnasio", "Restaurante", "General"].includes(payload.businessLine)) {
+    throw httpError(400, "La línea del documento no es válida.");
+  }
+
+  if (
+    !["Venta", "Compra", "Gasto", "Impuesto", "Nomina", "Soporte", "Otro"].includes(
+      payload.documentArea
+    )
+  ) {
+    throw httpError(400, "El área del documento no es válida.");
+  }
+
+  if (!payload.documentType) {
+    throw httpError(400, "El tipo de documento es obligatorio.");
+  }
+}
+
+function mapAccountingDocumentRow(row) {
+  return {
+    id: row.id,
+    accountingDate: normalizeDateOnly(row.accounting_date),
+    businessLine: row.business_line,
+    documentArea: row.document_area,
+    documentType: row.document_type,
+    reference: row.reference || "",
+    notes: row.notes || "",
+    originalName: row.original_name,
+    mimeType: row.mime_type,
+    fileSize: Number(row.file_size || 0),
+    uploadedBy:
+      row.uploaded_by_name ||
+      row.uploaded_by_username ||
+      "Sistema",
+    downloadCount: Number(row.download_count || 0),
+    lastDownloadedAt: row.last_downloaded_at || null,
+    lastDownloadedBy:
+      row.last_downloaded_by_name ||
+      row.last_downloaded_by_username ||
+      "",
+    createdAt: row.created_at || null,
+    updatedAt: row.updated_at || row.created_at || null,
     fileUrl: `/api/accounting-documents/${row.id}/file`,
   };
 }

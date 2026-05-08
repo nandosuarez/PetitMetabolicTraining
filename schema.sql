@@ -2,6 +2,7 @@ create table if not exists catalog_items (
   id bigserial primary key,
   group_name text not null,
   value text not null,
+  default_amount numeric(14, 2) not null default 0,
   sort_order integer not null default 1,
   is_active boolean not null default true,
   created_at timestamptz not null default now(),
@@ -14,6 +15,9 @@ alter table catalog_items
 
 alter table catalog_items
   add column if not exists updated_at timestamptz not null default now();
+
+alter table catalog_items
+  add column if not exists default_amount numeric(14, 2) not null default 0;
 
 create table if not exists movements (
   id bigserial primary key,
@@ -385,6 +389,22 @@ create table if not exists accounting_documents (
   uploaded_by_user_id bigint not null references app_users(id),
   created_at timestamptz not null default now()
 );
+
+create table if not exists accounting_document_downloads (
+  id bigserial primary key,
+  accounting_document_id bigint not null references accounting_documents(id) on delete cascade,
+  downloaded_by_user_id bigint not null references app_users(id),
+  created_at timestamptz not null default now()
+);
+
+create index if not exists accounting_document_downloads_document_idx
+  on accounting_document_downloads(accounting_document_id, created_at desc);
+
+alter table accounting_documents
+  add column if not exists updated_at timestamptz not null default now();
+
+alter table accounting_documents
+  add column if not exists updated_by_user_id bigint references app_users(id);
 
 alter table class_program_items
   add column if not exists repetition_text text not null default '';
