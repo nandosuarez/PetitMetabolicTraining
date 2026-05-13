@@ -2506,6 +2506,7 @@
               <div class="list-editor-card">
                 <h4>Categorías gimnasio</h4>
                 <form class="inline-form" data-list-form="gimnasioCategorias">
+                  <input name="editId" type="hidden" />
                   <input name="value" type="text" placeholder="Agregar categoría" required />
                   <input
                     name="defaultAmount"
@@ -2515,6 +2516,13 @@
                     placeholder="Valor sugerido"
                   />
                   <button class="small-button" type="submit">Agregar</button>
+                  <button
+                    class="small-button list-form-cancel is-hidden"
+                    type="button"
+                    data-list-cancel="gimnasioCategorias"
+                  >
+                    Cancelar
+                  </button>
                 </form>
                 <div id="list-gimnasioCategorias" class="chips-wrap"></div>
               </div>
@@ -2522,6 +2530,7 @@
               <div class="list-editor-card">
                 <h4>Categorías restaurante</h4>
                 <form class="inline-form" data-list-form="restauranteCategorias">
+                  <input name="editId" type="hidden" />
                   <input name="value" type="text" placeholder="Agregar categoría" required />
                   <input
                     name="defaultAmount"
@@ -2531,6 +2540,13 @@
                     placeholder="Valor sugerido"
                   />
                   <button class="small-button" type="submit">Agregar</button>
+                  <button
+                    class="small-button list-form-cancel is-hidden"
+                    type="button"
+                    data-list-cancel="restauranteCategorias"
+                  >
+                    Cancelar
+                  </button>
                 </form>
                 <div id="list-restauranteCategorias" class="chips-wrap"></div>
               </div>
@@ -2538,8 +2554,16 @@
               <div class="list-editor-card">
                 <h4>Cajas / medios de pago</h4>
                 <form class="inline-form" data-list-form="mediosPago">
+                  <input name="editId" type="hidden" />
                   <input name="value" type="text" placeholder="Agregar medio" required />
                   <button class="small-button" type="submit">Agregar</button>
+                  <button
+                    class="small-button list-form-cancel is-hidden"
+                    type="button"
+                    data-list-cancel="mediosPago"
+                  >
+                    Cancelar
+                  </button>
                 </form>
                 <div id="list-mediosPago" class="chips-wrap"></div>
               </div>
@@ -2547,8 +2571,16 @@
               <div class="list-editor-card">
                 <h4>Estados de pago</h4>
                 <form class="inline-form" data-list-form="estadosPago">
+                  <input name="editId" type="hidden" />
                   <input name="value" type="text" placeholder="Agregar estado" required />
                   <button class="small-button" type="submit">Agregar</button>
+                  <button
+                    class="small-button list-form-cancel is-hidden"
+                    type="button"
+                    data-list-cancel="estadosPago"
+                  >
+                    Cancelar
+                  </button>
                 </form>
                 <div id="list-estadosPago" class="chips-wrap"></div>
               </div>
@@ -2556,8 +2588,16 @@
               <div class="list-editor-card">
                 <h4>Tipos</h4>
                 <form class="inline-form" data-list-form="tipos">
+                  <input name="editId" type="hidden" />
                   <input name="value" type="text" placeholder="Agregar tipo" required />
                   <button class="small-button" type="submit">Agregar</button>
+                  <button
+                    class="small-button list-form-cancel is-hidden"
+                    type="button"
+                    data-list-cancel="tipos"
+                  >
+                    Cancelar
+                  </button>
                 </form>
                 <div id="list-tipos" class="chips-wrap"></div>
               </div>

@@ -888,6 +888,12 @@ function bindEvents() {
     .querySelectorAll("[data-list-form]")
     .forEach((form) => form.addEventListener("submit", handleListSubmit));
 
+  document
+    .querySelectorAll("[data-list-cancel]")
+    .forEach((button) =>
+      button.addEventListener("click", handleListEditCancelClick)
+    );
+
   addListener(document.getElementById("listas-view"), "click", handleCatalogItemAction);
   addListener(elements.inventoryAssetForm, "submit", handleInventoryAssetSubmit);
   addListener(
@@ -5171,6 +5177,72 @@ async function handleListSubmit(event) {
   }
 }
 
+function startEditingListItem(key, item) {
+  const form = document.querySelector(`[data-list-form="${key}"]`);
+  if (!form) {
+    return;
+  }
+
+  form.elements.editId.value = String(item?.id || "");
+  form.elements.value.value = String(item?.value || "");
+
+  if (form.elements.defaultAmount) {
+    form.elements.defaultAmount.value = Number(item?.defaultAmount || 0) || 0;
+  }
+
+  const submitButton = form.querySelector('button[type="submit"]');
+  if (submitButton) {
+    submitButton.textContent = "Guardar cambios";
+  }
+
+  const cancelButton = form.querySelector("[data-list-cancel]");
+  if (cancelButton) {
+    cancelButton.classList.remove("is-hidden");
+  }
+
+  setStatus("Edita el nombre y el valor sugerido en el formulario.");
+  form.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  form.elements.value.focus();
+  form.elements.value.select?.();
+}
+
+function resetListForm(keyOrForm) {
+  const form =
+    typeof keyOrForm === "string"
+      ? document.querySelector(`[data-list-form="${keyOrForm}"]`)
+      : keyOrForm;
+
+  if (!form) {
+    return;
+  }
+
+  form.reset();
+
+  if (form.elements.editId) {
+    form.elements.editId.value = "";
+  }
+
+  if (form.elements.defaultAmount) {
+    form.elements.defaultAmount.value = "";
+  }
+
+  const submitButton = form.querySelector('button[type="submit"]');
+  if (submitButton) {
+    submitButton.textContent = "Agregar";
+  }
+
+  const cancelButton = form.querySelector("[data-list-cancel]");
+  if (cancelButton) {
+    cancelButton.classList.add("is-hidden");
+  }
+}
+
+function handleListEditCancelClick(event) {
+  const key = event.currentTarget?.dataset?.listCancel;
+  resetListForm(key);
+  setStatus("Edicion cancelada.");
+}
+
 async function handleCatalogItemAction(event) {
   const editButton = event.target.closest("[data-catalog-edit-id]");
   const toggleButton = event.target.closest("[data-catalog-toggle-id]");
@@ -5183,6 +5255,13 @@ async function handleCatalogItemAction(event) {
     if (!key || !itemId) {
       return;
     }
+
+    startEditingListItem(key, {
+      id: itemId,
+      value: currentValue,
+      defaultAmount: currentDefaultAmount,
+    });
+    return;
 
     const nextValue = window.prompt(
       "Escribe el nuevo nombre para este item de lista.",
@@ -10619,6 +10698,7 @@ async function handleListSubmit(event) {
 
   const form = event.currentTarget;
   const key = form.dataset.listForm;
+  const editId = Number(form.elements.editId?.value || 0);
   const value = form.elements.value.value.trim();
   const defaultAmount = Math.max(
     Number(form.elements.defaultAmount?.value || 0),
@@ -10637,13 +10717,22 @@ async function handleListSubmit(event) {
   }
 
   try {
-    await apiRequest(`/api/catalogs/${key}/items`, {
-      method: "POST",
-      body: JSON.stringify({ value, defaultAmount }),
-    });
-    form.reset();
+    await apiRequest(
+      editId > 0
+        ? `/api/catalogs/${key}/items/${editId}`
+        : `/api/catalogs/${key}/items`,
+      {
+        method: editId > 0 ? "PATCH" : "POST",
+        body: JSON.stringify({ value, defaultAmount }),
+      }
+    );
+    resetListForm(form);
     await loadBootstrap();
-    setStatus("Item de lista guardado correctamente.");
+    setStatus(
+      editId > 0
+        ? "Item de lista actualizado correctamente."
+        : "Item de lista guardado correctamente."
+    );
   } catch (error) {
     setStatus(error.message);
   }
@@ -11096,4 +11185,73 @@ function generateTemporaryPassword() {
   const chunk = Math.random().toString(36).slice(2, 8);
   const digits = String(Math.floor(100 + Math.random() * 900));
   return `PetitTemp#${digits}${chunk.toUpperCase()}`;
+}
+
+async function handleCatalogItemAction(event) {
+  const editButton = event.target.closest("[data-catalog-edit-id]");
+  const toggleButton = event.target.closest("[data-catalog-toggle-id]");
+
+  if (editButton) {
+    const key = editButton.dataset.catalogGroup;
+    const itemId = editButton.dataset.catalogEditId;
+    const catalogItem = (state.catalogItems[key] || []).find(
+      (item) => String(item.id) === String(itemId)
+    );
+    const currentValue =
+      String(catalogItem?.value || "") ||
+      decodeURIComponent(editButton.dataset.catalogValue || "");
+    const currentDefaultAmount = Number(
+      catalogItem?.defaultAmount ?? editButton.dataset.catalogDefaultAmount ?? 0
+    );
+
+    if (!key || !itemId) {
+      return;
+    }
+
+    startEditingListItem(key, {
+      id: itemId,
+      value: currentValue,
+      defaultAmount: currentDefaultAmount,
+    });
+    return;
+  }
+
+  if (!toggleButton) {
+    return;
+  }
+
+  const key = toggleButton.dataset.catalogGroup;
+  const itemId = toggleButton.dataset.catalogToggleId;
+  const nextActive = toggleButton.dataset.catalogNextActive;
+
+  if (!key || !itemId || !nextActive) {
+    return;
+  }
+
+  const activate = nextActive === "true";
+  const confirmed = window.confirm(
+    activate
+      ? "Este item volvera a quedar disponible. Quieres activarlo?"
+      : "Este item dejara de aparecer en nuevos registros. Quieres inactivarlo?"
+  );
+
+  if (!confirmed) {
+    return;
+  }
+
+  try {
+    await apiRequest(`/api/catalogs/${key}/items/${itemId}`, {
+      method: "PATCH",
+      body: JSON.stringify({ isActive: activate }),
+    });
+    await loadBootstrap();
+    switchView("listas");
+    setStatus(
+      activate
+        ? "Item de lista activado correctamente."
+        : "Item de lista inactivado correctamente."
+    );
+  } catch (error) {
+    setStatus(error.message);
+  }
 }
