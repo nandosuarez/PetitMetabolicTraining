@@ -296,12 +296,29 @@ button {
 }
 
 .nav {
+  position: relative;
   display: grid;
   gap: 10px;
   margin: 28px 0;
+  padding-left: 16px;
+}
+
+.nav::before {
+  content: "";
+  position: absolute;
+  inset: 8px auto 8px 0;
+  width: 4px;
+  border-radius: 999px;
+  background:
+    linear-gradient(180deg, rgba(159, 239, 1, 0.9), rgba(159, 239, 1, 0.2));
+  box-shadow:
+    0 0 0 1px rgba(159, 239, 1, 0.08),
+    0 0 18px rgba(159, 239, 1, 0.18);
 }
 
 .nav-link {
+  position: relative;
+  overflow: hidden;
   padding: 14px 16px;
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 14px;
@@ -314,12 +331,30 @@ button {
     border-color 180ms ease;
 }
 
+.nav-link::before {
+  content: "";
+  position: absolute;
+  inset: 11px auto 11px 0;
+  width: 4px;
+  border-radius: 999px;
+  background: transparent;
+  transition:
+    background 180ms ease,
+    box-shadow 180ms ease;
+}
+
 .nav-link:hover,
 .nav-link.active {
   transform: translateX(4px);
   background: linear-gradient(90deg, rgba(159, 239, 1, 0.14), rgba(159, 239, 1, 0.04));
   border-color: rgba(159, 239, 1, 0.45);
   color: var(--accent);
+}
+
+.nav-link:hover::before,
+.nav-link.active::before {
+  background: linear-gradient(180deg, #c7ff52, #9fef01);
+  box-shadow: 0 0 14px rgba(159, 239, 1, 0.28);
 }
 
 .sidebar-card {
@@ -1938,11 +1973,20 @@ button:disabled {
     grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 10px;
     margin: 0;
+    padding-left: 0;
+  }
+
+  .nav::before {
+    display: none;
   }
 
   .nav-link {
     min-height: 48px;
     text-align: center;
+  }
+
+  .nav-link::before {
+    display: none;
   }
 
   .nav-link:hover,
@@ -2067,6 +2111,7 @@ button:disabled {
     flex-wrap: nowrap;
     overflow-x: auto;
     gap: 10px;
+    padding-left: 0;
     padding-bottom: 4px;
     scroll-snap-type: x proximity;
   }
