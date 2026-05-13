@@ -635,6 +635,14 @@ button {
   display: block;
 }
 
+.inventory-panel {
+  display: none;
+}
+
+.inventory-panel.active {
+  display: block;
+}
+
 .stat-card {
   padding: 20px;
   border-radius: var(--radius-lg);
@@ -1536,6 +1544,10 @@ tbody tr:hover {
 
 .table-button.danger {
   color: var(--danger);
+}
+
+.inventory-row-low-stock {
+  background: linear-gradient(90deg, rgba(255, 183, 0, 0.08), rgba(255, 255, 255, 0));
 }
 
 .table-button:disabled {

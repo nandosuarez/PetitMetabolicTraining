@@ -397,6 +397,58 @@ create table if not exists accounting_document_downloads (
   created_at timestamptz not null default now()
 );
 
+create table if not exists inventory_assets (
+  id bigserial primary key,
+  name text not null,
+  category text not null,
+  location text not null default '',
+  condition_status text not null default 'Operativo',
+  brand_model text not null default '',
+  serial_number text not null default '',
+  purchase_date date,
+  purchase_value numeric(14, 2) not null default 0,
+  notes text not null default '',
+  is_active boolean not null default true,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create table if not exists inventory_products (
+  id bigserial primary key,
+  name text not null,
+  area text not null check (area in ('Gimnasio', 'Restaurante', 'Tienda', 'Suplementos', 'General')),
+  category text not null,
+  unit_name text not null,
+  current_stock numeric(14, 2) not null default 0,
+  minimum_stock numeric(14, 2) not null default 0,
+  cost_price numeric(14, 2) not null default 0,
+  sale_price numeric(14, 2) not null default 0,
+  notes text not null default '',
+  is_active boolean not null default true,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create table if not exists inventory_stock_movements (
+  id bigserial primary key,
+  inventory_product_id bigint not null references inventory_products(id) on delete cascade,
+  movement_date date not null,
+  movement_type text not null check (
+    movement_type in ('entrada', 'salida', 'ajuste_positivo', 'ajuste_negativo')
+  ),
+  quantity numeric(14, 2) not null check (quantity > 0),
+  unit_cost numeric(14, 2) not null default 0,
+  stock_before numeric(14, 2) not null default 0,
+  stock_after numeric(14, 2) not null default 0,
+  reference text not null default '',
+  notes text not null default '',
+  registered_by_user_id bigint not null references app_users(id),
+  created_at timestamptz not null default now()
+);
+
+create index if not exists inventory_stock_movements_product_idx
+  on inventory_stock_movements(inventory_product_id, movement_date desc, created_at desc);
+
 create index if not exists accounting_document_downloads_document_idx
   on accounting_document_downloads(accounting_document_id, created_at desc);
 

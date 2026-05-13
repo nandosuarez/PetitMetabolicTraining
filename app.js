@@ -21,6 +21,9 @@ const emptyState = {
   clients: [],
   athletes: [],
   users: [],
+  inventoryAssets: [],
+  inventoryProducts: [],
+  inventoryStockMovements: [],
   accountingDocuments: [],
   programmingMethods: [],
   programmingExercises: [],
@@ -65,6 +68,7 @@ let activeView = "dashboard";
 let activeClientPanel = "base";
 let activeBoxPanel = "resumen";
 let activeProgrammingPanel = "clases";
+let activeInventoryPanel = "activos";
 let selectedCollectionMovementId = null;
 let selectedCollectionClientKey = null;
 let selectedCollectionMovementIds = [];
@@ -112,6 +116,7 @@ const elements = {
     contabilidad: document.getElementById("contabilidad-view"),
     cartera: document.getElementById("cartera-view"),
     programacion: document.getElementById("programacion-view"),
+    inventario: document.getElementById("inventario-view"),
     listas: document.getElementById("listas-view"),
     usuarios: document.getElementById("usuarios-view"),
     importar: document.getElementById("importar-view"),
@@ -134,6 +139,7 @@ const elements = {
   accountingDateFrom: document.getElementById("accounting-date-from"),
   accountingDateTo: document.getElementById("accounting-date-to"),
   accountingLine: document.getElementById("accounting-line"),
+  accountingType: document.getElementById("accounting-type"),
   accountingQuery: document.getElementById("accounting-query"),
   accountingSummary: document.getElementById("accounting-summary"),
   accountingTable: document.getElementById("accounting-table"),
@@ -257,6 +263,57 @@ const elements = {
     biblioteca: document.getElementById("programming-panel-biblioteca"),
     metodos: document.getElementById("programming-panel-metodos"),
   },
+  inventoryMenuButtons: [...document.querySelectorAll("[data-inventory-panel]")],
+  inventoryPanels: {
+    activos: document.getElementById("inventory-panel-activos"),
+    productos: document.getElementById("inventory-panel-productos"),
+    movimientos: document.getElementById("inventory-panel-movimientos"),
+  },
+  inventorySummary: document.getElementById("inventory-summary"),
+  inventoryAssetForm: document.getElementById("inventory-asset-form"),
+  inventoryAssetId: document.getElementById("inventory-asset-id"),
+  inventoryAssetName: document.getElementById("inventory-asset-name"),
+  inventoryAssetCategory: document.getElementById("inventory-asset-category"),
+  inventoryAssetLocation: document.getElementById("inventory-asset-location"),
+  inventoryAssetCondition: document.getElementById("inventory-asset-condition"),
+  inventoryAssetBrandModel: document.getElementById("inventory-asset-brand-model"),
+  inventoryAssetSerial: document.getElementById("inventory-asset-serial"),
+  inventoryAssetPurchaseDate: document.getElementById("inventory-asset-purchase-date"),
+  inventoryAssetPurchaseValue: document.getElementById("inventory-asset-purchase-value"),
+  inventoryAssetNotes: document.getElementById("inventory-asset-notes"),
+  inventoryAssetFeedback: document.getElementById("inventory-asset-feedback"),
+  inventoryAssetCancelEdit: document.getElementById("inventory-asset-cancel-edit"),
+  inventoryAssetQuery: document.getElementById("inventory-asset-query"),
+  inventoryAssetsMetrics: document.getElementById("inventory-assets-metrics"),
+  inventoryAssetsTable: document.getElementById("inventory-assets-table"),
+  inventoryProductForm: document.getElementById("inventory-product-form"),
+  inventoryProductId: document.getElementById("inventory-product-id"),
+  inventoryProductName: document.getElementById("inventory-product-name"),
+  inventoryProductArea: document.getElementById("inventory-product-area"),
+  inventoryProductCategory: document.getElementById("inventory-product-category"),
+  inventoryProductUnit: document.getElementById("inventory-product-unit"),
+  inventoryProductCurrentStock: document.getElementById("inventory-product-current-stock"),
+  inventoryProductMinimumStock: document.getElementById("inventory-product-minimum-stock"),
+  inventoryProductCostPrice: document.getElementById("inventory-product-cost-price"),
+  inventoryProductSalePrice: document.getElementById("inventory-product-sale-price"),
+  inventoryProductNotes: document.getElementById("inventory-product-notes"),
+  inventoryProductFeedback: document.getElementById("inventory-product-feedback"),
+  inventoryProductCancelEdit: document.getElementById("inventory-product-cancel-edit"),
+  inventoryProductQuery: document.getElementById("inventory-product-query"),
+  inventoryProductsMetrics: document.getElementById("inventory-products-metrics"),
+  inventoryProductsTable: document.getElementById("inventory-products-table"),
+  inventoryMovementForm: document.getElementById("inventory-movement-form"),
+  inventoryMovementProductId: document.getElementById("inventory-movement-product-id"),
+  inventoryMovementDate: document.getElementById("inventory-movement-date"),
+  inventoryMovementType: document.getElementById("inventory-movement-type"),
+  inventoryMovementQuantity: document.getElementById("inventory-movement-quantity"),
+  inventoryMovementUnitCost: document.getElementById("inventory-movement-unit-cost"),
+  inventoryMovementReference: document.getElementById("inventory-movement-reference"),
+  inventoryMovementNotes: document.getElementById("inventory-movement-notes"),
+  inventoryMovementFeedback: document.getElementById("inventory-movement-feedback"),
+  inventoryMovementQuery: document.getElementById("inventory-movement-query"),
+  inventoryMovementsMetrics: document.getElementById("inventory-movements-metrics"),
+  inventoryMovementsTable: document.getElementById("inventory-movements-table"),
   programForm: document.getElementById("program-form"),
   programFormTitle: document.getElementById("program-form-title"),
   programId: document.getElementById("program-id"),
@@ -554,6 +611,12 @@ function bindEvents() {
     button.addEventListener("click", () => setBoxPanel(button.dataset.boxPanel));
   });
 
+  elements.inventoryMenuButtons.forEach((button) => {
+    button.addEventListener("click", () =>
+      setInventoryPanel(button.dataset.inventoryPanel)
+    );
+  });
+
   elements.quickMovement.addEventListener("click", () => {
     switchView("movimientos");
     elements.descripcion.focus();
@@ -593,6 +656,7 @@ function bindEvents() {
     elements.accountingDateFrom,
     elements.accountingDateTo,
     elements.accountingLine,
+    elements.accountingType,
     elements.accountingQuery,
   ].forEach(
     (input) => {
@@ -825,6 +889,32 @@ function bindEvents() {
     .forEach((form) => form.addEventListener("submit", handleListSubmit));
 
   addListener(document.getElementById("listas-view"), "click", handleCatalogItemAction);
+  addListener(elements.inventoryAssetForm, "submit", handleInventoryAssetSubmit);
+  addListener(
+    elements.inventoryAssetCancelEdit,
+    "click",
+    resetInventoryAssetForm
+  );
+  addListener(elements.inventoryAssetsTable, "click", handleInventoryAssetsTableClick);
+  addListener(elements.inventoryAssetQuery, "input", renderInventoryView);
+  addListener(elements.inventoryProductForm, "submit", handleInventoryProductSubmit);
+  addListener(
+    elements.inventoryProductCancelEdit,
+    "click",
+    resetInventoryProductForm
+  );
+  addListener(
+    elements.inventoryProductsTable,
+    "click",
+    handleInventoryProductsTableClick
+  );
+  addListener(elements.inventoryProductQuery, "input", renderInventoryView);
+  addListener(
+    elements.inventoryMovementForm,
+    "submit",
+    handleInventoryStockMovementSubmit
+  );
+  addListener(elements.inventoryMovementQuery, "input", renderInventoryView);
 }
 
 function addListener(element, eventName, handler) {
@@ -1068,6 +1158,11 @@ async function loadBootstrap() {
       accountingDocuments: Array.isArray(data.accountingDocuments)
         ? data.accountingDocuments
         : [],
+      inventoryAssets: normalizeInventoryAssets(data.inventoryAssets),
+      inventoryProducts: normalizeInventoryProducts(data.inventoryProducts),
+      inventoryStockMovements: normalizeInventoryStockMovements(
+        data.inventoryStockMovements
+      ),
       clients: Array.isArray(data.clients) ? data.clients : [],
       athletes: normalizeProgrammingAthletes(data.athletes),
       users: Array.isArray(usersPayload?.users) ? usersPayload.users : [],
@@ -1119,6 +1214,9 @@ async function loadBootstrap() {
     resetUserForm();
     resetProgramExerciseForm();
     resetProgramForm();
+    resetInventoryAssetForm();
+    resetInventoryProductForm();
+    resetInventoryMovementForm();
     renderAll();
     setStatus(`PostgreSQL conectado · ${formatClockTime(new Date())}`);
   } catch (error) {
@@ -1239,6 +1337,7 @@ function getAllowedViews() {
       "contabilidad",
       "cartera",
       "programacion",
+      "inventario",
       "listas",
       "usuarios",
       "importar",
@@ -1278,6 +1377,10 @@ function defaultBoxPanelForCurrentUser() {
 
 function defaultProgrammingPanelForCurrentUser() {
   return "clases";
+}
+
+function defaultInventoryPanelForCurrentUser() {
+  return "activos";
 }
 
 function defaultAccountingDateForCurrentUser() {
@@ -1348,6 +1451,9 @@ function hydrateDefaultDates() {
   }
   if (elements.boxTransferDate) {
     elements.boxTransferDate.value = today;
+  }
+  if (elements.inventoryMovementDate) {
+    elements.inventoryMovementDate.value = today;
   }
   elements.monthlyYear.value = String(getCurrentDateParts().year);
 
@@ -1486,6 +1592,14 @@ function switchView(view, options = {}) {
     );
   }
 
+  if (view === "inventario") {
+    activeInventoryPanel = normalizeInventoryPanel(
+      options.inventoryPanel ||
+        activeInventoryPanel ||
+        defaultInventoryPanelForCurrentUser()
+    );
+  }
+
   activeView = view;
 
   Object.entries(elements.views).forEach(([key, section]) => {
@@ -1510,6 +1624,7 @@ function switchView(view, options = {}) {
     usuarios: "Usuarios",
     importar: "Importar Excel",
   };
+  titles.inventario = "Inventario";
 
   elements.viewTitle.textContent = titles[view] || "Control administrativo";
 
@@ -1523,6 +1638,10 @@ function switchView(view, options = {}) {
 
   if (view === "cajas") {
     renderBoxPanels();
+  }
+
+  if (view === "inventario") {
+    renderInventoryPanels();
   }
 
   setSidebarOpen(false);
@@ -1572,6 +1691,12 @@ function normalizeBoxPanel(panel) {
     : defaultBoxPanelForCurrentUser();
 }
 
+function normalizeInventoryPanel(panel) {
+  return ["activos", "productos", "movimientos"].includes(panel)
+    ? panel
+    : defaultInventoryPanelForCurrentUser();
+}
+
 function setBoxPanel(panel) {
   activeBoxPanel = normalizeBoxPanel(panel);
 
@@ -1582,6 +1707,19 @@ function setBoxPanel(panel) {
 
   switchView("cajas", {
     boxPanel: activeBoxPanel,
+  });
+}
+
+function setInventoryPanel(panel) {
+  activeInventoryPanel = normalizeInventoryPanel(panel);
+
+  if (activeView === "inventario") {
+    renderInventoryPanels();
+    return;
+  }
+
+  switchView("inventario", {
+    inventoryPanel: activeInventoryPanel,
   });
 }
 
@@ -1596,6 +1734,26 @@ function renderBoxPanels() {
   });
 
   Object.entries(elements.boxPanels).forEach(([key, panel]) => {
+    if (!panel) {
+      return;
+    }
+
+    panel.classList.toggle("active", key === normalizedPanel);
+    panel.classList.toggle("is-hidden", key !== normalizedPanel);
+  });
+}
+
+function renderInventoryPanels() {
+  const normalizedPanel = normalizeInventoryPanel(activeInventoryPanel);
+  activeInventoryPanel = normalizedPanel;
+
+  elements.inventoryMenuButtons.forEach((button) => {
+    const isActive = button.dataset.inventoryPanel === normalizedPanel;
+    button.classList.toggle("active", isActive);
+    button.setAttribute("aria-selected", String(isActive));
+  });
+
+  Object.entries(elements.inventoryPanels).forEach(([key, panel]) => {
     if (!panel) {
       return;
     }
@@ -1657,6 +1815,7 @@ function renderAll() {
   renderAccountingView();
   renderPortfolioView();
   renderProgrammingView();
+  renderInventoryView();
   renderListsView();
   renderUsersView();
   renderImportView();
@@ -2301,6 +2460,7 @@ function getAccountingSelectedDateRange() {
 function getFilteredAccountingMovements() {
   const { from, to } = getAccountingSelectedDateRange();
   const selectedLine = String(elements.accountingLine?.value || "");
+  const selectedType = String(elements.accountingType?.value || "");
   const query = normalizeSearchValue(elements.accountingQuery?.value || "");
 
   return getSortedMovements(
@@ -2311,6 +2471,10 @@ function getFilteredAccountingMovements() {
       }
 
       if (selectedLine && item.linea !== selectedLine) {
+        return false;
+      }
+
+      if (selectedType && item.tipo !== selectedType) {
         return false;
       }
 
@@ -3128,6 +3292,756 @@ function renderImportView() {
       <div class="mini-stat"><span>Total en clientes</span><strong>${Number(lastUsersClientsImportReport.totalClients || 0)}</strong></div>
     </div>
   `;
+}
+
+function renderInventoryView() {
+  if (
+    !elements.inventorySummary ||
+    !elements.inventoryAssetsTable ||
+    !elements.inventoryProductsTable ||
+    !elements.inventoryMovementsTable
+  ) {
+    return;
+  }
+
+  renderInventoryPanels();
+
+  if (!isAdminUser()) {
+    elements.inventorySummary.innerHTML = `
+      <div class="empty-state">
+        Solo el perfil administrador puede consultar y gestionar inventario.
+      </div>
+    `;
+    elements.inventoryAssetsMetrics.innerHTML = "";
+    elements.inventoryProductsMetrics.innerHTML = "";
+    elements.inventoryMovementsMetrics.innerHTML = "";
+    elements.inventoryAssetsTable.innerHTML = "";
+    elements.inventoryProductsTable.innerHTML = "";
+    elements.inventoryMovementsTable.innerHTML = "";
+    fillInventoryProductSelect();
+    return;
+  }
+
+  fillInventoryProductSelect();
+  renderInventorySummary();
+  renderInventoryAssetsTable();
+  renderInventoryProductsTable();
+  renderInventoryStockMovementsTable();
+  applyStackTableLabels(elements.appShell);
+}
+
+function renderInventorySummary() {
+  const assets = Array.isArray(state.inventoryAssets) ? state.inventoryAssets : [];
+  const products = Array.isArray(state.inventoryProducts) ? state.inventoryProducts : [];
+  const stockMovements = Array.isArray(state.inventoryStockMovements)
+    ? state.inventoryStockMovements
+    : [];
+  const activeAssets = assets.filter((item) => item.isActive);
+  const activeProducts = products.filter((item) => item.isActive);
+  const lowStockProducts = activeProducts.filter(
+    (item) => item.currentStock <= item.minimumStock
+  );
+  const assetValue = activeAssets.reduce(
+    (total, item) => total + Number(item.purchaseValue || 0),
+    0
+  );
+  const stockValue = activeProducts.reduce(
+    (total, item) =>
+      total + Number(item.currentStock || 0) * Number(item.costPrice || 0),
+    0
+  );
+
+  elements.inventorySummary.innerHTML = [
+    createStatCard(
+      "Activos gimnasio",
+      String(activeAssets.length),
+      `${assets.length} registros · Valor ${formatCurrency(assetValue)}`
+    ),
+    createStatCard(
+      "Productos con stock",
+      String(activeProducts.length),
+      `${lowStockProducts.length} por debajo del minimo`
+    ),
+    createStatCard(
+      "Costo inventario",
+      formatCurrency(stockValue),
+      "Estimado segun stock actual y costo de compra"
+    ),
+    createStatCard(
+      "Movimientos de stock",
+      String(stockMovements.length),
+      "Entradas, salidas y ajustes registrados"
+    ),
+  ].join("");
+}
+
+function getFilteredInventoryAssets() {
+  const query = normalizeSearchValue(elements.inventoryAssetQuery?.value || "");
+  const items = Array.isArray(state.inventoryAssets) ? state.inventoryAssets : [];
+
+  if (!query) {
+    return items;
+  }
+
+  return items.filter((item) =>
+    normalizeSearchValue(
+      [
+        item.name,
+        item.category,
+        item.location,
+        item.conditionStatus,
+        item.brandModel,
+        item.serialNumber,
+        item.notes,
+        item.purchaseValue,
+      ].join(" ")
+    ).includes(query)
+  );
+}
+
+function getFilteredInventoryProducts() {
+  const query = normalizeSearchValue(elements.inventoryProductQuery?.value || "");
+  const items = Array.isArray(state.inventoryProducts) ? state.inventoryProducts : [];
+
+  if (!query) {
+    return items;
+  }
+
+  return items.filter((item) =>
+    normalizeSearchValue(
+      [
+        item.name,
+        item.area,
+        item.category,
+        item.unitName,
+        item.notes,
+        item.currentStock,
+        item.minimumStock,
+        item.costPrice,
+        item.salePrice,
+      ].join(" ")
+    ).includes(query)
+  );
+}
+
+function getFilteredInventoryStockMovements() {
+  const query = normalizeSearchValue(elements.inventoryMovementQuery?.value || "");
+  const items = Array.isArray(state.inventoryStockMovements)
+    ? state.inventoryStockMovements
+    : [];
+
+  if (!query) {
+    return items;
+  }
+
+  return items.filter((item) =>
+    normalizeSearchValue(
+      [
+        item.productName,
+        item.productArea,
+        item.productUnitName,
+        inventoryMovementTypeLabel(item.movementType),
+        item.reference,
+        item.notes,
+        item.registeredBy,
+        item.quantity,
+        item.stockBefore,
+        item.stockAfter,
+      ].join(" ")
+    ).includes(query)
+  );
+}
+
+function renderInventoryAssetsTable() {
+  const items = getFilteredInventoryAssets();
+  const activeAssets = items.filter((item) => item.isActive);
+  const maintenanceAssets = activeAssets.filter(
+    (item) => item.conditionStatus === "En mantenimiento"
+  );
+  const activeValue = activeAssets.reduce(
+    (total, item) => total + Number(item.purchaseValue || 0),
+    0
+  );
+
+  elements.inventoryAssetsMetrics.innerHTML = `
+    <div class="mini-stat"><span>Total</span><strong>${items.length}</strong></div>
+    <div class="mini-stat"><span>Activos</span><strong>${activeAssets.length}</strong></div>
+    <div class="mini-stat"><span>Mantenimiento</span><strong>${maintenanceAssets.length}</strong></div>
+    <div class="mini-stat"><span>Valor</span><strong>${formatCurrency(activeValue)}</strong></div>
+  `;
+
+  if (!items.length) {
+    elements.inventoryAssetsTable.innerHTML = `
+      <tr>
+        <td colspan="6" class="empty-state">No hay activos registrados para esos filtros.</td>
+      </tr>
+    `;
+    return;
+  }
+
+  elements.inventoryAssetsTable.innerHTML = items
+    .map((item) => {
+      const nextActive = item.isActive ? "false" : "true";
+      return `
+        <tr>
+          <td>
+            <strong>${escapeHtml(item.name)}</strong>
+            <div class="inline-hint">${escapeHtml(item.brandModel || "Sin marca o modelo")}</div>
+          </td>
+          <td>${escapeHtml(item.category)}</td>
+          <td>${escapeHtml(item.location || "Sin ubicacion")}</td>
+          <td>
+            <span class="status-pill ${item.isActive ? "user-status-active" : "user-status-inactive"}">
+              ${escapeHtml(item.conditionStatus || (item.isActive ? "Operativo" : "Inactivo"))}
+            </span>
+          </td>
+          <td>${formatCurrency(item.purchaseValue)}</td>
+          <td>
+            <div class="row-actions row-actions--compact">
+              <button
+                class="table-button icon-button"
+                type="button"
+                data-inventory-asset-edit-id="${item.id}"
+                title="Editar activo"
+                aria-label="Editar activo"
+              >
+                <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                  <path d="M4 20h4l10-10-4-4L4 16v4Z"></path>
+                  <path d="m12 6 4 4"></path>
+                </svg>
+              </button>
+              <button
+                class="table-button ${item.isActive ? "danger" : ""} icon-button"
+                type="button"
+                data-inventory-asset-status-id="${item.id}"
+                data-inventory-asset-next-active="${nextActive}"
+                title="${item.isActive ? "Inactivar activo" : "Activar activo"}"
+                aria-label="${item.isActive ? "Inactivar activo" : "Activar activo"}"
+              >
+                <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                  <path d="M12 3v7"></path>
+                  <path d="M7.8 5.8A9 9 0 1 0 16.2 5.8"></path>
+                </svg>
+              </button>
+            </div>
+          </td>
+        </tr>
+      `;
+    })
+    .join("");
+}
+
+function renderInventoryProductsTable() {
+  const items = getFilteredInventoryProducts();
+  const activeProducts = items.filter((item) => item.isActive);
+  const lowStockProducts = activeProducts.filter(
+    (item) => item.currentStock <= item.minimumStock
+  );
+  const stockValue = activeProducts.reduce(
+    (total, item) =>
+      total + Number(item.currentStock || 0) * Number(item.costPrice || 0),
+    0
+  );
+
+  elements.inventoryProductsMetrics.innerHTML = `
+    <div class="mini-stat"><span>Total</span><strong>${items.length}</strong></div>
+    <div class="mini-stat"><span>Activos</span><strong>${activeProducts.length}</strong></div>
+    <div class="mini-stat"><span>Bajo minimo</span><strong>${lowStockProducts.length}</strong></div>
+    <div class="mini-stat"><span>Valor costo</span><strong>${formatCurrency(stockValue)}</strong></div>
+  `;
+
+  if (!items.length) {
+    elements.inventoryProductsTable.innerHTML = `
+      <tr>
+        <td colspan="6" class="empty-state">No hay productos registrados para esos filtros.</td>
+      </tr>
+    `;
+    return;
+  }
+
+  elements.inventoryProductsTable.innerHTML = items
+    .map((item) => {
+      const nextActive = item.isActive ? "false" : "true";
+      const isLowStock = item.isActive && item.currentStock <= item.minimumStock;
+      return `
+        <tr class="${isLowStock ? "inventory-row-low-stock" : ""}">
+          <td>
+            <strong>${escapeHtml(item.name)}</strong>
+            <div class="inline-hint">${escapeHtml(item.category)} · ${escapeHtml(item.unitName)}</div>
+          </td>
+          <td>${escapeHtml(item.area)}</td>
+          <td>${escapeHtml(formatInventoryQuantity(item.currentStock, item.unitName))}</td>
+          <td>${escapeHtml(formatInventoryQuantity(item.minimumStock, item.unitName))}</td>
+          <td>${formatCurrency(item.salePrice)}</td>
+          <td>
+            <div class="row-actions row-actions--compact">
+              <button
+                class="table-button icon-button"
+                type="button"
+                data-inventory-product-edit-id="${item.id}"
+                title="Editar producto"
+                aria-label="Editar producto"
+              >
+                <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                  <path d="M4 20h4l10-10-4-4L4 16v4Z"></path>
+                  <path d="m12 6 4 4"></path>
+                </svg>
+              </button>
+              <button
+                class="table-button ${item.isActive ? "danger" : ""} icon-button"
+                type="button"
+                data-inventory-product-status-id="${item.id}"
+                data-inventory-product-next-active="${nextActive}"
+                title="${item.isActive ? "Inactivar producto" : "Activar producto"}"
+                aria-label="${item.isActive ? "Inactivar producto" : "Activar producto"}"
+              >
+                <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                  <path d="M12 3v7"></path>
+                  <path d="M7.8 5.8A9 9 0 1 0 16.2 5.8"></path>
+                </svg>
+              </button>
+            </div>
+          </td>
+        </tr>
+      `;
+    })
+    .join("");
+}
+
+function renderInventoryStockMovementsTable() {
+  const items = getFilteredInventoryStockMovements();
+  const entries = items.filter((item) => item.movementType === "entrada").length;
+  const exits = items.filter((item) => item.movementType === "salida").length;
+  const adjustments = items.filter((item) => item.movementType.includes("ajuste")).length;
+
+  elements.inventoryMovementsMetrics.innerHTML = `
+    <div class="mini-stat"><span>Registros</span><strong>${items.length}</strong></div>
+    <div class="mini-stat"><span>Entradas</span><strong>${entries}</strong></div>
+    <div class="mini-stat"><span>Salidas</span><strong>${exits}</strong></div>
+    <div class="mini-stat"><span>Ajustes</span><strong>${adjustments}</strong></div>
+  `;
+
+  if (!items.length) {
+    elements.inventoryMovementsTable.innerHTML = `
+      <tr>
+        <td colspan="7" class="empty-state">Aún no hay movimientos de inventario registrados.</td>
+      </tr>
+    `;
+    return;
+  }
+
+  elements.inventoryMovementsTable.innerHTML = items
+    .map(
+      (item) => `
+        <tr>
+          <td>${formatDate(item.movementDate)}</td>
+          <td>
+            <strong>${escapeHtml(item.productName)}</strong>
+            <div class="inline-hint">${escapeHtml(item.productArea || "Sin area")}</div>
+          </td>
+          <td>${escapeHtml(inventoryMovementTypeLabel(item.movementType))}</td>
+          <td>${escapeHtml(formatInventoryQuantity(item.quantity, item.productUnitName))}</td>
+          <td>${escapeHtml(formatInventoryQuantity(item.stockBefore, item.productUnitName))} → ${escapeHtml(formatInventoryQuantity(item.stockAfter, item.productUnitName))}</td>
+          <td>${escapeHtml(item.reference || "Sin referencia")}</td>
+          <td>${escapeHtml(item.registeredBy || "Sistema")}</td>
+        </tr>
+      `
+    )
+    .join("");
+}
+
+function fillInventoryProductSelect(selectedValue = "") {
+  if (!elements.inventoryMovementProductId) {
+    return;
+  }
+
+  const products = (state.inventoryProducts || [])
+    .filter((item) => item.isActive)
+    .sort((a, b) => a.name.localeCompare(b.name, "es"));
+
+  if (!products.length) {
+    elements.inventoryMovementProductId.innerHTML = `
+      <option value="">Primero crea un producto de inventario</option>
+    `;
+    elements.inventoryMovementProductId.disabled = true;
+    return;
+  }
+
+  elements.inventoryMovementProductId.disabled = false;
+  elements.inventoryMovementProductId.innerHTML = products
+    .map((item) => {
+      const label = `${item.name} · ${item.area} · ${formatInventoryQuantity(
+        item.currentStock,
+        item.unitName
+      )}`;
+      return `<option value="${item.id}">${escapeHtml(label)}</option>`;
+    })
+    .join("");
+
+  if (selectedValue && products.some((item) => String(item.id) === String(selectedValue))) {
+    elements.inventoryMovementProductId.value = String(selectedValue);
+    return;
+  }
+
+  elements.inventoryMovementProductId.value = String(products[0].id);
+}
+
+async function handleInventoryAssetSubmit(event) {
+  event.preventDefault();
+
+  const assetId = Number(elements.inventoryAssetId?.value || 0);
+  const payload = {
+    name: elements.inventoryAssetName.value.trim(),
+    category: elements.inventoryAssetCategory.value.trim(),
+    location: elements.inventoryAssetLocation.value.trim(),
+    conditionStatus: elements.inventoryAssetCondition.value,
+    brandModel: elements.inventoryAssetBrandModel.value.trim(),
+    serialNumber: elements.inventoryAssetSerial.value.trim(),
+    purchaseDate: elements.inventoryAssetPurchaseDate.value,
+    purchaseValue: Number(elements.inventoryAssetPurchaseValue.value || 0),
+    notes: elements.inventoryAssetNotes.value.trim(),
+  };
+
+  if (!payload.name || !payload.category) {
+    elements.inventoryAssetFeedback.textContent =
+      "El nombre y la categoria del activo son obligatorios.";
+    return;
+  }
+
+  try {
+    await apiRequest(assetId > 0 ? `/api/inventory/assets/${assetId}` : "/api/inventory/assets", {
+      method: assetId > 0 ? "PUT" : "POST",
+      body: JSON.stringify(payload),
+    });
+    resetInventoryAssetForm();
+    await loadBootstrap();
+    switchView("inventario", {
+      inventoryPanel: "activos",
+    });
+    elements.inventoryAssetFeedback.textContent =
+      assetId > 0
+        ? "Activo actualizado correctamente."
+        : "Activo registrado correctamente.";
+  } catch (error) {
+    elements.inventoryAssetFeedback.textContent = error.message;
+  }
+}
+
+function resetInventoryAssetForm() {
+  if (!elements.inventoryAssetForm) {
+    return;
+  }
+
+  elements.inventoryAssetForm.reset();
+  elements.inventoryAssetId.value = "";
+  elements.inventoryAssetCondition.value = "Operativo";
+  elements.inventoryAssetPurchaseValue.value = "0";
+  elements.inventoryAssetFeedback.textContent =
+    "Aqui puedes llevar el control de maquinas, accesorios, mobiliario y equipos del gimnasio.";
+  elements.inventoryAssetCancelEdit.classList.add("is-hidden");
+
+  const submitButton = elements.inventoryAssetForm.querySelector('button[type="submit"]');
+  if (submitButton) {
+    submitButton.textContent = "Guardar activo";
+  }
+}
+
+async function handleInventoryAssetsTableClick(event) {
+  const editButton = event.target.closest("[data-inventory-asset-edit-id]");
+  const statusButton = event.target.closest("[data-inventory-asset-status-id]");
+
+  if (editButton) {
+    const asset = (state.inventoryAssets || []).find(
+      (item) => String(item.id) === String(editButton.dataset.inventoryAssetEditId)
+    );
+
+    if (!asset) {
+      elements.inventoryAssetFeedback.textContent =
+        "No encontré el activo que quieres editar.";
+      return;
+    }
+
+    elements.inventoryAssetId.value = String(asset.id);
+    elements.inventoryAssetName.value = asset.name || "";
+    elements.inventoryAssetCategory.value = asset.category || "";
+    elements.inventoryAssetLocation.value = asset.location || "";
+    elements.inventoryAssetCondition.value = asset.conditionStatus || "Operativo";
+    elements.inventoryAssetBrandModel.value = asset.brandModel || "";
+    elements.inventoryAssetSerial.value = asset.serialNumber || "";
+    elements.inventoryAssetPurchaseDate.value = asset.purchaseDate || "";
+    elements.inventoryAssetPurchaseValue.value = String(asset.purchaseValue || 0);
+    elements.inventoryAssetNotes.value = asset.notes || "";
+    elements.inventoryAssetFeedback.textContent =
+      "Actualiza la informacion del activo y guarda para aplicar el cambio.";
+    elements.inventoryAssetCancelEdit.classList.remove("is-hidden");
+
+    const submitButton = elements.inventoryAssetForm.querySelector('button[type="submit"]');
+    if (submitButton) {
+      submitButton.textContent = "Guardar cambios";
+    }
+
+    switchView("inventario", {
+      inventoryPanel: "activos",
+    });
+    elements.inventoryAssetName.focus();
+    return;
+  }
+
+  if (!statusButton) {
+    return;
+  }
+
+  const assetId = statusButton.dataset.inventoryAssetStatusId;
+  const activate = statusButton.dataset.inventoryAssetNextActive === "true";
+  const confirmed = window.confirm(
+    activate ? "¿Deseas activar este activo?" : "¿Deseas inactivar este activo?"
+  );
+
+  if (!confirmed) {
+    return;
+  }
+
+  try {
+    await apiRequest(`/api/inventory/assets/${assetId}/active`, {
+      method: "PATCH",
+      body: JSON.stringify({
+        isActive: activate,
+      }),
+    });
+    await loadBootstrap();
+    switchView("inventario", {
+      inventoryPanel: "activos",
+    });
+    elements.inventoryAssetFeedback.textContent = activate
+      ? "Activo activado correctamente."
+      : "Activo inactivado correctamente.";
+  } catch (error) {
+    elements.inventoryAssetFeedback.textContent = error.message;
+  }
+}
+
+async function handleInventoryProductSubmit(event) {
+  event.preventDefault();
+
+  const productId = Number(elements.inventoryProductId?.value || 0);
+  const payload = {
+    name: elements.inventoryProductName.value.trim(),
+    area: elements.inventoryProductArea.value,
+    category: elements.inventoryProductCategory.value.trim(),
+    unitName: elements.inventoryProductUnit.value,
+    currentStock: Number(elements.inventoryProductCurrentStock.value || 0),
+    minimumStock: Number(elements.inventoryProductMinimumStock.value || 0),
+    costPrice: Number(elements.inventoryProductCostPrice.value || 0),
+    salePrice: Number(elements.inventoryProductSalePrice.value || 0),
+    notes: elements.inventoryProductNotes.value.trim(),
+  };
+
+  if (!payload.name || !payload.category) {
+    elements.inventoryProductFeedback.textContent =
+      "El nombre y la categoria del producto son obligatorios.";
+    return;
+  }
+
+  try {
+    await apiRequest(
+      productId > 0 ? `/api/inventory/products/${productId}` : "/api/inventory/products",
+      {
+        method: productId > 0 ? "PUT" : "POST",
+        body: JSON.stringify(payload),
+      }
+    );
+    resetInventoryProductForm();
+    await loadBootstrap();
+    switchView("inventario", {
+      inventoryPanel: "productos",
+    });
+    elements.inventoryProductFeedback.textContent =
+      productId > 0
+        ? "Producto actualizado correctamente."
+        : "Producto registrado correctamente.";
+  } catch (error) {
+    elements.inventoryProductFeedback.textContent = error.message;
+  }
+}
+
+function resetInventoryProductForm() {
+  if (!elements.inventoryProductForm) {
+    return;
+  }
+
+  elements.inventoryProductForm.reset();
+  elements.inventoryProductId.value = "";
+  elements.inventoryProductArea.value = "Gimnasio";
+  elements.inventoryProductUnit.value = "Unidad";
+  elements.inventoryProductCurrentStock.value = "0";
+  elements.inventoryProductMinimumStock.value = "0";
+  elements.inventoryProductCostPrice.value = "0";
+  elements.inventoryProductSalePrice.value = "0";
+  elements.inventoryProductFeedback.textContent =
+    "Aqui puedes registrar agua, proteina, yogurt, ingredientes, empaques y cualquier insumo de venta o consumo.";
+  elements.inventoryProductCancelEdit.classList.add("is-hidden");
+
+  const submitButton = elements.inventoryProductForm.querySelector('button[type="submit"]');
+  if (submitButton) {
+    submitButton.textContent = "Guardar producto";
+  }
+}
+
+async function handleInventoryProductsTableClick(event) {
+  const editButton = event.target.closest("[data-inventory-product-edit-id]");
+  const statusButton = event.target.closest("[data-inventory-product-status-id]");
+
+  if (editButton) {
+    const product = (state.inventoryProducts || []).find(
+      (item) => String(item.id) === String(editButton.dataset.inventoryProductEditId)
+    );
+
+    if (!product) {
+      elements.inventoryProductFeedback.textContent =
+        "No encontré el producto que quieres editar.";
+      return;
+    }
+
+    elements.inventoryProductId.value = String(product.id);
+    elements.inventoryProductName.value = product.name || "";
+    elements.inventoryProductArea.value = product.area || "Gimnasio";
+    elements.inventoryProductCategory.value = product.category || "";
+    elements.inventoryProductUnit.value = product.unitName || "Unidad";
+    elements.inventoryProductCurrentStock.value = String(product.currentStock || 0);
+    elements.inventoryProductMinimumStock.value = String(product.minimumStock || 0);
+    elements.inventoryProductCostPrice.value = String(product.costPrice || 0);
+    elements.inventoryProductSalePrice.value = String(product.salePrice || 0);
+    elements.inventoryProductNotes.value = product.notes || "";
+    elements.inventoryProductFeedback.textContent =
+      "Actualiza la ficha del producto. Si cambias el stock, el sistema deja trazabilidad del ajuste.";
+    elements.inventoryProductCancelEdit.classList.remove("is-hidden");
+
+    const submitButton = elements.inventoryProductForm.querySelector('button[type="submit"]');
+    if (submitButton) {
+      submitButton.textContent = "Guardar cambios";
+    }
+
+    switchView("inventario", {
+      inventoryPanel: "productos",
+    });
+    elements.inventoryProductName.focus();
+    return;
+  }
+
+  if (!statusButton) {
+    return;
+  }
+
+  const productId = statusButton.dataset.inventoryProductStatusId;
+  const activate = statusButton.dataset.inventoryProductNextActive === "true";
+  const confirmed = window.confirm(
+    activate
+      ? "¿Deseas activar este producto?"
+      : "¿Deseas inactivar este producto?"
+  );
+
+  if (!confirmed) {
+    return;
+  }
+
+  try {
+    await apiRequest(`/api/inventory/products/${productId}/active`, {
+      method: "PATCH",
+      body: JSON.stringify({
+        isActive: activate,
+      }),
+    });
+    await loadBootstrap();
+    switchView("inventario", {
+      inventoryPanel: "productos",
+    });
+    elements.inventoryProductFeedback.textContent = activate
+      ? "Producto activado correctamente."
+      : "Producto inactivado correctamente.";
+  } catch (error) {
+    elements.inventoryProductFeedback.textContent = error.message;
+  }
+}
+
+async function handleInventoryStockMovementSubmit(event) {
+  event.preventDefault();
+
+  const productId = Number(elements.inventoryMovementProductId?.value || 0);
+  const payload = {
+    movementDate: elements.inventoryMovementDate.value,
+    movementType: elements.inventoryMovementType.value,
+    quantity: Number(elements.inventoryMovementQuantity.value || 0),
+    unitCost: Number(elements.inventoryMovementUnitCost.value || 0),
+    reference: elements.inventoryMovementReference.value.trim(),
+    notes: elements.inventoryMovementNotes.value.trim(),
+  };
+
+  if (!productId) {
+    elements.inventoryMovementFeedback.textContent =
+      "Selecciona el producto al que quieres registrar el movimiento.";
+    return;
+  }
+
+  if (!payload.movementDate || !(payload.quantity > 0)) {
+    elements.inventoryMovementFeedback.textContent =
+      "La fecha y la cantidad del movimiento son obligatorias.";
+    return;
+  }
+
+  try {
+    await apiRequest(`/api/inventory/products/${productId}/movements`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+    resetInventoryMovementForm();
+    await loadBootstrap();
+    switchView("inventario", {
+      inventoryPanel: "movimientos",
+    });
+    elements.inventoryMovementFeedback.textContent =
+      "Movimiento de stock registrado correctamente.";
+  } catch (error) {
+    elements.inventoryMovementFeedback.textContent = error.message;
+  }
+}
+
+function resetInventoryMovementForm() {
+  if (!elements.inventoryMovementForm) {
+    return;
+  }
+
+  const currentProductId = elements.inventoryMovementProductId?.value || "";
+  elements.inventoryMovementForm.reset();
+  elements.inventoryMovementDate.value = getCurrentIsoDate();
+  elements.inventoryMovementType.value = "entrada";
+  elements.inventoryMovementQuantity.value = "";
+  elements.inventoryMovementUnitCost.value = "";
+  elements.inventoryMovementReference.value = "";
+  elements.inventoryMovementNotes.value = "";
+  fillInventoryProductSelect(currentProductId);
+  elements.inventoryMovementFeedback.textContent =
+    "Registra entradas, salidas y ajustes para dejar trazabilidad del inventario.";
+}
+
+function inventoryMovementTypeLabel(value) {
+  return (
+    {
+      entrada: "Entrada",
+      salida: "Salida",
+      ajuste_positivo: "Ajuste positivo",
+      ajuste_negativo: "Ajuste negativo",
+    }[String(value || "").trim()] || "Movimiento"
+  );
+}
+
+function formatInventoryQuantity(value, unitName = "") {
+  const numericValue = Number(value || 0);
+  const formatter = new Intl.NumberFormat(APP_LOCALE, {
+    minimumFractionDigits: Number.isInteger(numericValue) ? 0 : 2,
+    maximumFractionDigits: 2,
+  });
+
+  return `${formatter.format(numericValue)}${unitName ? ` ${unitName}` : ""}`.trim();
 }
 
 async function handleExcelImportSubmit(event) {
@@ -7765,7 +8679,54 @@ function normalizeBoxTransfers(items) {
   return items.map((item) => ({
     ...item,
     transferDate: normalizeDateOnly(item.transferDate),
-    amount: Number(item.amount || 0),
+      amount: Number(item.amount || 0),
+  }));
+}
+
+function normalizeInventoryAssets(items) {
+  if (!Array.isArray(items)) {
+    return [];
+  }
+
+  return items.map((item) => ({
+    ...item,
+    id: Number(item.id || 0),
+    purchaseDate: normalizeDateOnly(item.purchaseDate),
+    purchaseValue: Number(item.purchaseValue || 0),
+    isActive: Boolean(item.isActive),
+  }));
+}
+
+function normalizeInventoryProducts(items) {
+  if (!Array.isArray(items)) {
+    return [];
+  }
+
+  return items.map((item) => ({
+    ...item,
+    id: Number(item.id || 0),
+    currentStock: Number(item.currentStock || 0),
+    minimumStock: Number(item.minimumStock || 0),
+    costPrice: Number(item.costPrice || 0),
+    salePrice: Number(item.salePrice || 0),
+    isActive: Boolean(item.isActive),
+  }));
+}
+
+function normalizeInventoryStockMovements(items) {
+  if (!Array.isArray(items)) {
+    return [];
+  }
+
+  return items.map((item) => ({
+    ...item,
+    id: Number(item.id || 0),
+    inventoryProductId: Number(item.inventoryProductId || 0),
+    movementDate: normalizeDateOnly(item.movementDate),
+    quantity: Number(item.quantity || 0),
+    unitCost: Number(item.unitCost || 0),
+    stockBefore: Number(item.stockBefore || 0),
+    stockAfter: Number(item.stockAfter || 0),
   }));
 }
 
@@ -9695,9 +10656,14 @@ async function handleCatalogItemAction(event) {
   if (editButton) {
     const key = editButton.dataset.catalogGroup;
     const itemId = editButton.dataset.catalogEditId;
-    const currentValue = decodeURIComponent(editButton.dataset.catalogValue || "");
+    const catalogItem = (state.catalogItems[key] || []).find(
+      (item) => String(item.id) === String(itemId)
+    );
+    const currentValue =
+      String(catalogItem?.value || "") ||
+      decodeURIComponent(editButton.dataset.catalogValue || "");
     const currentDefaultAmount = Number(
-      editButton.dataset.catalogDefaultAmount || 0
+      catalogItem?.defaultAmount ?? editButton.dataset.catalogDefaultAmount ?? 0
     );
 
     if (!key || !itemId) {
@@ -9722,7 +10688,7 @@ async function handleCatalogItemAction(event) {
     let nextDefaultAmount = currentDefaultAmount;
     if (isCategoryPricingGroup(key)) {
       const amountPrompt = window.prompt(
-        "Escribe el valor sugerido para este item. Usa 0 si no aplica.",
+        `Escribe el valor sugerido para "${cleanValue}". Usa 0 si no aplica.`,
         currentDefaultAmount > 0 ? String(currentDefaultAmount) : "0"
       );
 

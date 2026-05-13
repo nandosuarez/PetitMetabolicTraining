@@ -1086,6 +1086,7 @@ app.get("/api/bootstrap", asyncHandler(async (req, res) => {
   const isAssistantOperative = req.authUser?.role === "asistente_operativo";
   const hasAccountingAccess = userHasAccountingAccess(req.authUser);
   const hasProgrammingAccess = req.authUser?.role === "administrador";
+  const hasInventoryAccess = req.authUser?.role === "administrador";
 
   const [
     catalogResult,
@@ -1101,11 +1102,14 @@ app.get("/api/bootstrap", asyncHandler(async (req, res) => {
     programmingExercises,
     classPrograms,
     accountingDocumentsResult,
+    inventoryAssetsResult,
+    inventoryProductsResult,
+    inventoryStockMovementsResult,
   ] =
     await Promise.all([
     query(
       `
-        select id, group_name, value, sort_order, is_active, created_at, updated_at
+        select id, group_name, value, default_amount, sort_order, is_active, created_at, updated_at
         from catalog_items
         order by group_name asc, sort_order asc, value asc
       `
@@ -1220,6 +1224,43 @@ app.get("/api/bootstrap", asyncHandler(async (req, res) => {
           `
         )
       : Promise.resolve({ rows: [] }),
+    hasInventoryAccess
+      ? query(
+          `
+            select *
+            from inventory_assets
+            order by is_active desc, name asc, id asc
+          `
+        )
+      : Promise.resolve({ rows: [] }),
+    hasInventoryAccess
+      ? query(
+          `
+            select *
+            from inventory_products
+            order by is_active desc, name asc, id asc
+          `
+        )
+      : Promise.resolve({ rows: [] }),
+    hasInventoryAccess
+      ? query(
+          `
+            select
+              ism.*,
+              ip.name as product_name,
+              ip.area as product_area,
+              ip.unit_name as product_unit_name,
+              coalesce(nullif(u.full_name, ''), u.username) as registered_by_name,
+              u.username as registered_by_username
+            from inventory_stock_movements ism
+            join inventory_products ip
+              on ip.id = ism.inventory_product_id
+            join app_users u
+              on u.id = ism.registered_by_user_id
+            order by ism.movement_date desc, ism.created_at desc, ism.id desc
+          `
+        )
+      : Promise.resolve({ rows: [] }),
   ]);
 
   res.json({
@@ -1236,6 +1277,10 @@ app.get("/api/bootstrap", asyncHandler(async (req, res) => {
     programmingExercises,
     classPrograms,
     accountingDocuments: accountingDocumentsResult.rows.map(mapAccountingDocumentRow),
+    inventoryAssets: inventoryAssetsResult.rows.map(mapInventoryAssetRow),
+    inventoryProducts: inventoryProductsResult.rows.map(mapInventoryProductRow),
+    inventoryStockMovements:
+      inventoryStockMovementsResult.rows.map(mapInventoryStockMovementRow),
     notes: mapNotesRows(notesResult.rows),
   });
 }));
@@ -2016,6 +2061,461 @@ app.delete("/api/catalogs/:group/items", requireAdmin, asyncHandler(async (_req,
   });
 }));
 
+app.post(
+  "/api/inventory/assets",
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const payload = normalizeInventoryAssetPayload(req.body);
+    validateInventoryAssetPayload(payload);
+
+    const result = await query(
+      `
+        insert into inventory_assets (
+          name,
+          category,
+          location,
+          condition_status,
+          brand_model,
+          serial_number,
+          purchase_date,
+          purchase_value,
+          notes,
+          is_active
+        )
+        values ($1, $2, $3, $4, $5, $6, $7, $8, $9, true)
+        returning *
+      `,
+      [
+        payload.name,
+        payload.category,
+        payload.location,
+        payload.conditionStatus,
+        payload.brandModel,
+        payload.serialNumber,
+        payload.purchaseDate || null,
+        payload.purchaseValue,
+        payload.notes,
+      ]
+    );
+
+    res.status(201).json(mapInventoryAssetRow(result.rows[0]));
+  })
+);
+
+app.put(
+  "/api/inventory/assets/:id",
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const assetId = Number(req.params.id);
+    const payload = normalizeInventoryAssetPayload(req.body);
+    validateInventoryAssetPayload(payload);
+
+    if (!Number.isInteger(assetId) || assetId <= 0) {
+      return res.status(400).json({ error: "Activo invalido." });
+    }
+
+    const result = await query(
+      `
+        update inventory_assets
+        set
+          name = $2,
+          category = $3,
+          location = $4,
+          condition_status = $5,
+          brand_model = $6,
+          serial_number = $7,
+          purchase_date = $8,
+          purchase_value = $9,
+          notes = $10,
+          updated_at = now()
+        where id = $1
+        returning *
+      `,
+      [
+        assetId,
+        payload.name,
+        payload.category,
+        payload.location,
+        payload.conditionStatus,
+        payload.brandModel,
+        payload.serialNumber,
+        payload.purchaseDate || null,
+        payload.purchaseValue,
+        payload.notes,
+      ]
+    );
+
+    if (!result.rows.length) {
+      return res.status(404).json({ error: "Activo no encontrado." });
+    }
+
+    res.json(mapInventoryAssetRow(result.rows[0]));
+  })
+);
+
+app.patch(
+  "/api/inventory/assets/:id/active",
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const assetId = Number(req.params.id);
+    const isActive = Boolean(req.body.isActive);
+
+    if (!Number.isInteger(assetId) || assetId <= 0) {
+      return res.status(400).json({ error: "Activo invalido." });
+    }
+
+    const result = await query(
+      `
+        update inventory_assets
+        set
+          is_active = $2,
+          updated_at = now()
+        where id = $1
+        returning *
+      `,
+      [assetId, isActive]
+    );
+
+    if (!result.rows.length) {
+      return res.status(404).json({ error: "Activo no encontrado." });
+    }
+
+    res.json(mapInventoryAssetRow(result.rows[0]));
+  })
+);
+
+app.post(
+  "/api/inventory/products",
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const payload = normalizeInventoryProductPayload(req.body);
+    validateInventoryProductPayload(payload);
+
+    const product = await withClient(async (client) => {
+      await client.query("begin");
+
+      try {
+        const result = await client.query(
+          `
+            insert into inventory_products (
+              name,
+              area,
+              category,
+              unit_name,
+              current_stock,
+              minimum_stock,
+              cost_price,
+              sale_price,
+              notes,
+              is_active
+            )
+            values ($1, $2, $3, $4, $5, $6, $7, $8, $9, true)
+            returning *
+          `,
+          [
+            payload.name,
+            payload.area,
+            payload.category,
+            payload.unitName,
+            payload.currentStock,
+            payload.minimumStock,
+            payload.costPrice,
+            payload.salePrice,
+            payload.notes,
+          ]
+        );
+
+        const productRow = result.rows[0];
+
+        if (payload.currentStock > 0) {
+          await client.query(
+            `
+              insert into inventory_stock_movements (
+                inventory_product_id,
+                movement_date,
+                movement_type,
+                quantity,
+                unit_cost,
+                stock_before,
+                stock_after,
+                reference,
+                notes,
+                registered_by_user_id
+              )
+              values ($1, $2, 'entrada', $3, $4, 0, $3, $5, $6, $7)
+            `,
+            [
+              productRow.id,
+              getCurrentIsoDateInBogota(),
+              payload.currentStock,
+              payload.costPrice,
+              "Saldo inicial",
+              payload.notes,
+              Number(req.authUser.id),
+            ]
+          );
+        }
+
+        await client.query("commit");
+        return productRow;
+      } catch (error) {
+        await client.query("rollback");
+        throw error;
+      }
+    });
+
+    res.status(201).json(mapInventoryProductRow(product));
+  })
+);
+
+app.put(
+  "/api/inventory/products/:id",
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const productId = Number(req.params.id);
+    const payload = normalizeInventoryProductPayload(req.body);
+    validateInventoryProductPayload(payload);
+
+    if (!Number.isInteger(productId) || productId <= 0) {
+      return res.status(400).json({ error: "Producto invalido." });
+    }
+
+    const product = await withClient(async (client) => {
+      await client.query("begin");
+
+      try {
+        const currentResult = await client.query(
+          `
+            select *
+            from inventory_products
+            where id = $1
+            limit 1
+            for update
+          `,
+          [productId]
+        );
+
+        if (!currentResult.rows.length) {
+          throw httpError(404, "Producto no encontrado.");
+        }
+
+        const currentRow = currentResult.rows[0];
+        const currentStock = Number(currentRow.current_stock || 0);
+        const nextStock = payload.currentStock;
+        const delta = Number((nextStock - currentStock).toFixed(2));
+
+        const result = await client.query(
+          `
+            update inventory_products
+            set
+              name = $2,
+              area = $3,
+              category = $4,
+              unit_name = $5,
+              current_stock = $6,
+              minimum_stock = $7,
+              cost_price = $8,
+              sale_price = $9,
+              notes = $10,
+              updated_at = now()
+            where id = $1
+            returning *
+          `,
+          [
+            productId,
+            payload.name,
+            payload.area,
+            payload.category,
+            payload.unitName,
+            nextStock,
+            payload.minimumStock,
+            payload.costPrice,
+            payload.salePrice,
+            payload.notes,
+          ]
+        );
+
+        if (delta !== 0) {
+          await client.query(
+            `
+              insert into inventory_stock_movements (
+                inventory_product_id,
+                movement_date,
+                movement_type,
+                quantity,
+                unit_cost,
+                stock_before,
+                stock_after,
+                reference,
+                notes,
+                registered_by_user_id
+              )
+              values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+            `,
+            [
+              productId,
+              getCurrentIsoDateInBogota(),
+              delta > 0 ? "ajuste_positivo" : "ajuste_negativo",
+              Math.abs(delta),
+              payload.costPrice,
+              currentStock,
+              nextStock,
+              "Ajuste manual desde ficha del producto",
+              payload.notes,
+              Number(req.authUser.id),
+            ]
+          );
+        }
+
+        await client.query("commit");
+        return result.rows[0];
+      } catch (error) {
+        await client.query("rollback");
+        throw error;
+      }
+    });
+
+    res.json(mapInventoryProductRow(product));
+  })
+);
+
+app.patch(
+  "/api/inventory/products/:id/active",
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const productId = Number(req.params.id);
+    const isActive = Boolean(req.body.isActive);
+
+    if (!Number.isInteger(productId) || productId <= 0) {
+      return res.status(400).json({ error: "Producto invalido." });
+    }
+
+    const result = await query(
+      `
+        update inventory_products
+        set
+          is_active = $2,
+          updated_at = now()
+        where id = $1
+        returning *
+      `,
+      [productId, isActive]
+    );
+
+    if (!result.rows.length) {
+      return res.status(404).json({ error: "Producto no encontrado." });
+    }
+
+    res.json(mapInventoryProductRow(result.rows[0]));
+  })
+);
+
+app.post(
+  "/api/inventory/products/:id/movements",
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const productId = Number(req.params.id);
+    const payload = normalizeInventoryStockMovementPayload(req.body);
+    validateInventoryStockMovementPayload(payload);
+
+    if (!Number.isInteger(productId) || productId <= 0) {
+      return res.status(400).json({ error: "Producto invalido." });
+    }
+
+    const movement = await withClient(async (client) => {
+      await client.query("begin");
+
+      try {
+        const productResult = await client.query(
+          `
+            select *
+            from inventory_products
+            where id = $1
+            limit 1
+            for update
+          `,
+          [productId]
+        );
+
+        if (!productResult.rows.length) {
+          throw httpError(404, "Producto no encontrado.");
+        }
+
+        const productRow = productResult.rows[0];
+        const stockBefore = Number(productRow.current_stock || 0);
+        const delta = getInventoryStockDelta(payload.movementType, payload.quantity);
+        const stockAfter = Number((stockBefore + delta).toFixed(2));
+
+        if (stockAfter < 0) {
+          throw httpError(
+            400,
+            `El producto ${productRow.name} no tiene stock suficiente para esa salida o ajuste.`
+          );
+        }
+
+        const movementResult = await client.query(
+          `
+            insert into inventory_stock_movements (
+              inventory_product_id,
+              movement_date,
+              movement_type,
+              quantity,
+              unit_cost,
+              stock_before,
+              stock_after,
+              reference,
+              notes,
+              registered_by_user_id
+            )
+            values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+            returning *
+          `,
+          [
+            productId,
+            payload.movementDate,
+            payload.movementType,
+            payload.quantity,
+            payload.unitCost,
+            stockBefore,
+            stockAfter,
+            payload.reference,
+            payload.notes,
+            Number(req.authUser.id),
+          ]
+        );
+
+        await client.query(
+          `
+            update inventory_products
+            set
+              current_stock = $2,
+              updated_at = now()
+            where id = $1
+          `,
+          [productId, stockAfter]
+        );
+
+        await client.query("commit");
+
+        return {
+          ...movementResult.rows[0],
+          product_name: productRow.name,
+          product_area: productRow.area,
+          product_unit_name: productRow.unit_name,
+          registered_by_name:
+            req.authUser.fullName || req.authUser.username || "Sistema",
+          registered_by_username: req.authUser.username || "",
+        };
+      } catch (error) {
+        await client.query("rollback");
+        throw error;
+      }
+    });
+
+    res.status(201).json(mapInventoryStockMovementRow(movement));
+  })
+);
+
 app.get("*", (_req, res) => {
   res.sendFile(path.join(rootDir, "index.html"));
 });
@@ -2036,6 +2536,45 @@ function normalizeClientPayload(body) {
     documentNumber: String(body.documentNumber || "").trim(),
     phone: String(body.phone || "").trim(),
     email: String(body.email || "").trim(),
+    notes: String(body.notes || "").trim(),
+  };
+}
+
+function normalizeInventoryAssetPayload(body) {
+  return {
+    name: String(body.name || "").trim(),
+    category: String(body.category || "").trim(),
+    location: String(body.location || "").trim(),
+    conditionStatus: String(body.conditionStatus || "").trim(),
+    brandModel: String(body.brandModel || "").trim(),
+    serialNumber: String(body.serialNumber || "").trim(),
+    purchaseDate: normalizeDateOnly(body.purchaseDate),
+    purchaseValue: Math.max(Number(body.purchaseValue || 0), 0),
+    notes: String(body.notes || "").trim(),
+  };
+}
+
+function normalizeInventoryProductPayload(body) {
+  return {
+    name: String(body.name || "").trim(),
+    area: String(body.area || "").trim(),
+    category: String(body.category || "").trim(),
+    unitName: String(body.unitName || "").trim(),
+    currentStock: Math.max(Number(body.currentStock || 0), 0),
+    minimumStock: Math.max(Number(body.minimumStock || 0), 0),
+    costPrice: Math.max(Number(body.costPrice || 0), 0),
+    salePrice: Math.max(Number(body.salePrice || 0), 0),
+    notes: String(body.notes || "").trim(),
+  };
+}
+
+function normalizeInventoryStockMovementPayload(body) {
+  return {
+    movementDate: normalizeDateOnly(body.movementDate),
+    movementType: String(body.movementType || "").trim(),
+    quantity: Number(body.quantity || 0),
+    unitCost: Math.max(Number(body.unitCost || 0), 0),
+    reference: String(body.reference || "").trim(),
     notes: String(body.notes || "").trim(),
   };
 }
@@ -2067,6 +2606,65 @@ function validateClientPayload(payload) {
     !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(payload.email)
   ) {
     throw httpError(400, "El correo del cliente no es valido.");
+  }
+}
+
+function validateInventoryAssetPayload(payload) {
+  if (!payload.name) {
+    throw httpError(400, "El nombre del activo es obligatorio.");
+  }
+
+  if (!payload.category) {
+    throw httpError(400, "La categoria del activo es obligatoria.");
+  }
+
+  if (
+    payload.conditionStatus &&
+    !["Operativo", "En mantenimiento", "Fuera de servicio"].includes(
+      payload.conditionStatus
+    )
+  ) {
+    throw httpError(400, "El estado del activo no es valido.");
+  }
+}
+
+function validateInventoryProductPayload(payload) {
+  if (!payload.name) {
+    throw httpError(400, "El nombre del producto es obligatorio.");
+  }
+
+  if (
+    !["Gimnasio", "Restaurante", "Tienda", "Suplementos", "General"].includes(
+      payload.area
+    )
+  ) {
+    throw httpError(400, "El area del producto no es valida.");
+  }
+
+  if (!payload.category) {
+    throw httpError(400, "La categoria del producto es obligatoria.");
+  }
+
+  if (!payload.unitName) {
+    throw httpError(400, "La unidad del producto es obligatoria.");
+  }
+}
+
+function validateInventoryStockMovementPayload(payload) {
+  if (!payload.movementDate) {
+    throw httpError(400, "La fecha del movimiento es obligatoria.");
+  }
+
+  if (
+    !["entrada", "salida", "ajuste_positivo", "ajuste_negativo"].includes(
+      payload.movementType
+    )
+  ) {
+    throw httpError(400, "El tipo de movimiento de stock no es valido.");
+  }
+
+  if (!Number.isFinite(payload.quantity) || !(payload.quantity > 0)) {
+    throw httpError(400, "La cantidad del movimiento debe ser mayor que cero.");
   }
 }
 
@@ -4358,6 +4956,92 @@ async function syncClientNameRename(client, previousValue, nextValue) {
     `,
     [previousValue, nextValue]
   );
+}
+
+function getCurrentIsoDateInBogota() {
+  const formatter = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Bogota",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  });
+
+  return formatter.format(new Date());
+}
+
+function getInventoryStockDelta(movementType, quantity) {
+  const normalizedQuantity = Number(quantity || 0);
+
+  if (!normalizedQuantity) {
+    return 0;
+  }
+
+  if (movementType === "entrada" || movementType === "ajuste_positivo") {
+    return normalizedQuantity;
+  }
+
+  if (movementType === "salida" || movementType === "ajuste_negativo") {
+    return normalizedQuantity * -1;
+  }
+
+  return 0;
+}
+
+function mapInventoryAssetRow(row) {
+  return {
+    id: Number(row.id || 0),
+    name: row.name || "",
+    category: row.category || "",
+    location: row.location || "",
+    conditionStatus: row.condition_status || "Operativo",
+    brandModel: row.brand_model || "",
+    serialNumber: row.serial_number || "",
+    purchaseDate: normalizeDateOnly(row.purchase_date),
+    purchaseValue: Number(row.purchase_value || 0),
+    notes: row.notes || "",
+    isActive: Boolean(row.is_active),
+    createdAt: row.created_at || null,
+    updatedAt: row.updated_at || null,
+  };
+}
+
+function mapInventoryProductRow(row) {
+  return {
+    id: Number(row.id || 0),
+    name: row.name || "",
+    area: row.area || "",
+    category: row.category || "",
+    unitName: row.unit_name || "",
+    currentStock: Number(row.current_stock || 0),
+    minimumStock: Number(row.minimum_stock || 0),
+    costPrice: Number(row.cost_price || 0),
+    salePrice: Number(row.sale_price || 0),
+    notes: row.notes || "",
+    isActive: Boolean(row.is_active),
+    createdAt: row.created_at || null,
+    updatedAt: row.updated_at || null,
+  };
+}
+
+function mapInventoryStockMovementRow(row) {
+  return {
+    id: Number(row.id || 0),
+    inventoryProductId: Number(row.inventory_product_id || 0),
+    productName: row.product_name || "",
+    productArea: row.product_area || "",
+    productUnitName: row.product_unit_name || "",
+    movementDate: normalizeDateOnly(row.movement_date),
+    movementType: row.movement_type || "",
+    quantity: Number(row.quantity || 0),
+    unitCost: Number(row.unit_cost || 0),
+    stockBefore: Number(row.stock_before || 0),
+    stockAfter: Number(row.stock_after || 0),
+    reference: row.reference || "",
+    notes: row.notes || "",
+    registeredBy:
+      row.registered_by_name || row.registered_by_username || "Sistema",
+    createdAt: row.created_at || null,
+  };
 }
 
 function mapClientRow(row) {

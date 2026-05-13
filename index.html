@@ -159,6 +159,7 @@
           <button class="nav-link" data-view="contabilidad">Contabilidad</button>
           <button class="nav-link" data-view="cartera">Clientes</button>
           <button class="nav-link" data-view="programacion">Programación</button>
+          <button class="nav-link" data-view="inventario">Inventario</button>
           <button class="nav-link" data-view="listas">Listas maestras</button>
           <button class="nav-link admin-only is-hidden" data-view="usuarios">Usuarios</button>
           <button class="nav-link admin-only is-hidden" data-view="importar">Importar Excel</button>
@@ -648,6 +649,16 @@
                   <option value="">Todas</option>
                   <option value="Gimnasio">Gimnasio</option>
                   <option value="Restaurante">Restaurante</option>
+                </select>
+              </label>
+
+              <label>
+                Tipo
+                <select id="accounting-type">
+                  <option value="">Todos</option>
+                  <option value="Ingreso">Ingreso</option>
+                  <option value="Gasto">Gasto</option>
+                  <option value="Costo">Costo</option>
                 </select>
               </label>
 
@@ -2058,6 +2069,428 @@
               <div id="programming-methods-grid" class="stack-list"></div>
             </section>
           </div>
+        </section>
+
+        <section id="inventario-view" class="view">
+          <section class="panel">
+            <div class="panel-head">
+              <div>
+                <p class="section-kicker">Control fisico</p>
+                <h3>Menu de inventario</h3>
+              </div>
+            </div>
+            <div class="client-menu" role="tablist" aria-label="Menu de inventario">
+              <button
+                class="client-menu-button active"
+                type="button"
+                data-inventory-panel="activos"
+              >
+                Activos gimnasio
+              </button>
+              <button
+                class="client-menu-button"
+                type="button"
+                data-inventory-panel="productos"
+              >
+                Insumos y productos
+              </button>
+              <button
+                class="client-menu-button"
+                type="button"
+                data-inventory-panel="movimientos"
+              >
+                Movimientos stock
+              </button>
+            </div>
+          </section>
+
+          <div id="inventory-summary" class="stats-grid"></div>
+
+          <section id="inventory-panel-activos" class="inventory-panel active">
+            <div class="content-grid two-up align-start">
+              <section class="panel">
+                <div class="panel-head">
+                  <div>
+                    <p class="section-kicker">Patrimonio</p>
+                    <h3>Registrar activo</h3>
+                  </div>
+                </div>
+
+                <form id="inventory-asset-form" class="form-grid">
+                  <input id="inventory-asset-id" type="hidden" />
+
+                  <label>
+                    Nombre
+                    <input id="inventory-asset-name" type="text" required />
+                  </label>
+
+                  <label>
+                    Categoria
+                    <input id="inventory-asset-category" type="text" required />
+                  </label>
+
+                  <label>
+                    Ubicacion
+                    <input id="inventory-asset-location" type="text" />
+                  </label>
+
+                  <label>
+                    Estado
+                    <select id="inventory-asset-condition">
+                      <option value="Operativo">Operativo</option>
+                      <option value="En mantenimiento">En mantenimiento</option>
+                      <option value="Fuera de servicio">Fuera de servicio</option>
+                    </select>
+                  </label>
+
+                  <label>
+                    Marca / modelo
+                    <input id="inventory-asset-brand-model" type="text" />
+                  </label>
+
+                  <label>
+                    Serial
+                    <input id="inventory-asset-serial" type="text" />
+                  </label>
+
+                  <label>
+                    Fecha compra
+                    <input id="inventory-asset-purchase-date" type="date" />
+                  </label>
+
+                  <label>
+                    Valor compra
+                    <input
+                      id="inventory-asset-purchase-value"
+                      type="number"
+                      min="0"
+                      step="0.01"
+                    />
+                  </label>
+
+                  <label class="span-2">
+                    Notas
+                    <textarea id="inventory-asset-notes" rows="3"></textarea>
+                  </label>
+
+                  <div id="inventory-asset-feedback" class="form-note span-2">
+                    Aqui puedes llevar el control de maquinas, accesorios, mobiliario y equipos del gimnasio.
+                  </div>
+
+                  <div class="form-actions span-2">
+                    <button class="primary-button" type="submit">Guardar activo</button>
+                    <button
+                      id="inventory-asset-cancel-edit"
+                      class="ghost-button is-hidden"
+                      type="button"
+                    >
+                      Cancelar edicion
+                    </button>
+                  </div>
+                </form>
+              </section>
+
+              <section class="panel">
+                <div class="panel-head">
+                  <div>
+                    <p class="section-kicker">Consulta</p>
+                    <h3>Activos registrados</h3>
+                  </div>
+                  <label class="inline-label portfolio-search">
+                    Buscar
+                    <input
+                      id="inventory-asset-query"
+                      type="search"
+                      placeholder="Nombre, categoria, ubicacion..."
+                    />
+                  </label>
+                </div>
+
+                <div id="inventory-assets-metrics" class="mini-stats"></div>
+
+                <div class="table-wrap">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Nombre</th>
+                        <th>Categoria</th>
+                        <th>Ubicacion</th>
+                        <th>Estado</th>
+                        <th>Valor</th>
+                        <th>Acciones</th>
+                      </tr>
+                    </thead>
+                    <tbody id="inventory-assets-table"></tbody>
+                  </table>
+                </div>
+              </section>
+            </div>
+          </section>
+
+          <section id="inventory-panel-productos" class="inventory-panel">
+            <div class="content-grid two-up align-start">
+              <section class="panel">
+                <div class="panel-head">
+                  <div>
+                    <p class="section-kicker">Stock</p>
+                    <h3>Registrar producto</h3>
+                  </div>
+                </div>
+
+                <form id="inventory-product-form" class="form-grid">
+                  <input id="inventory-product-id" type="hidden" />
+
+                  <label>
+                    Nombre
+                    <input id="inventory-product-name" type="text" required />
+                  </label>
+
+                  <label>
+                    Area
+                    <select id="inventory-product-area">
+                      <option value="Gimnasio">Gimnasio</option>
+                      <option value="Restaurante">Restaurante</option>
+                      <option value="Tienda">Tienda</option>
+                      <option value="Suplementos">Suplementos</option>
+                      <option value="General">General</option>
+                    </select>
+                  </label>
+
+                  <label>
+                    Categoria
+                    <input id="inventory-product-category" type="text" required />
+                  </label>
+
+                  <label>
+                    Unidad
+                    <select id="inventory-product-unit">
+                      <option value="Unidad">Unidad</option>
+                      <option value="g">g</option>
+                      <option value="kg">kg</option>
+                      <option value="ml">ml</option>
+                      <option value="L">L</option>
+                      <option value="Porcion">Porcion</option>
+                      <option value="Servicio">Servicio</option>
+                      <option value="Paquete">Paquete</option>
+                    </select>
+                  </label>
+
+                  <label>
+                    Stock actual
+                    <input
+                      id="inventory-product-current-stock"
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value="0"
+                    />
+                  </label>
+
+                  <label>
+                    Stock minimo
+                    <input
+                      id="inventory-product-minimum-stock"
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value="0"
+                    />
+                  </label>
+
+                  <label>
+                    Costo compra
+                    <input
+                      id="inventory-product-cost-price"
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value="0"
+                    />
+                  </label>
+
+                  <label>
+                    Precio venta
+                    <input
+                      id="inventory-product-sale-price"
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value="0"
+                    />
+                  </label>
+
+                  <label class="span-2">
+                    Notas
+                    <textarea id="inventory-product-notes" rows="3"></textarea>
+                  </label>
+
+                  <div id="inventory-product-feedback" class="form-note span-2">
+                    Aqui puedes registrar agua, proteina, yogurt, ingredientes, empaques y cualquier insumo de venta o consumo.
+                  </div>
+
+                  <div class="form-actions span-2">
+                    <button class="primary-button" type="submit">Guardar producto</button>
+                    <button
+                      id="inventory-product-cancel-edit"
+                      class="ghost-button is-hidden"
+                      type="button"
+                    >
+                      Cancelar edicion
+                    </button>
+                  </div>
+                </form>
+              </section>
+
+              <section class="panel">
+                <div class="panel-head">
+                  <div>
+                    <p class="section-kicker">Consulta</p>
+                    <h3>Productos registrados</h3>
+                  </div>
+                  <label class="inline-label portfolio-search">
+                    Buscar
+                    <input
+                      id="inventory-product-query"
+                      type="search"
+                      placeholder="Nombre, area, categoria..."
+                    />
+                  </label>
+                </div>
+
+                <div id="inventory-products-metrics" class="mini-stats"></div>
+
+                <div class="table-wrap">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Nombre</th>
+                        <th>Area</th>
+                        <th>Stock</th>
+                        <th>Minimo</th>
+                        <th>Venta</th>
+                        <th>Acciones</th>
+                      </tr>
+                    </thead>
+                    <tbody id="inventory-products-table"></tbody>
+                  </table>
+                </div>
+              </section>
+            </div>
+          </section>
+
+          <section id="inventory-panel-movimientos" class="inventory-panel">
+            <div class="content-grid two-up align-start">
+              <section class="panel">
+                <div class="panel-head">
+                  <div>
+                    <p class="section-kicker">Kardex</p>
+                    <h3>Registrar movimiento de stock</h3>
+                  </div>
+                </div>
+
+                <form id="inventory-movement-form" class="form-grid">
+                  <label class="span-2">
+                    Producto
+                    <select id="inventory-movement-product-id"></select>
+                  </label>
+
+                  <label>
+                    Fecha
+                    <input id="inventory-movement-date" type="date" required />
+                  </label>
+
+                  <label>
+                    Tipo
+                    <select id="inventory-movement-type">
+                      <option value="entrada">Entrada</option>
+                      <option value="salida">Salida</option>
+                      <option value="ajuste_positivo">Ajuste positivo</option>
+                      <option value="ajuste_negativo">Ajuste negativo</option>
+                    </select>
+                  </label>
+
+                  <label>
+                    Cantidad
+                    <input
+                      id="inventory-movement-quantity"
+                      type="number"
+                      min="0.01"
+                      step="0.01"
+                      required
+                    />
+                  </label>
+
+                  <label>
+                    Costo unitario
+                    <input
+                      id="inventory-movement-unit-cost"
+                      type="number"
+                      min="0"
+                      step="0.01"
+                    />
+                  </label>
+
+                  <label class="span-2">
+                    Referencia
+                    <input
+                      id="inventory-movement-reference"
+                      type="text"
+                      placeholder="Compra proveedor, venta directa, merma..."
+                    />
+                  </label>
+
+                  <label class="span-2">
+                    Notas
+                    <textarea id="inventory-movement-notes" rows="3"></textarea>
+                  </label>
+
+                  <div id="inventory-movement-feedback" class="form-note span-2">
+                    Registra entradas, salidas y ajustes para dejar trazabilidad del inventario.
+                  </div>
+
+                  <div class="form-actions span-2">
+                    <button class="primary-button" type="submit">Registrar movimiento</button>
+                  </div>
+                </form>
+              </section>
+
+              <section class="panel">
+                <div class="panel-head">
+                  <div>
+                    <p class="section-kicker">Historial</p>
+                    <h3>Movimientos de inventario</h3>
+                  </div>
+                  <label class="inline-label portfolio-search">
+                    Buscar
+                    <input
+                      id="inventory-movement-query"
+                      type="search"
+                      placeholder="Producto, referencia o notas..."
+                    />
+                  </label>
+                </div>
+
+                <div id="inventory-movements-metrics" class="mini-stats"></div>
+
+                <div class="table-wrap">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Fecha</th>
+                        <th>Producto</th>
+                        <th>Tipo</th>
+                        <th>Cantidad</th>
+                        <th>Stock</th>
+                        <th>Referencia</th>
+                        <th>Registrado por</th>
+                      </tr>
+                    </thead>
+                    <tbody id="inventory-movements-table"></tbody>
+                  </table>
+                </div>
+              </section>
+            </div>
+          </section>
         </section>
 
         <section id="listas-view" class="view">
