@@ -176,6 +176,16 @@ const elements = {
   descripcion: document.getElementById("descripcion"),
   estadoPago: document.getElementById("estadoPago"),
   medioPago: document.getElementById("medioPago"),
+  movementInventoryProductId: document.getElementById(
+    "movement-inventory-product-id"
+  ),
+  movementInventoryEffect: document.getElementById("movement-inventory-effect"),
+  movementInventoryQuantity: document.getElementById(
+    "movement-inventory-quantity"
+  ),
+  movementInventoryFeedback: document.getElementById(
+    "movement-inventory-feedback"
+  ),
   valorTotal: document.getElementById("valorTotal"),
   abono: document.getElementById("abono"),
   observaciones: document.getElementById("observaciones"),
@@ -629,7 +639,19 @@ function bindEvents() {
   elements.linea.addEventListener("change", () =>
     syncCategoryOptions({ applySuggestedAmount: true })
   );
+  addListener(elements.linea, "change", syncMovementInventoryFields);
+  addListener(elements.tipo, "change", syncMovementInventoryFields);
   addListener(elements.categoria, "change", syncCategorySuggestedAmount);
+  addListener(
+    elements.movementInventoryProductId,
+    "change",
+    syncMovementInventoryFields
+  );
+  addListener(
+    elements.movementInventoryEffect,
+    "change",
+    syncMovementInventoryFields
+  );
   elements.movementForm.addEventListener("submit", handleMovementSubmit);
   elements.cancelEdit.addEventListener("click", resetMovementForm);
   addListener(elements.valorTotal, "input", syncComputedPaymentStatus);
@@ -1473,6 +1495,12 @@ function hydrateStaticOptions() {
   const previousType = elements.tipo.value;
   const previousPaymentStatus = elements.estadoPago.value;
   const previousPaymentMethod = elements.medioPago.value;
+  const previousInventoryProductId =
+    elements.movementInventoryProductId?.value || "";
+  const previousInventoryEffect =
+    elements.movementInventoryEffect?.value || "ninguno";
+  const previousInventoryQuantity =
+    elements.movementInventoryQuantity?.value || "";
   const previousCollectionMethod = elements.collectionMethod?.value || "";
   const previousTransferSource = elements.boxTransferSource?.value || "";
   const previousTransferTarget = elements.boxTransferTarget?.value || "";
@@ -1496,6 +1524,9 @@ function hydrateStaticOptions() {
   });
   fillSelect(elements.medioPago, state.lists.mediosPago, {
     includeValue: previousPaymentMethod,
+  });
+  fillMovementInventoryProductOptions({
+    selectedValue: previousInventoryProductId,
   });
   if (elements.collectionMethod) {
     fillSelect(elements.collectionMethod, state.lists.mediosPago, {
@@ -1546,6 +1577,17 @@ function hydrateStaticOptions() {
   }
 
   if (
+    elements.movementInventoryEffect &&
+    ["ninguno", "entrada", "salida"].includes(previousInventoryEffect)
+  ) {
+    elements.movementInventoryEffect.value = previousInventoryEffect;
+  }
+
+  if (elements.movementInventoryQuantity) {
+    elements.movementInventoryQuantity.value = previousInventoryQuantity;
+  }
+
+  if (
     elements.collectionMethod &&
     getAvailableSelectValues(elements.collectionMethod).includes(previousCollectionMethod)
   ) {
@@ -1571,6 +1613,10 @@ function hydrateStaticOptions() {
   }
 
   syncComputedPaymentStatus();
+  syncMovementInventoryFields({
+    preserveQuantity: true,
+    preserveEffect: true,
+  });
 }
 
 function switchView(view, options = {}) {
@@ -2009,6 +2055,13 @@ function renderMovementSummary(item, isExpanded) {
 }
 
 function renderMovementDetail(item) {
+  const inventoryProduct = getInventoryProductById(item.inventoryProductId);
+  const inventoryProductLabel = inventoryProduct
+    ? `${inventoryProduct.name} · ${inventoryProduct.area}`
+    : item.inventoryProductId
+      ? `Producto #${item.inventoryProductId}`
+      : "";
+
   return `
     <div class="detail-panel">
       <div class="detail-grid">
@@ -2022,11 +2075,25 @@ function renderMovementDetail(item) {
         )}
         ${createDetailItem(
           "Resumen",
-          item.descripcion
-            ? escapeHtml(item.descripcion)
-            : "<span class='muted'>Sin resumen</span>",
+            item.descripcion
+              ? escapeHtml(item.descripcion)
+              : "<span class='muted'>Sin resumen</span>",
           "detail-item--wide"
         )}
+        ${
+          item.inventoryEffect !== "ninguno" && inventoryProductLabel
+            ? createDetailItem(
+                "Inventario",
+                `${escapeHtml(inventoryProductLabel)}<br /><span class="muted">${escapeHtml(
+                  `${item.inventoryEffect === "entrada" ? "Entrada" : "Salida"} · ${formatInventoryQuantity(
+                    item.inventoryQuantity,
+                    inventoryProduct?.unitName || ""
+                  )}`
+                )}</span>`,
+                "detail-item--wide"
+              )
+            : ""
+        }
         ${createDetailItem(
           "Observaciones",
           item.observaciones
@@ -4818,6 +4885,9 @@ async function handleMovementSubmit(event) {
     medioPago: elements.medioPago.value,
     valorTotal: Number(elements.valorTotal.value || 0),
     abono: Number(elements.abono.value || 0),
+    inventoryProductId: Number(elements.movementInventoryProductId.value || 0),
+    inventoryQuantity: Number(elements.movementInventoryQuantity.value || 0),
+    inventoryEffect: elements.movementInventoryEffect.value || "ninguno",
     observaciones: elements.observaciones.value.trim(),
     justificacionEdicion: elements.editJustification.value.trim(),
   };
@@ -5112,10 +5182,24 @@ async function handleMovementTableClick(event) {
     setClientSelection(movement.cliente);
     elements.descripcion.value = movement.descripcion;
     elements.medioPago.value = movement.medioPago;
+    fillMovementInventoryProductOptions({
+      selectedValue: String(movement.inventoryProductId || ""),
+    });
+    elements.movementInventoryProductId.value = movement.inventoryProductId
+      ? String(movement.inventoryProductId)
+      : "";
+    elements.movementInventoryEffect.value = movement.inventoryEffect || "ninguno";
+    elements.movementInventoryQuantity.value = movement.inventoryQuantity
+      ? String(movement.inventoryQuantity)
+      : "";
     elements.valorTotal.value = String(movement.valorTotal);
     elements.abono.value = String(movement.abono);
     elements.observaciones.value = movement.observaciones;
     syncComputedPaymentStatus();
+    syncMovementInventoryFields({
+      preserveEffect: true,
+      preserveQuantity: true,
+    });
     if (isAssistantUser()) {
       elements.assistantEditJustificationShell.classList.remove("is-hidden");
       elements.editJustification.value = "";
@@ -8734,6 +8818,9 @@ function normalizeMovementRecord(item) {
     abono: Number(item.abono || 0),
     saldoPendiente: Number(item.saldoPendiente || 0),
     flujoNeto: Number(item.flujoNeto || 0),
+    inventoryProductId: Number(item.inventoryProductId || 0),
+    inventoryQuantity: Number(item.inventoryQuantity || 0),
+    inventoryEffect: item.inventoryEffect || "ninguno",
   };
 }
 
@@ -9181,6 +9268,38 @@ function validateMovement(payload, options = {}) {
       valid: false,
       message: "El abono no puede ser mayor que el valor total.",
     };
+  }
+
+  if (!["ninguno", "entrada", "salida"].includes(payload.inventoryEffect)) {
+    return {
+      valid: false,
+      message: "Selecciona un impacto de inventario valido.",
+    };
+  }
+
+  if (payload.inventoryProductId > 0 && payload.inventoryEffect === "ninguno") {
+    return {
+      valid: false,
+      message:
+        "Si seleccionas un producto de inventario, indica si entra o sale del stock.",
+    };
+  }
+
+  if (payload.inventoryEffect !== "ninguno") {
+    if (!(payload.inventoryProductId > 0)) {
+      return {
+        valid: false,
+        message: "Selecciona el producto de inventario relacionado.",
+      };
+    }
+
+    if (!(payload.inventoryQuantity > 0)) {
+      return {
+        valid: false,
+        message:
+          "La cantidad de inventario debe ser mayor que cero cuando enlazas stock.",
+      };
+    }
   }
 
   if (!derivePaymentStatus(payload.valorTotal, payload.abono)) {
@@ -9699,6 +9818,106 @@ function setClientSelection(value) {
   fillClientOptions(cleanValue);
 }
 
+function getInventoryProductById(productId) {
+  return (state.inventoryProducts || []).find(
+    (item) => String(item.id) === String(productId)
+  );
+}
+
+function fillMovementInventoryProductOptions(options = {}) {
+  if (!elements.movementInventoryProductId) {
+    return;
+  }
+
+  const selectedValue = String(
+    options.selectedValue ?? elements.movementInventoryProductId.value ?? ""
+  );
+  const selectedProduct = getInventoryProductById(selectedValue);
+  const products = (state.inventoryProducts || []).filter((item) => item.isActive);
+
+  fillSelectFromRecords(elements.movementInventoryProductId, products, {
+    selectedValue,
+    includeRecord: selectedProduct,
+    placeholder: "Sin producto enlazado",
+    labelBuilder: (item) =>
+      `${item.name} · ${item.area} · Stock ${formatInventoryQuantity(
+        item.currentStock,
+        item.unitName
+      )}`,
+  });
+}
+
+function getSuggestedMovementInventoryEffect() {
+  if (elements.tipo.value === "Costo") {
+    return "entrada";
+  }
+
+  if (["Ingreso", "Gasto"].includes(elements.tipo.value)) {
+    return "salida";
+  }
+
+  return "ninguno";
+}
+
+function syncMovementInventoryFields(options = {}) {
+  if (
+    !elements.movementInventoryProductId ||
+    !elements.movementInventoryEffect ||
+    !elements.movementInventoryQuantity
+  ) {
+    return;
+  }
+
+  fillMovementInventoryProductOptions({
+    selectedValue: elements.movementInventoryProductId.value,
+  });
+
+  const selectedProduct = getInventoryProductById(
+    elements.movementInventoryProductId.value
+  );
+  const hasProduct = Boolean(selectedProduct);
+
+  if (
+    hasProduct &&
+    !options.preserveEffect &&
+    elements.movementInventoryEffect.value === "ninguno"
+  ) {
+    elements.movementInventoryEffect.value = getSuggestedMovementInventoryEffect();
+  }
+
+  if (!hasProduct) {
+    elements.movementInventoryEffect.value = "ninguno";
+    if (!options.preserveQuantity) {
+      elements.movementInventoryQuantity.value = "";
+    }
+  }
+
+  const shouldTrackStock =
+    hasProduct && elements.movementInventoryEffect.value !== "ninguno";
+
+  elements.movementInventoryQuantity.disabled = !shouldTrackStock;
+
+  if (!shouldTrackStock && !options.preserveQuantity) {
+    elements.movementInventoryQuantity.value = "";
+  }
+
+  if (elements.movementInventoryFeedback) {
+    if (!hasProduct) {
+      elements.movementInventoryFeedback.textContent =
+        "Si este movimiento compra, consume o vende un producto, enlazalo aqui para que el stock tambien se ajuste.";
+    } else {
+      const effectLabel =
+        elements.movementInventoryEffect.value === "entrada"
+          ? "sumará"
+          : elements.movementInventoryEffect.value === "salida"
+            ? "restará"
+            : "no moverá";
+      elements.movementInventoryFeedback.textContent =
+        `${selectedProduct.name} ${effectLabel} stock en inventario. Usa esta opcion cuando el movimiento financiero tambien afecte cantidades fisicas.`;
+    }
+  }
+}
+
 function buildMonthlyRows(year) {
   return monthNames.map((mes, index) => {
     const monthMovements = state.movements.filter(
@@ -9801,6 +10020,11 @@ function resetMovementForm() {
   elements.linea.value = "Gimnasio";
   setClientSelection("");
   syncCategoryOptions();
+  fillMovementInventoryProductOptions({
+    selectedValue: "",
+  });
+  elements.movementInventoryEffect.value = "ninguno";
+  elements.movementInventoryQuantity.value = "";
   if ((state.lists.tipos || []).length) {
     elements.tipo.value = state.lists.tipos[0];
   }
@@ -9808,6 +10032,7 @@ function resetMovementForm() {
     elements.medioPago.value = state.lists.mediosPago[0];
   }
   syncComputedPaymentStatus();
+  syncMovementInventoryFields();
   elements.editJustification.value = "";
   elements.assistantEditJustificationShell.classList.add("is-hidden");
   elements.movementFeedback.textContent = isAssistantUser()

@@ -336,6 +336,34 @@
                 </label>
 
                 <label>
+                  Producto de inventario
+                  <select id="movement-inventory-product-id" name="inventoryProductId">
+                    <option value="">Sin producto enlazado</option>
+                  </select>
+                </label>
+
+                <label>
+                  Impacto en inventario
+                  <select id="movement-inventory-effect" name="inventoryEffect">
+                    <option value="ninguno">Sin mover inventario</option>
+                    <option value="entrada">Entrada a inventario</option>
+                    <option value="salida">Salida de inventario</option>
+                  </select>
+                </label>
+
+                <label>
+                  Cantidad inventario
+                  <input
+                    id="movement-inventory-quantity"
+                    name="inventoryQuantity"
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    placeholder="0"
+                  />
+                </label>
+
+                <label>
                   Valor total
                   <input
                     id="valorTotal"
@@ -391,6 +419,10 @@
                 <div class="form-note span-2" id="movement-feedback">
                   El estado de pago se valida contra valor total y abono para
                   mantener la misma lógica del Excel.
+                </div>
+
+                <div class="form-note span-2" id="movement-inventory-feedback">
+                  Si enlazas un producto, este movimiento también puede generar entrada o salida de stock.
                 </div>
 
                 <div class="form-actions span-2">

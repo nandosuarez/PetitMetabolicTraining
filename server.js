@@ -1087,6 +1087,8 @@ app.get("/api/bootstrap", asyncHandler(async (req, res) => {
   const hasAccountingAccess = userHasAccountingAccess(req.authUser);
   const hasProgrammingAccess = req.authUser?.role === "administrador";
   const hasInventoryAccess = req.authUser?.role === "administrador";
+  const hasInventoryProductLinkAccess =
+    hasInventoryAccess || userHasOperationalWriteAccess(req.authUser);
 
   const [
     catalogResult,
@@ -1233,7 +1235,7 @@ app.get("/api/bootstrap", asyncHandler(async (req, res) => {
           `
         )
       : Promise.resolve({ rows: [] }),
-    hasInventoryAccess
+    hasInventoryProductLinkAccess
       ? query(
           `
             select *
@@ -1491,53 +1493,79 @@ app.post("/api/movements", requireOperationalWriteAccess, asyncHandler(async (re
   const payload = normalizeMovementPayload(req.body);
   validateMovementPayload(payload);
 
-  const result = await query(
-    `
-      insert into movements (
-        business_line,
-        movement_date,
-        movement_type,
-        category,
-        client_name,
-        description,
-        payment_status,
-        payment_method,
-        total_amount,
-        paid_amount,
-        balance_due,
-        cash_flow,
-        year,
-        month_number,
-        month_name,
-        notes
-      )
-      values (
-        $1, $2, $3, $4, $5, $6, $7, $8,
-        $9, $10, $11, $12, $13, $14, $15, $16
-      )
-      returning *
-    `,
-    [
-      payload.linea,
-      payload.fecha,
-      payload.tipo,
-      payload.categoria,
-      payload.cliente,
-      payload.descripcion,
-      payload.estadoPago,
-      payload.medioPago,
-      payload.valorTotal,
-      payload.abono,
-      payload.saldoPendiente,
-      payload.flujoNeto,
-      payload.ano,
-      payload.mesNumero,
-      payload.mesNombre,
-      payload.observaciones,
-    ]
-  );
+  const movement = await withClient(async (client) => {
+    await client.query("begin");
 
-  res.status(201).json(mapMovementRow(result.rows[0]));
+    try {
+      const result = await client.query(
+        `
+          insert into movements (
+            business_line,
+            movement_date,
+            movement_type,
+            category,
+            client_name,
+            description,
+            payment_status,
+            payment_method,
+            total_amount,
+            paid_amount,
+            balance_due,
+            cash_flow,
+            inventory_product_id,
+            inventory_quantity,
+            inventory_effect,
+            year,
+            month_number,
+            month_name,
+            notes
+          )
+          values (
+            $1, $2, $3, $4, $5, $6, $7, $8,
+            $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19
+          )
+          returning *
+        `,
+        [
+          payload.linea,
+          payload.fecha,
+          payload.tipo,
+          payload.categoria,
+          payload.cliente,
+          payload.descripcion,
+          payload.estadoPago,
+          payload.medioPago,
+          payload.valorTotal,
+          payload.abono,
+          payload.saldoPendiente,
+          payload.flujoNeto,
+          payload.inventoryEffect === "ninguno" ? null : payload.inventoryProductId,
+          payload.inventoryEffect === "ninguno" ? 0 : payload.inventoryQuantity,
+          payload.inventoryEffect,
+          payload.ano,
+          payload.mesNumero,
+          payload.mesNombre,
+          payload.observaciones,
+        ]
+      );
+
+      const movementRow = result.rows[0];
+      await applyMovementInventoryLink(
+        client,
+        Number(movementRow.id),
+        payload,
+        Number(req.authUser.id)
+      );
+
+      await client.query("commit");
+      return movementRow;
+    } catch (error) {
+      await client.query("rollback");
+      throw error;
+    }
+  });
+
+  res.status(201).json(mapMovementRow(movement));
 }));
 
 app.put("/api/movements/:id", requireOperationalWriteAccess, asyncHandler(async (req, res) => {
@@ -1592,56 +1620,83 @@ app.put("/api/movements/:id", requireOperationalWriteAccess, asyncHandler(async 
     });
   }
 
-  const result = await query(
-    `
-      update movements
-      set
-        business_line = $2,
-        movement_date = $3,
-        movement_type = $4,
-        category = $5,
-        client_name = $6,
-        description = $7,
-        payment_status = $8,
-        payment_method = $9,
-        total_amount = $10,
-        paid_amount = $11,
-        balance_due = $12,
-        cash_flow = $13,
-        year = $14,
-        month_number = $15,
-        month_name = $16,
-        notes = $17,
-        updated_at = now()
-      where id = $1
-      returning *
-    `,
-    [
-      movementId,
-      payload.linea,
-      payload.fecha,
-      payload.tipo,
-      payload.categoria,
-      payload.cliente,
-      payload.descripcion,
-      payload.estadoPago,
-      payload.medioPago,
-      payload.valorTotal,
-      payload.abono,
-      payload.saldoPendiente,
-      payload.flujoNeto,
-      payload.ano,
-      payload.mesNumero,
-      payload.mesNombre,
-      payload.observaciones,
-    ]
-  );
+  const updatedMovementRow = await withClient(async (client) => {
+    await client.query("begin");
 
-  if (!result.rows.length) {
-    return res.status(404).json({ error: "Movimiento no encontrado." });
-  }
+    try {
+      await revertMovementInventoryLink(client, movementId);
 
-  const updatedMovement = mapMovementRow(result.rows[0]);
+      const result = await client.query(
+        `
+          update movements
+          set
+            business_line = $2,
+            movement_date = $3,
+            movement_type = $4,
+            category = $5,
+            client_name = $6,
+            description = $7,
+            payment_status = $8,
+            payment_method = $9,
+            total_amount = $10,
+            paid_amount = $11,
+            balance_due = $12,
+            cash_flow = $13,
+            inventory_product_id = $14,
+            inventory_quantity = $15,
+            inventory_effect = $16,
+            year = $17,
+            month_number = $18,
+            month_name = $19,
+            notes = $20,
+            updated_at = now()
+          where id = $1
+          returning *
+        `,
+        [
+          movementId,
+          payload.linea,
+          payload.fecha,
+          payload.tipo,
+          payload.categoria,
+          payload.cliente,
+          payload.descripcion,
+          payload.estadoPago,
+          payload.medioPago,
+          payload.valorTotal,
+          payload.abono,
+          payload.saldoPendiente,
+          payload.flujoNeto,
+          payload.inventoryEffect === "ninguno" ? null : payload.inventoryProductId,
+          payload.inventoryEffect === "ninguno" ? 0 : payload.inventoryQuantity,
+          payload.inventoryEffect,
+          payload.ano,
+          payload.mesNumero,
+          payload.mesNombre,
+          payload.observaciones,
+        ]
+      );
+
+      if (!result.rows.length) {
+        throw httpError(404, "Movimiento no encontrado.");
+      }
+
+      await applyMovementInventoryLink(
+        client,
+        movementId,
+        payload,
+        Number(req.authUser.id)
+      );
+
+      await client.query("commit");
+      return result.rows[0];
+    } catch (error) {
+      await client.query("rollback");
+      throw error;
+    }
+  });
+
+  const updatedMovement = mapMovementRow(updatedMovementRow);
 
   if (req.authUser?.role === "asistente_operativo") {
     await query(
@@ -1669,14 +1724,33 @@ app.put("/api/movements/:id", requireOperationalWriteAccess, asyncHandler(async 
 }));
 
 app.delete("/api/movements/:id", requireOperationalWriteAccess, asyncHandler(async (req, res) => {
-  await assertMovementMutationAllowed(req.authUser, Number(req.params.id));
+  const movementId = Number(req.params.id);
+  await assertMovementMutationAllowed(req.authUser, movementId);
 
-  const result = await query(
-    "delete from movements where id = $1 returning id",
-    [Number(req.params.id)]
-  );
+  const deletedId = await withClient(async (client) => {
+    await client.query("begin");
 
-  if (!result.rows.length) {
+    try {
+      await revertMovementInventoryLink(client, movementId);
+
+      const result = await client.query(
+        "delete from movements where id = $1 returning id",
+        [movementId]
+      );
+
+      if (!result.rows.length) {
+        throw httpError(404, "Movimiento no encontrado.");
+      }
+
+      await client.query("commit");
+      return Number(result.rows[0].id);
+    } catch (error) {
+      await client.query("rollback");
+      throw error;
+    }
+  });
+
+  if (!deletedId) {
     return res.status(404).json({ error: "Movimiento no encontrado." });
   }
 
@@ -2676,6 +2750,10 @@ function normalizeMovementPayload(body) {
   const saldoPendiente = Math.max(valorTotal - abono, 0);
   const tipo = String(body.tipo || "").trim();
   const estadoPago = derivePaymentStatus(valorTotal, abono);
+  const inventoryProductId = Number(body.inventoryProductId || 0);
+  const inventoryQuantity = Math.max(Number(body.inventoryQuantity || 0), 0);
+  const inventoryEffect =
+    String(body.inventoryEffect || "ninguno").trim() || "ninguno";
 
   return {
     linea: String(body.linea || "").trim(),
@@ -2695,6 +2773,11 @@ function normalizeMovementPayload(body) {
     mesNombre: monthNames[(mesNumero || 1) - 1] || "",
     observaciones: String(body.observaciones || "").trim(),
     justificacionEdicion: String(body.justificacionEdicion || "").trim(),
+    inventoryProductId: Number.isInteger(inventoryProductId)
+      ? inventoryProductId
+      : 0,
+    inventoryQuantity,
+    inventoryEffect,
   };
 }
 
@@ -2977,6 +3060,33 @@ function validateMovementPayload(payload, options = {}) {
 
   if (payload.abono > payload.valorTotal) {
     throw httpError(400, "El abono no puede ser mayor que el valor total.");
+  }
+
+  if (!["ninguno", "entrada", "salida"].includes(payload.inventoryEffect)) {
+    throw httpError(400, "El impacto de inventario no es valido.");
+  }
+
+  if (payload.inventoryProductId > 0 && payload.inventoryEffect === "ninguno") {
+    throw httpError(
+      400,
+      "Selecciona si el producto relacionado entra o sale del inventario."
+    );
+  }
+
+  if (payload.inventoryEffect !== "ninguno") {
+    if (!Number.isInteger(payload.inventoryProductId) || payload.inventoryProductId <= 0) {
+      throw httpError(
+        400,
+        "Selecciona el producto de inventario relacionado con este movimiento."
+      );
+    }
+
+    if (!(payload.inventoryQuantity > 0)) {
+      throw httpError(
+        400,
+        "La cantidad de inventario debe ser mayor que cero cuando enlazas stock."
+      );
+    }
   }
 
   const expectedStatus = derivePaymentStatus(payload.valorTotal, payload.abono);
@@ -4987,6 +5097,200 @@ function getInventoryStockDelta(movementType, quantity) {
   return 0;
 }
 
+function normalizeMovementInventoryEffect(effect) {
+  const normalizedEffect = String(effect || "ninguno").trim().toLowerCase();
+  return ["entrada", "salida"].includes(normalizedEffect)
+    ? normalizedEffect
+    : "ninguno";
+}
+
+function movementInventoryEffectToStockType(effect) {
+  return normalizeMovementInventoryEffect(effect) === "salida"
+    ? "salida"
+    : "entrada";
+}
+
+function resolveInventoryUnitCostFromMovement(payload, productRow) {
+  const quantity = Number(payload.inventoryQuantity || 0);
+  if (!(quantity > 0)) {
+    return 0;
+  }
+
+  if (normalizeMovementInventoryEffect(payload.inventoryEffect) === "entrada") {
+    return Number((Number(payload.valorTotal || 0) / quantity).toFixed(2));
+  }
+
+  return Number(productRow?.cost_price || 0);
+}
+
+async function lockInventoryProductForMovement(client, productId) {
+  const result = await client.query(
+    `
+      select *
+      from inventory_products
+      where id = $1
+      limit 1
+      for update
+    `,
+    [productId]
+  );
+
+  if (!result.rows.length) {
+    throw httpError(404, "Producto de inventario no encontrado.");
+  }
+
+  return result.rows[0];
+}
+
+async function revertMovementInventoryLink(client, movementId) {
+  const linkResult = await client.query(
+    `
+      select
+        ism.*,
+        ip.name as product_name,
+        ip.current_stock,
+        ip.cost_price
+      from inventory_stock_movements ism
+      join inventory_products ip
+        on ip.id = ism.inventory_product_id
+      where ism.source_movement_id = $1
+      limit 1
+      for update of ism, ip
+    `,
+    [movementId]
+  );
+
+  if (!linkResult.rows.length) {
+    return null;
+  }
+
+  const linkRow = linkResult.rows[0];
+  const delta = Number(
+    (
+      Number(linkRow.stock_after || 0) - Number(linkRow.stock_before || 0)
+    ).toFixed(2)
+  );
+  const currentStock = Number(linkRow.current_stock || 0);
+  const revertedStock = Number((currentStock - delta).toFixed(2));
+
+  if (revertedStock < 0) {
+    throw httpError(
+      400,
+      `No se puede modificar este movimiento porque el inventario de ${linkRow.product_name} ya fue consumido y quedaria negativo.`
+    );
+  }
+
+  await client.query(
+    `
+      update inventory_products
+      set
+        current_stock = $2,
+        updated_at = now()
+      where id = $1
+    `,
+    [Number(linkRow.inventory_product_id), revertedStock]
+  );
+
+  await client.query(
+    `
+      delete from inventory_stock_movements
+      where id = $1
+    `,
+    [Number(linkRow.id)]
+  );
+
+  return linkRow;
+}
+
+async function applyMovementInventoryLink(client, movementId, payload, authUserId) {
+  if (normalizeMovementInventoryEffect(payload.inventoryEffect) === "ninguno") {
+    return null;
+  }
+
+  const productRow = await lockInventoryProductForMovement(
+    client,
+    payload.inventoryProductId
+  );
+  const movementType = movementInventoryEffectToStockType(payload.inventoryEffect);
+  const stockBefore = Number(productRow.current_stock || 0);
+  const delta = getInventoryStockDelta(movementType, payload.inventoryQuantity);
+  const stockAfter = Number((stockBefore + delta).toFixed(2));
+
+  if (stockAfter < 0) {
+    throw httpError(
+      400,
+      `El producto ${productRow.name} no tiene stock suficiente para registrar esa salida.`
+    );
+  }
+
+  const unitCost = resolveInventoryUnitCostFromMovement(payload, productRow);
+  const reference = [
+    `Movimiento #${movementId}`,
+    payload.tipo,
+    payload.categoria,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+
+  await client.query(
+    `
+      insert into inventory_stock_movements (
+        inventory_product_id,
+        source_movement_id,
+        movement_date,
+        movement_type,
+        quantity,
+        unit_cost,
+        stock_before,
+        stock_after,
+        reference,
+        notes,
+        registered_by_user_id
+      )
+      values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+    `,
+    [
+      payload.inventoryProductId,
+      movementId,
+      payload.fecha,
+      movementType,
+      payload.inventoryQuantity,
+      unitCost,
+      stockBefore,
+      stockAfter,
+      reference,
+      payload.observaciones || payload.descripcion || "",
+      Number(authUserId),
+    ]
+  );
+
+  await client.query(
+    `
+      update inventory_products
+      set
+        current_stock = $2,
+        cost_price = case
+          when $3 > 0 and $4 = 'entrada' then $3
+          else cost_price
+        end,
+        updated_at = now()
+      where id = $1
+    `,
+    [
+      payload.inventoryProductId,
+      stockAfter,
+      unitCost,
+      movementType,
+    ]
+  );
+
+  return {
+    inventoryProductId: Number(payload.inventoryProductId),
+    inventoryQuantity: Number(payload.inventoryQuantity),
+    inventoryEffect: normalizeMovementInventoryEffect(payload.inventoryEffect),
+  };
+}
+
 function mapInventoryAssetRow(row) {
   return {
     id: Number(row.id || 0),
@@ -5027,6 +5331,7 @@ function mapInventoryStockMovementRow(row) {
   return {
     id: Number(row.id || 0),
     inventoryProductId: Number(row.inventory_product_id || 0),
+    sourceMovementId: Number(row.source_movement_id || 0),
     productName: row.product_name || "",
     productArea: row.product_area || "",
     productUnitName: row.product_unit_name || "",
@@ -5099,6 +5404,9 @@ function mapMovementRow(row) {
     abono: Number(row.paid_amount),
     saldoPendiente: Number(row.balance_due),
     flujoNeto: Number(row.cash_flow),
+    inventoryProductId: Number(row.inventory_product_id || 0),
+    inventoryQuantity: Number(row.inventory_quantity || 0),
+    inventoryEffect: row.inventory_effect || "ninguno",
     ano: Number(row.year),
     mesNumero: Number(row.month_number),
     mesNombre: row.month_name,

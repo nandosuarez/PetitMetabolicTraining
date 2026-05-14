@@ -33,6 +33,11 @@ create table if not exists movements (
   paid_amount numeric(14, 2) not null check (paid_amount >= 0),
   balance_due numeric(14, 2) not null check (balance_due >= 0),
   cash_flow numeric(14, 2) not null,
+  inventory_product_id bigint,
+  inventory_quantity numeric(14, 2) not null default 0,
+  inventory_effect text not null default 'ninguno' check (
+    inventory_effect in ('ninguno', 'entrada', 'salida')
+  ),
   year integer not null,
   month_number integer not null check (month_number between 1 and 12),
   month_name text not null,
@@ -432,6 +437,7 @@ create table if not exists inventory_products (
 create table if not exists inventory_stock_movements (
   id bigserial primary key,
   inventory_product_id bigint not null references inventory_products(id) on delete cascade,
+  source_movement_id bigint references movements(id) on delete set null,
   movement_date date not null,
   movement_type text not null check (
     movement_type in ('entrada', 'salida', 'ajuste_positivo', 'ajuste_negativo')
@@ -448,6 +454,32 @@ create table if not exists inventory_stock_movements (
 
 create index if not exists inventory_stock_movements_product_idx
   on inventory_stock_movements(inventory_product_id, movement_date desc, created_at desc);
+
+alter table movements
+  add column if not exists inventory_product_id bigint;
+
+alter table movements
+  add column if not exists inventory_quantity numeric(14, 2) not null default 0;
+
+alter table movements
+  add column if not exists inventory_effect text not null default 'ninguno';
+
+alter table movements
+  drop constraint if exists movements_inventory_effect_check;
+
+alter table movements
+  add constraint movements_inventory_effect_check
+  check (inventory_effect in ('ninguno', 'entrada', 'salida'));
+
+alter table movements
+  drop constraint if exists movements_inventory_product_id_fkey;
+
+alter table movements
+  add constraint movements_inventory_product_id_fkey
+  foreign key (inventory_product_id) references inventory_products(id);
+
+alter table inventory_stock_movements
+  add column if not exists source_movement_id bigint references movements(id) on delete set null;
 
 create index if not exists accounting_document_downloads_document_idx
   on accounting_document_downloads(accounting_document_id, created_at desc);
