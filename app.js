@@ -220,6 +220,7 @@ const elements = {
   boxTransferNotes: document.getElementById("box-transfer-notes"),
   boxTransferFeedback: document.getElementById("box-transfer-feedback"),
   boxInsights: document.getElementById("box-insights"),
+  boxPendingBreakdown: document.getElementById("box-pending-breakdown"),
   boxFilter: document.getElementById("box-filter"),
   boxQuery: document.getElementById("box-query"),
   boxFilterSummary: document.getElementById("box-filter-summary"),
@@ -5506,10 +5507,67 @@ function getPaymentBoxSummaries() {
     });
 }
 
+function getPendingPayablesByBox() {
+  const grouped = new Map();
+
+  (state.boxMovements || []).forEach((movement) => {
+    const boxName = String(movement.medioPago || "").trim();
+    const pendingAmount = Number(movement.saldoPendiente || 0);
+
+    if (!boxName || movement.tipo === "Ingreso" || !(pendingAmount > 0)) {
+      return;
+    }
+
+    const current = grouped.get(boxName) || {
+      boxName,
+      totalPending: 0,
+      items: [],
+    };
+
+    current.totalPending += pendingAmount;
+    current.items.push({
+      id: movement.id,
+      fecha: movement.fecha,
+      tipo: movement.tipo,
+      categoria: movement.categoria || "",
+      descripcion: movement.descripcion || "",
+      cliente: movement.cliente || "",
+      valorTotal: Number(movement.valorTotal || 0),
+      abono: Number(movement.abono || 0),
+      saldoPendiente: pendingAmount,
+    });
+
+    grouped.set(boxName, current);
+  });
+
+  return [...grouped.values()]
+    .map((group) => ({
+      ...group,
+      items: [...group.items].sort((a, b) =>
+        String(b.fecha || "").localeCompare(String(a.fecha || ""))
+      ),
+    }))
+    .sort((a, b) => {
+      const pendingCompare = Number(b.totalPending || 0) - Number(a.totalPending || 0);
+      if (pendingCompare !== 0) {
+        return pendingCompare;
+      }
+
+      return String(a.boxName).localeCompare(String(b.boxName), APP_LOCALE);
+    });
+}
+
 function renderBoxesView() {
   renderBoxPanels();
 
-  const summaries = getPaymentBoxSummaries();
+  const pendingGroups = getPendingPayablesByBox();
+  const pendingByBox = new Map(
+    pendingGroups.map((group) => [group.boxName, Number(group.totalPending || 0)])
+  );
+  const summaries = getPaymentBoxSummaries().map((box) => ({
+    ...box,
+    pendingPayables: Number(pendingByBox.get(box.name) || 0),
+  }));
   const ledgerEntries = getFilteredBoxLedgerEntries();
   const totalBalance = sum(summaries, "balance");
   const totalInflows = sum(summaries, "inflows");
@@ -5543,6 +5601,56 @@ function renderBoxesView() {
     <div class="mini-stat"><span>Pendiente por pagar</span><strong>${formatCurrency(totalPendingPayables)}</strong></div>
     <div class="mini-stat"><span>Traslados registrados</span><strong>${state.boxTransfers.length}</strong></div>
   `;
+
+  if (elements.boxPendingBreakdown) {
+    elements.boxPendingBreakdown.innerHTML = pendingGroups.length
+      ? pendingGroups
+          .map(
+            (group) => `
+              <article class="pending-box-card">
+                <div class="pending-box-head">
+                  <div>
+                    <strong>${escapeHtml(group.boxName)}</strong>
+                    <small>${group.items.length} movimiento(s) pendiente(s)</small>
+                  </div>
+                  <strong>${formatCurrency(group.totalPending)}</strong>
+                </div>
+                <div class="pending-box-items">
+                  ${group.items
+                    .map(
+                      (item) => `
+                        <div class="pending-box-item">
+                          <div class="pending-box-item-copy">
+                            <strong>${escapeHtml(item.categoria || "Sin categoría")}</strong>
+                            <small>
+                              ${escapeHtml(
+                                [
+                                  `#${item.id}`,
+                                  formatDate(item.fecha),
+                                  item.descripcion || "",
+                                  item.cliente || "",
+                                ]
+                                  .filter(Boolean)
+                                  .join(" · ")
+                              )}
+                            </small>
+                          </div>
+                          <div class="pending-box-item-metrics">
+                            <span>Total ${formatCurrency(item.valorTotal)}</span>
+                            <span>Pagado ${formatCurrency(item.abono)}</span>
+                            <strong>Saldo ${formatCurrency(item.saldoPendiente)}</strong>
+                          </div>
+                        </div>
+                      `
+                    )
+                    .join("")}
+                </div>
+              </article>
+            `
+          )
+          .join("")
+      : '<div class="empty-state">No hay costos ni gastos pendientes por pagar en las cajas actuales.</div>';
+  }
 
   const filteredBalance = ledgerEntries.reduce(
     (acc, entry) => acc + Number(entry.amount || 0),

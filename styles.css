@@ -879,6 +879,69 @@ textarea {
   background: rgba(255, 255, 255, 0.64);
 }
 
+.pending-box-groups {
+  display: grid;
+  gap: 14px;
+}
+
+.pending-box-card {
+  display: grid;
+  gap: 12px;
+  padding: 16px 18px;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.72);
+  border: 1px solid rgba(0, 0, 0, 0.08);
+}
+
+.pending-box-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.pending-box-head > div {
+  display: grid;
+  gap: 4px;
+}
+
+.pending-box-head small,
+.pending-box-item-copy small,
+.pending-box-item-metrics span {
+  color: var(--muted);
+}
+
+.pending-box-items {
+  display: grid;
+  gap: 10px;
+}
+
+.pending-box-item {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.72);
+  border: 1px solid rgba(0, 0, 0, 0.06);
+}
+
+.pending-box-item-copy {
+  display: grid;
+  gap: 4px;
+}
+
+.pending-box-item-metrics {
+  display: grid;
+  gap: 4px;
+  text-align: right;
+}
+
+.pending-box-item-metrics strong {
+  color: var(--ink);
+}
+
 .collection-context {
   display: grid;
   gap: 6px;
@@ -2240,6 +2303,16 @@ button:disabled {
 
   .program-card-actions {
     justify-content: flex-start;
+  }
+
+  .pending-box-head,
+  .pending-box-item {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .pending-box-item-metrics {
+    text-align: left;
   }
 
   .form-grid,
