@@ -2292,6 +2292,7 @@ function renderBoxesView() {
   const totalBalance = sum(summaries, "balance");
   const totalInflows = sum(summaries, "inflows");
   const totalOutflows = sum(summaries, "outflows");
+  const totalPendingPayables = sum(summaries, "pendingPayables");
   const activeBoxes = summaries.filter((item) => item.isActive);
 
   elements.boxesSummary.innerHTML = summaries.length
@@ -5422,6 +5423,185 @@ async function handleCatalogItemAction(event) {
   } catch (error) {
     setStatus(error.message);
   }
+}
+
+function getPaymentBoxSummaries() {
+  const ledger = getBoxLedgerEntries();
+  const summaries = new Map();
+
+  getPaymentMethodCatalogItems().forEach((item) => {
+    summaries.set(item.value, {
+      name: item.value,
+      isActive: Boolean(item.isActive),
+      balance: 0,
+      inflows: 0,
+      outflows: 0,
+      pendingPayables: 0,
+      entriesCount: 0,
+      lastDate: "",
+    });
+  });
+
+  ledger.forEach((entry) => {
+    const current = summaries.get(entry.boxName) || {
+      name: entry.boxName,
+      isActive: false,
+      balance: 0,
+      inflows: 0,
+      outflows: 0,
+      pendingPayables: 0,
+      entriesCount: 0,
+      lastDate: "",
+    };
+
+    current.balance += Number(entry.amount || 0);
+    current.inflows += Number(entry.inflow || 0);
+    current.outflows += Number(entry.outflow || 0);
+    current.entriesCount += 1;
+    current.lastDate =
+      !current.lastDate || String(entry.date) > String(current.lastDate)
+        ? entry.date
+        : current.lastDate;
+
+    summaries.set(entry.boxName, current);
+  });
+
+  (state.boxMovements || []).forEach((movement) => {
+    const boxName = String(movement.medioPago || "").trim();
+    const pendingAmount = Number(movement.saldoPendiente || 0);
+
+    if (!boxName || movement.tipo === "Ingreso" || !(pendingAmount > 0)) {
+      return;
+    }
+
+    const current = summaries.get(boxName) || {
+      name: boxName,
+      isActive: false,
+      balance: 0,
+      inflows: 0,
+      outflows: 0,
+      pendingPayables: 0,
+      entriesCount: 0,
+      lastDate: "",
+    };
+
+    current.pendingPayables += pendingAmount;
+    summaries.set(boxName, current);
+  });
+
+  return [...summaries.values()]
+    .filter(
+      (item) =>
+        item.isActive ||
+        item.entriesCount > 0 ||
+        item.balance !== 0 ||
+        item.pendingPayables > 0
+    )
+    .sort((a, b) => {
+      if (a.isActive !== b.isActive) {
+        return a.isActive ? -1 : 1;
+      }
+
+      return String(a.name).localeCompare(String(b.name), APP_LOCALE);
+    });
+}
+
+function renderBoxesView() {
+  renderBoxPanels();
+
+  const summaries = getPaymentBoxSummaries();
+  const ledgerEntries = getFilteredBoxLedgerEntries();
+  const totalBalance = sum(summaries, "balance");
+  const totalInflows = sum(summaries, "inflows");
+  const totalOutflows = sum(summaries, "outflows");
+  const totalPendingPayables = sum(summaries, "pendingPayables");
+  const activeBoxes = summaries.filter((item) => item.isActive);
+
+  elements.boxesSummary.innerHTML = summaries.length
+    ? summaries
+        .map((box) =>
+          createStatCard(
+            box.name,
+            formatCurrency(box.balance),
+            `${box.entriesCount} movimientos · Entradas ${formatCurrency(
+              box.inflows
+            )} · Salidas ${formatCurrency(
+              box.outflows
+            )} · Pendiente por pagar ${formatCurrency(box.pendingPayables)}${
+              box.isActive ? "" : " · Inactiva"
+            }`
+          )
+        )
+        .join("")
+    : '<div class="empty-state">Aun no hay cajas disponibles para consultar.</div>';
+
+  elements.boxInsights.innerHTML = `
+    <div class="mini-stat"><span>Cajas activas</span><strong>${activeBoxes.length}</strong></div>
+    <div class="mini-stat"><span>Saldo disponible</span><strong>${formatCurrency(totalBalance)}</strong></div>
+    <div class="mini-stat"><span>Entradas acumuladas</span><strong>${formatCurrency(totalInflows)}</strong></div>
+    <div class="mini-stat"><span>Salidas acumuladas</span><strong>${formatCurrency(totalOutflows)}</strong></div>
+    <div class="mini-stat"><span>Pendiente por pagar</span><strong>${formatCurrency(totalPendingPayables)}</strong></div>
+    <div class="mini-stat"><span>Traslados registrados</span><strong>${state.boxTransfers.length}</strong></div>
+  `;
+
+  const filteredBalance = ledgerEntries.reduce(
+    (acc, entry) => acc + Number(entry.amount || 0),
+    0
+  );
+  const filteredInflows = ledgerEntries.reduce(
+    (acc, entry) => acc + Number(entry.inflow || 0),
+    0
+  );
+  const filteredOutflows = ledgerEntries.reduce(
+    (acc, entry) => acc + Number(entry.outflow || 0),
+    0
+  );
+  const visibleBoxes = [...new Set(ledgerEntries.map((entry) => entry.boxName))];
+  const filteredPendingPayables = summaries
+    .filter((item) => visibleBoxes.includes(item.name))
+    .reduce((acc, item) => acc + Number(item.pendingPayables || 0), 0);
+
+  elements.boxFilterSummary.innerHTML = `
+    <div class="mini-stat"><span>Movimientos visibles</span><strong>${ledgerEntries.length}</strong></div>
+    <div class="mini-stat"><span>Entradas</span><strong>${formatCurrency(filteredInflows)}</strong></div>
+    <div class="mini-stat"><span>Salidas</span><strong>${formatCurrency(filteredOutflows)}</strong></div>
+    <div class="mini-stat"><span>Impacto neto</span><strong>${formatCurrency(filteredBalance)}</strong></div>
+    <div class="mini-stat"><span>Pendiente por pagar</span><strong>${formatCurrency(filteredPendingPayables)}</strong></div>
+  `;
+
+  if (!ledgerEntries.length) {
+    elements.boxLedgerTable.innerHTML = `
+      <tr>
+        <td colspan="8" class="empty-state">
+          No hay movimientos de caja para los filtros seleccionados.
+        </td>
+      </tr>
+    `;
+    applyStackTableLabels(elements.appShell);
+    return;
+  }
+
+  elements.boxLedgerTable.innerHTML = ledgerEntries
+    .map(
+      (entry) => `
+        <tr>
+          ${tableCell("Fecha", formatDate(entry.date))}
+          ${tableCell("Caja", escapeHtml(entry.boxName))}
+          ${tableCell("Tipo", escapeHtml(entry.entryType))}
+          ${tableCell("Referencia", escapeHtml(entry.reference))}
+          ${tableCell(
+            "Detalle",
+            entry.detail ? escapeHtml(entry.detail) : "<span class='muted'>Sin detalle</span>"
+          )}
+          ${tableCell("Registrado por", escapeHtml(entry.registeredBy || "Sistema"))}
+          ${tableCell("Entrada", formatCurrency(entry.inflow), "numeric-cell")}
+          ${tableCell("Salida", formatCurrency(entry.outflow), "numeric-cell")}
+        </tr>
+      `
+    )
+    .join("");
+
+  applyStackTableLabels(elements.appShell);
 }
 
 async function saveDailyNote() {
