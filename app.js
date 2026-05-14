@@ -9374,6 +9374,7 @@ function getPaymentBoxSummaries() {
       balance: 0,
       inflows: 0,
       outflows: 0,
+      pendingPayables: 0,
       entriesCount: 0,
       lastDate: "",
     });
@@ -9386,6 +9387,7 @@ function getPaymentBoxSummaries() {
       balance: 0,
       inflows: 0,
       outflows: 0,
+      pendingPayables: 0,
       entriesCount: 0,
       lastDate: "",
     };
@@ -9402,8 +9404,37 @@ function getPaymentBoxSummaries() {
     summaries.set(entry.boxName, current);
   });
 
+  (state.boxMovements || []).forEach((movement) => {
+    const boxName = String(movement.medioPago || "").trim();
+    const pendingAmount = Number(movement.saldoPendiente || 0);
+
+    if (!boxName || movement.tipo === "Ingreso" || !(pendingAmount > 0)) {
+      return;
+    }
+
+    const current = summaries.get(boxName) || {
+      name: boxName,
+      isActive: false,
+      balance: 0,
+      inflows: 0,
+      outflows: 0,
+      pendingPayables: 0,
+      entriesCount: 0,
+      lastDate: "",
+    };
+
+    current.pendingPayables += pendingAmount;
+    summaries.set(boxName, current);
+  });
+
   return [...summaries.values()]
-    .filter((item) => item.isActive || item.entriesCount > 0 || item.balance !== 0)
+    .filter(
+      (item) =>
+        item.isActive ||
+        item.entriesCount > 0 ||
+        item.balance !== 0 ||
+        item.pendingPayables > 0
+    )
     .sort((a, b) => {
       if (a.isActive !== b.isActive) {
         return a.isActive ? -1 : 1;
