@@ -3618,8 +3618,23 @@ function renderInventorySummary() {
   const stockMovements = Array.isArray(state.inventoryStockMovements)
     ? state.inventoryStockMovements
     : [];
+  const businessProducts = Array.isArray(state.businessProducts)
+    ? state.businessProducts
+    : [];
+  const businessComponents = Array.isArray(state.businessProductComponents)
+    ? state.businessProductComponents
+    : [];
   const activeAssets = assets.filter((item) => item.isActive);
   const activeProducts = products.filter((item) => item.isActive);
+  const activeLinkedBusinessProducts = businessProducts.filter(
+    (item) => item.isActive && Number(item.inventoryProductId || 0) > 0
+  );
+  const activeLinkedBusinessProductIds = new Set(
+    activeLinkedBusinessProducts.map((item) => Number(item.id || 0))
+  );
+  const linkedRecipeComponents = businessComponents.filter((component) =>
+    activeLinkedBusinessProductIds.has(Number(component.businessProductId || 0))
+  );
   const lowStockProducts = activeProducts.filter(
     (item) => isInventoryProductStockTracked(item) && item.currentStock <= item.minimumStock
   );
@@ -3659,8 +3674,8 @@ function renderInventorySummary() {
     ),
     createStatCard(
       "Venta y recetas",
-      String((state.businessProducts || []).filter((item) => item.isActive).length),
-      `${(state.businessProductComponents || []).length} componentes de receta configurados`
+      String(activeLinkedBusinessProducts.length),
+      `${linkedRecipeComponents.length} componentes de receta configurados`
     ),
   ].join("");
 }

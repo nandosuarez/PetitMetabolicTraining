@@ -474,6 +474,91 @@ set inventory_product_id = direct_inventory_product_id
 where inventory_product_id is null
   and direct_inventory_product_id is not null;
 
+update business_products bp
+set inventory_product_id = ip.id
+from inventory_products ip
+where bp.inventory_product_id is null
+  and lower(trim(bp.name)) = lower(trim(ip.name))
+  and ip.area = case
+    when bp.business_line = 'Gimnasio' then 'Gimnasio'
+    else 'Restaurante'
+  end
+  and lower(trim(coalesce(bp.category, ''))) = lower(trim(coalesce(ip.category, '')));
+
+create temporary table if not exists missing_business_product_links on commit drop as
+select
+  bp.id as business_product_id,
+  bp.name,
+  bp.business_line,
+  bp.item_type,
+  bp.category,
+  bp.default_amount,
+  bp.notes,
+  ('legacy-bp-' || bp.id::text) as legacy_link_key
+from business_products bp
+where bp.inventory_product_id is null;
+
+insert into inventory_products (
+  name,
+  area,
+  item_kind,
+  tracks_stock,
+  category,
+  unit_name,
+  current_stock,
+  minimum_stock,
+  cost_price,
+  sale_price,
+  notes,
+  is_active
+)
+select
+  m.name,
+  case
+    when m.business_line = 'Gimnasio' then 'Gimnasio'
+    else 'Restaurante'
+  end as area,
+  case
+    when lower(trim(m.item_type)) = 'servicio' then 'Servicio'
+    else 'Producto de venta'
+  end as item_kind,
+  false as tracks_stock,
+  coalesce(nullif(trim(m.category), ''), 'General') as category,
+  case
+    when lower(trim(m.item_type)) = 'servicio' then 'Servicio'
+    else 'Unidad'
+  end as unit_name,
+  0 as current_stock,
+  0 as minimum_stock,
+  0 as cost_price,
+  coalesce(m.default_amount, 0) as sale_price,
+  trim(concat(
+    coalesce(nullif(trim(m.notes), ''), ''),
+    case
+      when coalesce(nullif(trim(m.notes), ''), '') = '' then ''
+      else ' | '
+    end,
+    'Migrado desde producto/servicio legacy (',
+    m.legacy_link_key,
+    ')'
+  )) as notes,
+  true as is_active
+from missing_business_product_links m;
+
+update business_products bp
+set inventory_product_id = ip.id
+from missing_business_product_links m
+join inventory_products ip
+  on lower(trim(ip.name)) = lower(trim(m.name))
+ and ip.area = case
+   when m.business_line = 'Gimnasio' then 'Gimnasio'
+   else 'Restaurante'
+ end
+ and lower(trim(coalesce(ip.category, ''))) = lower(trim(coalesce(m.category, '')))
+ and ip.notes ilike ('%' || m.legacy_link_key || '%')
+where bp.id = m.business_product_id
+  and bp.inventory_product_id is null;
+
 create table if not exists business_product_components (
   id bigserial primary key,
   business_product_id bigint not null references business_products(id) on delete cascade,
