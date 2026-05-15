@@ -295,7 +295,7 @@
                     <option value="">Sin producto o servicio</option>
                   </select>
                   <span id="movement-business-product-feedback" class="inline-hint">
-                    Si seleccionas un producto o servicio, el sistema puede sugerir valor y descontar inventario segun su configuracion.
+                    Si seleccionas un producto o servicio, la categoria se completa sola y el inventario se mueve segun su configuracion.
                   </span>
                 </label>
 
@@ -346,14 +346,14 @@
                 </label>
 
                 <label>
-                  Producto de inventario
+                  Producto de inventario manual
                   <select id="movement-inventory-product-id" name="inventoryProductId">
                     <option value="">Sin producto enlazado</option>
                   </select>
                 </label>
 
                 <label>
-                  Impacto en inventario
+                  Impacto manual en inventario
                   <select id="movement-inventory-effect" name="inventoryEffect">
                     <option value="ninguno">Sin mover inventario</option>
                     <option value="entrada">Entrada a inventario</option>
@@ -432,7 +432,7 @@
                 </div>
 
                 <div class="form-note span-2" id="movement-inventory-feedback">
-                  Si enlazas un producto, este movimiento también puede generar entrada o salida de stock.
+                  Usa estos campos solo cuando el ajuste de inventario sea manual. Si vendes un producto o servicio con receta, el sistema lo descuenta automaticamente.
                 </div>
 
                 <div class="form-actions span-2">
@@ -2466,28 +2466,16 @@
                     </label>
 
                     <label>
-                      Tipo comercial
-                      <select id="inventory-business-product-type">
-                        <option value="Producto">Producto</option>
-                        <option value="Servicio">Servicio</option>
-                        <option value="Membresia">Membresia</option>
-                        <option value="Cena">Cena</option>
-                        <option value="Desayuno">Desayuno</option>
-                        <option value="Bebida">Bebida</option>
-                        <option value="Snack">Snack</option>
-                        <option value="Suplemento">Suplemento</option>
-                        <option value="Combo">Combo</option>
-                        <option value="Otro">Otro</option>
-                      </select>
+                      Categoria
+                      <select id="inventory-business-product-type"></select>
                     </label>
 
                     <label>
-                      Categoria comercial
+                      Detalle opcional
                       <input
                         id="inventory-business-product-category"
                         type="text"
-                        placeholder="Ejemplo: Membresias, Cenas, Bebidas"
-                        required
+                        placeholder="Ejemplo: mensual, individual, premium, con bebida..."
                       />
                     </label>
 
@@ -2526,7 +2514,7 @@
                     </label>
 
                     <div id="inventory-business-product-feedback" class="form-note span-2">
-                      Aqui puedes crear membresias, cenas, desayunos, bebidas o cualquier servicio/combo para vender sin depender solo de categorias.
+                      La categoria mantiene el analisis historico. El detalle opcional te sirve para distinguir versiones como mensual, premium, con bebida o menu ejecutivo.
                     </div>
 
                     <div class="form-actions span-2">
@@ -2555,7 +2543,7 @@
                       <input
                         id="inventory-business-product-query"
                         type="search"
-                        placeholder="Nombre, linea, tipo o categoria..."
+                        placeholder="Nombre, linea, categoria o detalle..."
                       />
                     </label>
                   </div>
@@ -2568,7 +2556,7 @@
                         <tr>
                           <th>Nombre</th>
                           <th>Linea</th>
-                          <th>Tipo</th>
+                          <th>Categoria</th>
                           <th>Valor</th>
                           <th>Inventario</th>
                           <th>Acciones</th>
@@ -3118,5 +3106,6 @@
     </div>
 
     <script src="./app.js"></script>
+    <script src="./app.overrides.js"></script>
   </body>
 </html>

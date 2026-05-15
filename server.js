@@ -2953,12 +2953,14 @@ function normalizeInventoryStockMovementPayload(body) {
 
 function normalizeBusinessProductPayload(body) {
   const directInventoryProductId = Number(body.directInventoryProductId || 0);
+  const category = String(body.category || "").trim();
+  const itemType = String(body.itemType || "").trim();
 
   return {
     name: String(body.name || "").trim(),
     businessLine: String(body.businessLine || "").trim(),
-    itemType: String(body.itemType || "").trim() || "Producto",
-    category: String(body.category || "").trim(),
+    itemType: itemType || category || "Producto",
+    category,
     defaultAmount: Math.max(Number(body.defaultAmount || 0), 0),
     directInventoryProductId: Number.isInteger(directInventoryProductId)
       ? directInventoryProductId
