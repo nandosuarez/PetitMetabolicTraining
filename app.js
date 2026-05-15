@@ -24,6 +24,8 @@ const emptyState = {
   inventoryAssets: [],
   inventoryProducts: [],
   inventoryStockMovements: [],
+  businessProducts: [],
+  businessProductComponents: [],
   accountingDocuments: [],
   programmingMethods: [],
   programmingExercises: [],
@@ -170,6 +172,10 @@ const elements = {
   fecha: document.getElementById("fecha"),
   tipo: document.getElementById("tipo"),
   categoria: document.getElementById("categoria"),
+  movementBusinessProductId: document.getElementById("movement-business-product-id"),
+  movementBusinessProductFeedback: document.getElementById(
+    "movement-business-product-feedback"
+  ),
   clienteSearch: document.getElementById("cliente-search"),
   clienteSuggestions: document.getElementById("cliente-suggestions"),
   cliente: document.getElementById("cliente"),
@@ -278,6 +284,7 @@ const elements = {
   inventoryPanels: {
     activos: document.getElementById("inventory-panel-activos"),
     productos: document.getElementById("inventory-panel-productos"),
+    comercial: document.getElementById("inventory-panel-comercial"),
     movimientos: document.getElementById("inventory-panel-movimientos"),
   },
   inventorySummary: document.getElementById("inventory-summary"),
@@ -313,6 +320,73 @@ const elements = {
   inventoryProductQuery: document.getElementById("inventory-product-query"),
   inventoryProductsMetrics: document.getElementById("inventory-products-metrics"),
   inventoryProductsTable: document.getElementById("inventory-products-table"),
+  inventoryBusinessProductForm: document.getElementById(
+    "inventory-business-product-form"
+  ),
+  inventoryBusinessProductId: document.getElementById("inventory-business-product-id"),
+  inventoryBusinessProductName: document.getElementById(
+    "inventory-business-product-name"
+  ),
+  inventoryBusinessProductLine: document.getElementById(
+    "inventory-business-product-line"
+  ),
+  inventoryBusinessProductType: document.getElementById(
+    "inventory-business-product-type"
+  ),
+  inventoryBusinessProductCategory: document.getElementById(
+    "inventory-business-product-category"
+  ),
+  inventoryBusinessProductAmount: document.getElementById(
+    "inventory-business-product-amount"
+  ),
+  inventoryBusinessProductDirectProductId: document.getElementById(
+    "inventory-business-product-direct-product-id"
+  ),
+  inventoryBusinessProductDirectQuantity: document.getElementById(
+    "inventory-business-product-direct-quantity"
+  ),
+  inventoryBusinessProductNotes: document.getElementById(
+    "inventory-business-product-notes"
+  ),
+  inventoryBusinessProductFeedback: document.getElementById(
+    "inventory-business-product-feedback"
+  ),
+  inventoryBusinessProductCancelEdit: document.getElementById(
+    "inventory-business-product-cancel-edit"
+  ),
+  inventoryBusinessProductQuery: document.getElementById(
+    "inventory-business-product-query"
+  ),
+  inventoryBusinessProductsMetrics: document.getElementById(
+    "inventory-business-products-metrics"
+  ),
+  inventoryBusinessProductsTable: document.getElementById(
+    "inventory-business-products-table"
+  ),
+  inventoryBusinessProductRecipeTitle: document.getElementById(
+    "inventory-business-product-recipe-title"
+  ),
+  inventoryBusinessProductRecipeContext: document.getElementById(
+    "inventory-business-product-recipe-context"
+  ),
+  inventoryBusinessComponentForm: document.getElementById(
+    "inventory-business-component-form"
+  ),
+  inventoryBusinessComponentProductId: document.getElementById(
+    "inventory-business-component-product-id"
+  ),
+  inventoryBusinessComponentQuantity: document.getElementById(
+    "inventory-business-component-quantity"
+  ),
+  inventoryBusinessComponentNotes: document.getElementById(
+    "inventory-business-component-notes"
+  ),
+  inventoryBusinessComponentFeedback: document.getElementById(
+    "inventory-business-component-feedback"
+  ),
+  inventoryBusinessComponentsList: document.getElementById(
+    "inventory-business-components-list"
+  ),
   inventoryMovementForm: document.getElementById("inventory-movement-form"),
   inventoryMovementProductId: document.getElementById("inventory-movement-product-id"),
   inventoryMovementDate: document.getElementById("inventory-movement-date"),
@@ -640,6 +714,12 @@ function bindEvents() {
   elements.linea.addEventListener("change", () =>
     syncCategoryOptions({ applySuggestedAmount: true })
   );
+  addListener(elements.linea, "change", () => syncMovementBusinessProductSelection());
+  addListener(
+    elements.movementBusinessProductId,
+    "change",
+    syncMovementBusinessProductSelection
+  );
   addListener(elements.linea, "change", syncMovementInventoryFields);
   addListener(elements.tipo, "change", syncMovementInventoryFields);
   addListener(elements.categoria, "change", syncCategorySuggestedAmount);
@@ -670,6 +750,7 @@ function bindEvents() {
   [elements.boxFilter, elements.boxQuery].forEach((input) =>
     addListener(input, "input", renderBoxesView)
   );
+  addListener(elements.boxesSummary, "click", handleBoxSummaryClick);
 
   elements.dailyDate.addEventListener("input", renderDailyView);
   elements.weeklyStart.addEventListener("input", renderWeeklyView);
@@ -939,6 +1020,32 @@ function bindEvents() {
   );
   addListener(elements.inventoryProductQuery, "input", renderInventoryView);
   addListener(
+    elements.inventoryBusinessProductForm,
+    "submit",
+    handleInventoryBusinessProductSubmit
+  );
+  addListener(
+    elements.inventoryBusinessProductCancelEdit,
+    "click",
+    resetInventoryBusinessProductForm
+  );
+  addListener(
+    elements.inventoryBusinessProductsTable,
+    "click",
+    handleInventoryBusinessProductsTableClick
+  );
+  addListener(elements.inventoryBusinessProductQuery, "input", renderInventoryView);
+  addListener(
+    elements.inventoryBusinessComponentForm,
+    "submit",
+    handleInventoryBusinessComponentSubmit
+  );
+  addListener(
+    elements.inventoryBusinessComponentsList,
+    "click",
+    handleInventoryBusinessComponentsListClick
+  );
+  addListener(
     elements.inventoryMovementForm,
     "submit",
     handleInventoryStockMovementSubmit
@@ -1191,6 +1298,10 @@ async function loadBootstrap() {
       inventoryProducts: normalizeInventoryProducts(data.inventoryProducts),
       inventoryStockMovements: normalizeInventoryStockMovements(
         data.inventoryStockMovements
+      ),
+      businessProducts: normalizeBusinessProducts(data.businessProducts),
+      businessProductComponents: normalizeBusinessProductComponents(
+        data.businessProductComponents
       ),
       clients: Array.isArray(data.clients) ? data.clients : [],
       athletes: normalizeProgrammingAthletes(data.athletes),
@@ -1496,6 +1607,8 @@ function hydrateStaticOptions() {
   const previousType = elements.tipo.value;
   const previousPaymentStatus = elements.estadoPago.value;
   const previousPaymentMethod = elements.medioPago.value;
+  const previousBusinessProductId =
+    elements.movementBusinessProductId?.value || "";
   const previousInventoryProductId =
     elements.movementInventoryProductId?.value || "";
   const previousInventoryEffect =
@@ -1526,6 +1639,7 @@ function hydrateStaticOptions() {
   fillSelect(elements.medioPago, state.lists.mediosPago, {
     includeValue: previousPaymentMethod,
   });
+  fillMovementBusinessProductOptions(previousBusinessProductId);
   fillMovementInventoryProductOptions({
     selectedValue: previousInventoryProductId,
   });
@@ -1549,6 +1663,10 @@ function hydrateStaticOptions() {
   fillClientOptions();
   syncCategoryOptions({
     includeValue: previousCategory,
+  });
+  syncMovementBusinessProductSelection({
+    selectedValue: previousBusinessProductId,
+    preserveValue: true,
   });
   fillProgrammingMethodSelects({
     programMethod: previousProgramMethod,
@@ -1745,7 +1863,7 @@ function normalizeBoxPanel(panel) {
 }
 
 function normalizeInventoryPanel(panel) {
-  return ["activos", "productos", "movimientos"].includes(panel)
+  return ["activos", "productos", "comercial", "movimientos"].includes(panel)
     ? panel
     : defaultInventoryPanelForCurrentUser();
 }
@@ -3393,14 +3511,26 @@ function renderInventoryView() {
     elements.inventoryAssetsTable.innerHTML = "";
     elements.inventoryProductsTable.innerHTML = "";
     elements.inventoryMovementsTable.innerHTML = "";
+    if (elements.inventoryBusinessProductsMetrics) {
+      elements.inventoryBusinessProductsMetrics.innerHTML = "";
+    }
+    if (elements.inventoryBusinessProductsTable) {
+      elements.inventoryBusinessProductsTable.innerHTML = "";
+    }
+    if (elements.inventoryBusinessComponentsList) {
+      elements.inventoryBusinessComponentsList.innerHTML = "";
+    }
     fillInventoryProductSelect();
     return;
   }
 
   fillInventoryProductSelect();
+  fillBusinessProductDirectInventoryOptions();
+  fillBusinessProductComponentInventoryOptions();
   renderInventorySummary();
   renderInventoryAssetsTable();
   renderInventoryProductsTable();
+  renderInventoryBusinessProducts();
   renderInventoryStockMovementsTable();
   applyStackTableLabels(elements.appShell);
 }
@@ -3446,6 +3576,11 @@ function renderInventorySummary() {
       "Movimientos de stock",
       String(stockMovements.length),
       "Entradas, salidas y ajustes registrados"
+    ),
+    createStatCard(
+      "Productos y servicios",
+      String((state.businessProducts || []).filter((item) => item.isActive).length),
+      `${(state.businessProductComponents || []).length} componentes de receta configurados`
     ),
   ].join("");
 }
@@ -3681,6 +3816,257 @@ function renderInventoryProductsTable() {
       `;
     })
     .join("");
+}
+
+function getFilteredBusinessProducts() {
+  const query = normalizeSearchValue(
+    elements.inventoryBusinessProductQuery?.value || ""
+  );
+  const items = Array.isArray(state.businessProducts) ? state.businessProducts : [];
+
+  if (!query) {
+    return items;
+  }
+
+  return items.filter((item) =>
+    normalizeSearchValue(
+      [
+        item.name,
+        item.businessLine,
+        item.itemType,
+        item.category,
+        item.notes,
+        item.defaultAmount,
+        item.directInventoryProductName,
+      ].join(" ")
+    ).includes(query)
+  );
+}
+
+function getBusinessProductById(productId) {
+  return (state.businessProducts || []).find(
+    (item) => String(item.id) === String(productId)
+  );
+}
+
+function getBusinessProductComponents(businessProductId) {
+  return (state.businessProductComponents || [])
+    .filter((item) => String(item.businessProductId) === String(businessProductId))
+    .sort((a, b) => {
+      const sortCompare = Number(a.sortOrder || 0) - Number(b.sortOrder || 0);
+      if (sortCompare !== 0) {
+        return sortCompare;
+      }
+
+      return Number(a.id || 0) - Number(b.id || 0);
+    });
+}
+
+function fillBusinessProductDirectInventoryOptions(selectedValue = "") {
+  const products = (state.inventoryProducts || []).filter((item) => item.isActive);
+  fillSelectFromRecords(elements.inventoryBusinessProductDirectProductId, products, {
+    selectedValue: String(selectedValue || elements.inventoryBusinessProductDirectProductId?.value || ""),
+    placeholder: "Sin producto directo",
+    labelBuilder: (item) =>
+      `${item.name} · ${item.area} · Stock ${formatInventoryQuantity(
+        item.currentStock,
+        item.unitName
+      )}`,
+  });
+}
+
+function fillBusinessProductComponentInventoryOptions(selectedValue = "") {
+  const products = (state.inventoryProducts || []).filter((item) => item.isActive);
+  fillSelectFromRecords(elements.inventoryBusinessComponentProductId, products, {
+    selectedValue: String(selectedValue || elements.inventoryBusinessComponentProductId?.value || ""),
+    placeholder: "Selecciona un insumo del inventario",
+    labelBuilder: (item) =>
+      `${item.name} · ${item.area} · ${formatInventoryQuantity(
+        item.currentStock,
+        item.unitName
+      )}`,
+  });
+}
+
+function renderInventoryBusinessProducts() {
+  const items = getFilteredBusinessProducts();
+  const activeItems = items.filter((item) => item.isActive);
+  const recipeConfigured = activeItems.filter(
+    (item) => getBusinessProductComponents(item.id).length > 0
+  );
+  const directLinked = activeItems.filter((item) => item.directInventoryProductId > 0);
+
+  if (elements.inventoryBusinessProductsMetrics) {
+    elements.inventoryBusinessProductsMetrics.innerHTML = `
+      <div class="mini-stat"><span>Total</span><strong>${items.length}</strong></div>
+      <div class="mini-stat"><span>Activos</span><strong>${activeItems.length}</strong></div>
+      <div class="mini-stat"><span>Con receta</span><strong>${recipeConfigured.length}</strong></div>
+      <div class="mini-stat"><span>Venta directa stock</span><strong>${directLinked.length}</strong></div>
+    `;
+  }
+
+  if (elements.inventoryBusinessProductsTable) {
+    if (!items.length) {
+      elements.inventoryBusinessProductsTable.innerHTML = `
+        <tr>
+          <td colspan="6" class="empty-state">No hay productos o servicios registrados para esos filtros.</td>
+        </tr>
+      `;
+    } else {
+      elements.inventoryBusinessProductsTable.innerHTML = items
+        .map((item) => {
+          const nextActive = item.isActive ? "false" : "true";
+          const components = getBusinessProductComponents(item.id);
+          const inventorySummary =
+            item.directInventoryProductId > 0
+              ? `${item.directInventoryProductName || "Producto directo"} · ${formatInventoryQuantity(
+                  item.directInventoryQuantity,
+                  item.directInventoryProductUnitName
+                )}`
+              : components.length
+                ? `${components.length} insumo(s) en receta`
+                : "Sin descuento automatico";
+
+          return `
+            <tr>
+              <td>
+                <strong>${escapeHtml(item.name)}</strong>
+                <div class="inline-hint">${escapeHtml(item.category || "Sin categoria")}</div>
+              </td>
+              <td>${escapeHtml(item.businessLine)}</td>
+              <td>${escapeHtml(item.itemType)}</td>
+              <td>${formatCurrency(item.defaultAmount)}</td>
+              <td>${escapeHtml(inventorySummary)}</td>
+              <td>
+                <div class="row-actions row-actions--compact">
+                  <button
+                    class="table-button icon-button"
+                    type="button"
+                    data-business-product-edit-id="${item.id}"
+                    title="Editar producto o servicio"
+                    aria-label="Editar producto o servicio"
+                  >
+                    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                      <path d="M4 20h4l10-10-4-4L4 16v4Z"></path>
+                      <path d="m12 6 4 4"></path>
+                    </svg>
+                  </button>
+                  <button
+                    class="table-button ${item.isActive ? "danger" : ""} icon-button"
+                    type="button"
+                    data-business-product-status-id="${item.id}"
+                    data-business-product-next-active="${nextActive}"
+                    title="${item.isActive ? "Inactivar producto o servicio" : "Activar producto o servicio"}"
+                    aria-label="${item.isActive ? "Inactivar producto o servicio" : "Activar producto o servicio"}"
+                  >
+                    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                      <path d="M12 3v7"></path>
+                      <path d="M7.8 5.8A9 9 0 1 0 16.2 5.8"></path>
+                    </svg>
+                  </button>
+                </div>
+              </td>
+            </tr>
+          `;
+        })
+        .join("");
+    }
+  }
+
+  const activeId = Number(elements.inventoryBusinessProductId?.value || 0);
+  const selectedProduct = getBusinessProductById(activeId);
+  const selectedComponents = selectedProduct
+    ? getBusinessProductComponents(selectedProduct.id)
+    : [];
+
+  if (elements.inventoryBusinessProductRecipeTitle) {
+    elements.inventoryBusinessProductRecipeTitle.textContent = selectedProduct
+      ? `Receta de ${selectedProduct.name}`
+      : "Receta del producto o servicio seleccionado";
+  }
+
+  if (elements.inventoryBusinessProductRecipeContext) {
+    elements.inventoryBusinessProductRecipeContext.innerHTML = selectedProduct
+      ? `
+        <strong>${escapeHtml(selectedProduct.name)}</strong>
+        <small>${escapeHtml(selectedProduct.businessLine)} · ${escapeHtml(
+          selectedProduct.itemType
+        )} · ${formatCurrency(selectedProduct.defaultAmount)}</small>
+      `
+      : `
+        <strong>Sin seleccion activa</strong>
+        <small>Guarda o edita un producto/servicio para asociarle insumos desde inventario.</small>
+      `;
+  }
+
+  if (elements.inventoryBusinessComponentForm) {
+    const enabled = Boolean(selectedProduct);
+    [
+      elements.inventoryBusinessComponentProductId,
+      elements.inventoryBusinessComponentQuantity,
+      elements.inventoryBusinessComponentNotes,
+      elements.inventoryBusinessComponentForm.querySelector('button[type="submit"]'),
+    ].forEach((node) => {
+      if (node) {
+        node.disabled = !enabled;
+      }
+    });
+  }
+
+  if (elements.inventoryBusinessComponentsList) {
+    if (!selectedProduct) {
+      elements.inventoryBusinessComponentsList.innerHTML = `
+        <div class="empty-state collection-empty">
+          Guarda primero el producto o servicio, o edita uno existente, para empezar a construir su receta.
+        </div>
+      `;
+    } else if (!selectedComponents.length) {
+      elements.inventoryBusinessComponentsList.innerHTML = `
+        <div class="empty-state collection-empty">
+          Aun no hay insumos configurados para ${escapeHtml(selectedProduct.name)}.
+        </div>
+      `;
+    } else {
+      elements.inventoryBusinessComponentsList.innerHTML = selectedComponents
+        .map(
+          (component) => `
+            <article class="catalog-item">
+              <div class="catalog-item-copy">
+                <strong>${escapeHtml(component.inventoryProductName)}</strong>
+                <small>
+                  ${escapeHtml(component.inventoryProductArea || "Sin area")} ·
+                  ${escapeHtml(
+                    formatInventoryQuantity(
+                      component.quantity,
+                      component.inventoryProductUnitName
+                    )
+                  )}
+                  ${component.notes ? ` · ${escapeHtml(component.notes)}` : ""}
+                </small>
+              </div>
+              <div class="row-actions row-actions--compact">
+                <button
+                  class="table-button danger icon-button"
+                  type="button"
+                  data-business-component-delete-id="${component.id}"
+                  title="Eliminar insumo de la receta"
+                  aria-label="Eliminar insumo de la receta"
+                >
+                  <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                    <path d="M3 6h18"></path>
+                    <path d="M8 6V4h8v2"></path>
+                    <path d="m19 6-1 14H6L5 6"></path>
+                    <path d="M10 11v6"></path>
+                    <path d="M14 11v6"></path>
+                  </svg>
+                </button>
+              </div>
+            </article>
+          `
+        )
+        .join("");
+    }
+  }
 }
 
 function renderInventoryStockMovementsTable() {
@@ -4035,6 +4421,243 @@ async function handleInventoryProductsTableClick(event) {
       : "Producto inactivado correctamente.";
   } catch (error) {
     elements.inventoryProductFeedback.textContent = error.message;
+  }
+}
+
+async function handleInventoryBusinessProductSubmit(event) {
+  event.preventDefault();
+
+  const businessProductId = Number(elements.inventoryBusinessProductId?.value || 0);
+  const payload = {
+    name: elements.inventoryBusinessProductName.value.trim(),
+    businessLine: elements.inventoryBusinessProductLine.value,
+    itemType: elements.inventoryBusinessProductType.value,
+    category: elements.inventoryBusinessProductCategory.value.trim(),
+    defaultAmount: Number(elements.inventoryBusinessProductAmount.value || 0),
+    directInventoryProductId: Number(
+      elements.inventoryBusinessProductDirectProductId.value || 0
+    ),
+    directInventoryQuantity: Number(
+      elements.inventoryBusinessProductDirectQuantity.value || 0
+    ),
+    notes: elements.inventoryBusinessProductNotes.value.trim(),
+  };
+
+  if (!payload.name || !payload.category) {
+    elements.inventoryBusinessProductFeedback.textContent =
+      "El nombre y la categoria comercial son obligatorios.";
+    return;
+  }
+
+  try {
+    await apiRequest(
+      businessProductId > 0
+        ? `/api/business-products/${businessProductId}`
+        : "/api/business-products",
+      {
+        method: businessProductId > 0 ? "PUT" : "POST",
+        body: JSON.stringify(payload),
+      }
+    );
+    await loadBootstrap();
+    switchView("inventario", {
+      inventoryPanel: "comercial",
+    });
+    elements.inventoryBusinessProductFeedback.textContent =
+      businessProductId > 0
+        ? "Producto o servicio actualizado correctamente."
+        : "Producto o servicio registrado correctamente.";
+    if (!businessProductId) {
+      resetInventoryBusinessProductForm();
+    }
+  } catch (error) {
+    elements.inventoryBusinessProductFeedback.textContent = error.message;
+  }
+}
+
+function resetInventoryBusinessProductForm() {
+  if (!elements.inventoryBusinessProductForm) {
+    return;
+  }
+
+  elements.inventoryBusinessProductForm.reset();
+  elements.inventoryBusinessProductId.value = "";
+  elements.inventoryBusinessProductLine.value = "Gimnasio";
+  elements.inventoryBusinessProductType.value = "Producto";
+  elements.inventoryBusinessProductAmount.value = "0";
+  elements.inventoryBusinessProductDirectQuantity.value = "0";
+  fillBusinessProductDirectInventoryOptions("");
+  elements.inventoryBusinessProductFeedback.textContent =
+    "Aqui puedes crear membresias, cenas, desayunos, bebidas o cualquier servicio/combo para vender sin depender solo de categorias.";
+  elements.inventoryBusinessProductCancelEdit.classList.add("is-hidden");
+
+  const submitButton = elements.inventoryBusinessProductForm.querySelector(
+    'button[type="submit"]'
+  );
+  if (submitButton) {
+    submitButton.textContent = "Guardar producto o servicio";
+  }
+}
+
+async function handleInventoryBusinessProductsTableClick(event) {
+  const editButton = event.target.closest("[data-business-product-edit-id]");
+  const statusButton = event.target.closest("[data-business-product-status-id]");
+
+  if (editButton) {
+    const item = getBusinessProductById(editButton.dataset.businessProductEditId);
+    if (!item) {
+      elements.inventoryBusinessProductFeedback.textContent =
+        "No encontré el producto o servicio que quieres editar.";
+      return;
+    }
+
+    elements.inventoryBusinessProductId.value = String(item.id);
+    elements.inventoryBusinessProductName.value = item.name || "";
+    elements.inventoryBusinessProductLine.value = item.businessLine || "Gimnasio";
+    elements.inventoryBusinessProductType.value = item.itemType || "Producto";
+    elements.inventoryBusinessProductCategory.value = item.category || "";
+    elements.inventoryBusinessProductAmount.value = String(item.defaultAmount || 0);
+    fillBusinessProductDirectInventoryOptions(String(item.directInventoryProductId || ""));
+    elements.inventoryBusinessProductDirectProductId.value = item.directInventoryProductId
+      ? String(item.directInventoryProductId)
+      : "";
+    elements.inventoryBusinessProductDirectQuantity.value = String(
+      item.directInventoryQuantity || 0
+    );
+    elements.inventoryBusinessProductNotes.value = item.notes || "";
+    elements.inventoryBusinessProductFeedback.textContent =
+      "Actualiza el producto o servicio y luego, si aplica, ajusta su receta abajo.";
+    elements.inventoryBusinessProductCancelEdit.classList.remove("is-hidden");
+
+    const submitButton = elements.inventoryBusinessProductForm.querySelector(
+      'button[type="submit"]'
+    );
+    if (submitButton) {
+      submitButton.textContent = "Guardar cambios";
+    }
+
+    switchView("inventario", {
+      inventoryPanel: "comercial",
+    });
+    renderInventoryBusinessProducts();
+    elements.inventoryBusinessProductName.focus();
+    return;
+  }
+
+  if (!statusButton) {
+    return;
+  }
+
+  const productId = statusButton.dataset.businessProductStatusId;
+  const activate = statusButton.dataset.businessProductNextActive === "true";
+  const confirmed = window.confirm(
+    activate
+      ? "¿Deseas activar este producto o servicio?"
+      : "¿Deseas inactivar este producto o servicio?"
+  );
+
+  if (!confirmed) {
+    return;
+  }
+
+  try {
+    await apiRequest(`/api/business-products/${productId}/active`, {
+      method: "PATCH",
+      body: JSON.stringify({
+        isActive: activate,
+      }),
+    });
+    await loadBootstrap();
+    switchView("inventario", {
+      inventoryPanel: "comercial",
+    });
+    elements.inventoryBusinessProductFeedback.textContent = activate
+      ? "Producto o servicio activado correctamente."
+      : "Producto o servicio inactivado correctamente.";
+  } catch (error) {
+    elements.inventoryBusinessProductFeedback.textContent = error.message;
+  }
+}
+
+async function handleInventoryBusinessComponentSubmit(event) {
+  event.preventDefault();
+
+  const businessProductId = Number(elements.inventoryBusinessProductId?.value || 0);
+  if (!(businessProductId > 0)) {
+    elements.inventoryBusinessComponentFeedback.textContent =
+      "Guarda o edita primero un producto o servicio para empezar su receta.";
+    return;
+  }
+
+  const payload = {
+    inventoryProductId: Number(
+      elements.inventoryBusinessComponentProductId.value || 0
+    ),
+    quantity: Number(elements.inventoryBusinessComponentQuantity.value || 0),
+    notes: elements.inventoryBusinessComponentNotes.value.trim(),
+  };
+
+  if (!(payload.inventoryProductId > 0) || !(payload.quantity > 0)) {
+    elements.inventoryBusinessComponentFeedback.textContent =
+      "Selecciona un insumo y una cantidad valida para agregarlo a la receta.";
+    return;
+  }
+
+  try {
+    await apiRequest(`/api/business-products/${businessProductId}/components`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+    elements.inventoryBusinessComponentQuantity.value = "";
+    elements.inventoryBusinessComponentNotes.value = "";
+    fillBusinessProductComponentInventoryOptions(
+      elements.inventoryBusinessComponentProductId.value
+    );
+    await loadBootstrap();
+    switchView("inventario", {
+      inventoryPanel: "comercial",
+    });
+    elements.inventoryBusinessComponentFeedback.textContent =
+      "Insumo agregado a la receta correctamente.";
+    renderInventoryBusinessProducts();
+  } catch (error) {
+    elements.inventoryBusinessComponentFeedback.textContent = error.message;
+  }
+}
+
+async function handleInventoryBusinessComponentsListClick(event) {
+  const deleteButton = event.target.closest("[data-business-component-delete-id]");
+  if (!deleteButton) {
+    return;
+  }
+
+  const businessProductId = Number(elements.inventoryBusinessProductId?.value || 0);
+  const componentId = Number(deleteButton.dataset.businessComponentDeleteId || 0);
+  if (!(businessProductId > 0) || !(componentId > 0)) {
+    return;
+  }
+
+  const confirmed = window.confirm("¿Deseas quitar este insumo de la receta?");
+  if (!confirmed) {
+    return;
+  }
+
+  try {
+    await apiRequest(
+      `/api/business-products/${businessProductId}/components/${componentId}`,
+      {
+        method: "DELETE",
+      }
+    );
+    await loadBootstrap();
+    switchView("inventario", {
+      inventoryPanel: "comercial",
+    });
+    elements.inventoryBusinessComponentFeedback.textContent =
+      "Insumo retirado de la receta correctamente.";
+    renderInventoryBusinessProducts();
+  } catch (error) {
+    elements.inventoryBusinessComponentFeedback.textContent = error.message;
   }
 }
 
@@ -4882,6 +5505,7 @@ async function handleMovementSubmit(event) {
     fecha: elements.fecha.value,
     tipo: elements.tipo.value,
     categoria: elements.categoria.value,
+    businessProductId: Number(elements.movementBusinessProductId.value || 0),
     cliente: elements.cliente.value.trim(),
     descripcion: elements.descripcion.value.trim(),
     medioPago: elements.medioPago.value,
@@ -5178,9 +5802,13 @@ async function handleMovementTableClick(event) {
     syncCategoryOptions({
       includeValue: movement.categoria,
     });
+    fillMovementBusinessProductOptions(String(movement.businessProductId || ""));
     elements.fecha.value = movement.fecha;
     elements.tipo.value = movement.tipo;
     elements.categoria.value = movement.categoria;
+    elements.movementBusinessProductId.value = movement.businessProductId
+      ? String(movement.businessProductId)
+      : "";
     setClientSelection(movement.cliente);
     elements.descripcion.value = movement.descripcion;
     elements.medioPago.value = movement.medioPago;
@@ -5198,6 +5826,10 @@ async function handleMovementTableClick(event) {
     elements.abono.value = String(movement.abono);
     elements.observaciones.value = movement.observaciones;
     syncComputedPaymentStatus();
+    syncMovementBusinessProductSelection({
+      selectedValue: String(movement.businessProductId || ""),
+      preserveValue: true,
+    });
     syncMovementInventoryFields({
       preserveEffect: true,
       preserveQuantity: true,
@@ -9106,6 +9738,7 @@ function normalizeMovementRecord(item) {
     abono: Number(item.abono || 0),
     saldoPendiente: Number(item.saldoPendiente || 0),
     flujoNeto: Number(item.flujoNeto || 0),
+    businessProductId: Number(item.businessProductId || 0),
     inventoryProductId: Number(item.inventoryProductId || 0),
     inventoryQuantity: Number(item.inventoryQuantity || 0),
     inventoryEffect: item.inventoryEffect || "ninguno",
@@ -9181,6 +9814,36 @@ function normalizeInventoryStockMovements(items) {
     unitCost: Number(item.unitCost || 0),
     stockBefore: Number(item.stockBefore || 0),
     stockAfter: Number(item.stockAfter || 0),
+  }));
+}
+
+function normalizeBusinessProducts(items) {
+  if (!Array.isArray(items)) {
+    return [];
+  }
+
+  return items.map((item) => ({
+    ...item,
+    id: Number(item.id || 0),
+    defaultAmount: Number(item.defaultAmount || 0),
+    directInventoryProductId: Number(item.directInventoryProductId || 0),
+    directInventoryQuantity: Number(item.directInventoryQuantity || 0),
+    isActive: Boolean(item.isActive),
+  }));
+}
+
+function normalizeBusinessProductComponents(items) {
+  if (!Array.isArray(items)) {
+    return [];
+  }
+
+  return items.map((item) => ({
+    ...item,
+    id: Number(item.id || 0),
+    businessProductId: Number(item.businessProductId || 0),
+    inventoryProductId: Number(item.inventoryProductId || 0),
+    quantity: Number(item.quantity || 0),
+    sortOrder: Number(item.sortOrder || 0),
   }));
 }
 
@@ -10137,6 +10800,124 @@ function setClientSelection(value) {
   fillClientOptions(cleanValue);
 }
 
+function getAvailableMovementBusinessProducts() {
+  const activeLine = elements.linea?.value || "Gimnasio";
+  return (state.businessProducts || []).filter(
+    (item) => item.isActive && item.businessLine === activeLine
+  );
+}
+
+function fillMovementBusinessProductOptions(selectedValue = "") {
+  if (!elements.movementBusinessProductId) {
+    return;
+  }
+
+  const selectedRecord = getBusinessProductById(selectedValue);
+  fillSelectFromRecords(
+    elements.movementBusinessProductId,
+    getAvailableMovementBusinessProducts(),
+    {
+      selectedValue: String(
+        selectedValue || elements.movementBusinessProductId.value || ""
+      ),
+      includeRecord:
+        selectedRecord &&
+        selectedRecord.businessLine === (elements.linea?.value || "Gimnasio")
+          ? selectedRecord
+          : null,
+      placeholder: "Sin producto o servicio",
+      labelBuilder: (item) =>
+        `${item.name} · ${item.itemType} · ${formatCurrency(item.defaultAmount)}`,
+    }
+  );
+}
+
+function syncMovementBusinessProductSelection(options = {}) {
+  if (!elements.movementBusinessProductId) {
+    return null;
+  }
+
+  fillMovementBusinessProductOptions(
+    String(
+      options.selectedValue ??
+        elements.movementBusinessProductId.value ??
+        ""
+    )
+  );
+
+  const selectedProduct = getBusinessProductById(
+    elements.movementBusinessProductId.value
+  );
+
+  if (
+    !selectedProduct ||
+    selectedProduct.businessLine !== (elements.linea?.value || "Gimnasio")
+  ) {
+    if (!options.preserveValue) {
+      elements.movementBusinessProductId.value = "";
+    }
+    elements.movementInventoryProductId.disabled = false;
+    elements.movementInventoryEffect.disabled = false;
+    syncMovementInventoryFields();
+    if (elements.movementBusinessProductFeedback) {
+      elements.movementBusinessProductFeedback.textContent =
+        "Si seleccionas un producto o servicio, el sistema puede sugerir valor y descontar inventario segun su configuracion.";
+    }
+    return null;
+  }
+
+  syncCategoryOptions({
+    includeValue: selectedProduct.category || elements.categoria?.value || "",
+  });
+  if (selectedProduct.category) {
+    elements.categoria.value = selectedProduct.category;
+  }
+
+  if (selectedProduct.defaultAmount > 0 && !options.preserveValue) {
+    elements.valorTotal.value = String(selectedProduct.defaultAmount);
+    syncComputedPaymentStatus();
+  }
+
+  if (!elements.descripcion.value.trim()) {
+    elements.descripcion.value = selectedProduct.name;
+  }
+
+  if (elements.movementBusinessProductFeedback) {
+    const recipeItems = getBusinessProductComponents(selectedProduct.id).length;
+    if (selectedProduct.directInventoryProductId > 0 || recipeItems > 0) {
+      fillMovementInventoryProductOptions({
+        selectedValue: "",
+      });
+      elements.movementInventoryProductId.value = "";
+      elements.movementInventoryEffect.value = "ninguno";
+      elements.movementInventoryQuantity.value = "";
+      elements.movementInventoryProductId.disabled = true;
+      elements.movementInventoryEffect.disabled = true;
+      elements.movementInventoryQuantity.disabled = true;
+      syncMovementInventoryFields();
+    } else {
+      elements.movementInventoryProductId.disabled = false;
+      elements.movementInventoryEffect.disabled = false;
+      syncMovementInventoryFields();
+    }
+    const stockMessage =
+      selectedProduct.directInventoryProductId > 0
+        ? `descontará ${formatInventoryQuantity(
+            selectedProduct.directInventoryQuantity || 1,
+            selectedProduct.directInventoryProductUnitName
+          )} de ${selectedProduct.directInventoryProductName || "inventario"}`
+        : recipeItems
+          ? `descontará ${recipeItems} insumo(s) configurados en su receta`
+          : "no mueve inventario automáticamente";
+    elements.movementBusinessProductFeedback.textContent =
+      `${selectedProduct.name} · ${selectedProduct.itemType} · ${formatCurrency(
+        selectedProduct.defaultAmount
+      )}. Al registrar la venta, ${stockMessage}.`;
+  }
+
+  return selectedProduct;
+}
+
 function getInventoryProductById(productId) {
   return (state.inventoryProducts || []).find(
     (item) => String(item.id) === String(productId)
@@ -10266,6 +11047,182 @@ function buildMonthlyRows(year) {
   });
 }
 
+function handleBoxSummaryClick(event) {
+  const trigger = event.target.closest("[data-box-summary-name]");
+  if (!trigger || !elements.boxFilter) {
+    return;
+  }
+
+  const boxName = String(trigger.dataset.boxSummaryName || "").trim();
+  if (!boxName) {
+    return;
+  }
+
+  fillBoxFilterOptions(boxName);
+  elements.boxFilter.value = boxName;
+  switchView("cajas", {
+    boxPanel: "movimientos",
+  });
+  renderBoxesView();
+}
+
+function renderBoxesView() {
+  renderBoxPanels();
+
+  const pendingGroups = getPendingPayablesByBox();
+  const pendingByBox = new Map(
+    pendingGroups.map((group) => [group.boxName, Number(group.totalPending || 0)])
+  );
+  const summaries = getPaymentBoxSummaries().map((box) => ({
+    ...box,
+    pendingPayables: Number(pendingByBox.get(box.name) || 0),
+  }));
+  const ledgerEntries = getFilteredBoxLedgerEntries();
+  const totalBalance = sum(summaries, "balance");
+  const totalInflows = sum(summaries, "inflows");
+  const totalOutflows = sum(summaries, "outflows");
+  const totalPendingPayables = sum(summaries, "pendingPayables");
+  const activeBoxes = summaries.filter((item) => item.isActive);
+
+  elements.boxesSummary.innerHTML = summaries.length
+    ? summaries
+        .map(
+          (box) => `
+            <button
+              class="stat-card stat-card-button"
+              type="button"
+              data-box-summary-name="${escapeHtml(box.name)}"
+              title="Ver movimientos de ${escapeHtml(box.name)}"
+              aria-label="Ver movimientos de ${escapeHtml(box.name)}"
+            >
+              <span class="label">${escapeHtml(box.name)}</span>
+              <strong class="value">${formatCurrency(box.balance)}</strong>
+              <div class="meta">
+                ${box.entriesCount} movimientos · Entradas ${formatCurrency(
+                  box.inflows
+                )} · Salidas ${formatCurrency(
+                  box.outflows
+                )} · Pendiente por pagar ${formatCurrency(box.pendingPayables)}${
+                  box.isActive ? "" : " · Inactiva"
+                }
+              </div>
+            </button>
+          `
+        )
+        .join("")
+    : '<div class="empty-state">Aun no hay cajas disponibles para consultar.</div>';
+
+  elements.boxInsights.innerHTML = `
+    <div class="mini-stat"><span>Cajas activas</span><strong>${activeBoxes.length}</strong></div>
+    <div class="mini-stat"><span>Saldo disponible</span><strong>${formatCurrency(totalBalance)}</strong></div>
+    <div class="mini-stat"><span>Entradas acumuladas</span><strong>${formatCurrency(totalInflows)}</strong></div>
+    <div class="mini-stat"><span>Salidas acumuladas</span><strong>${formatCurrency(totalOutflows)}</strong></div>
+    <div class="mini-stat"><span>Pendiente por pagar</span><strong>${formatCurrency(totalPendingPayables)}</strong></div>
+    <div class="mini-stat"><span>Traslados registrados</span><strong>${state.boxTransfers.length}</strong></div>
+  `;
+
+  if (elements.boxPendingBreakdown) {
+    elements.boxPendingBreakdown.innerHTML = pendingGroups.length
+      ? pendingGroups
+          .map(
+            (group) => `
+              <article class="pending-box-card">
+                <div class="pending-box-head">
+                  <div>
+                    <strong>${escapeHtml(group.boxName)}</strong>
+                    <small>${group.items.length} movimiento(s) pendiente(s)</small>
+                  </div>
+                  <strong>${formatCurrency(group.totalPending)}</strong>
+                </div>
+                <div class="pending-box-items">
+                  ${group.items
+                    .map(
+                      (item) => `
+                        <div class="pending-box-item">
+                          <div class="pending-box-item-copy">
+                            <strong>${escapeHtml(item.categoria || "Sin categoría")}</strong>
+                            <small>
+                              ${escapeHtml(
+                                [
+                                  `#${item.id}`,
+                                  formatDate(item.fecha),
+                                  item.descripcion || "",
+                                  item.cliente || "",
+                                ]
+                                  .filter(Boolean)
+                                  .join(" · ")
+                              )}
+                            </small>
+                          </div>
+                          <div class="pending-box-item-metrics">
+                            <span>Total ${formatCurrency(item.valorTotal)}</span>
+                            <span>Pagado ${formatCurrency(item.abono)}</span>
+                            <strong>Saldo ${formatCurrency(item.saldoPendiente)}</strong>
+                          </div>
+                        </div>
+                      `
+                    )
+                    .join("")}
+                </div>
+              </article>
+            `
+          )
+          .join("")
+      : '<div class="empty-state">No hay costos ni gastos pendientes por pagar en las cajas actuales.</div>';
+  }
+
+  const filteredBalance = ledgerEntries.reduce(
+    (acc, entry) => acc + Number(entry.amount || 0),
+    0
+  );
+  const filteredInflows = ledgerEntries.reduce(
+    (acc, entry) => acc + Number(entry.inflow || 0),
+    0
+  );
+  const filteredOutflows = ledgerEntries.reduce(
+    (acc, entry) => acc + Number(entry.outflow || 0),
+    0
+  );
+  const visibleBoxes = [...new Set(ledgerEntries.map((entry) => entry.boxName))];
+  const filteredPendingPayables = summaries
+    .filter((item) => visibleBoxes.includes(item.name))
+    .reduce((acc, item) => acc + Number(item.pendingPayables || 0), 0);
+
+  elements.boxFilterSummary.innerHTML = `
+    <div class="mini-stat"><span>Movimientos visibles</span><strong>${ledgerEntries.length}</strong></div>
+    <div class="mini-stat"><span>Entradas</span><strong>${formatCurrency(filteredInflows)}</strong></div>
+    <div class="mini-stat"><span>Salidas</span><strong>${formatCurrency(filteredOutflows)}</strong></div>
+    <div class="mini-stat"><span>Saldo visible</span><strong>${formatCurrency(filteredBalance)}</strong></div>
+    <div class="mini-stat"><span>Pendiente por pagar</span><strong>${formatCurrency(filteredPendingPayables)}</strong></div>
+  `;
+
+  elements.boxLedgerTable.innerHTML = ledgerEntries.length
+    ? ledgerEntries
+        .map(
+          (entry) => `
+            <tr>
+              ${tableCell("Fecha", escapeHtml(formatDate(entry.date)))}
+              ${tableCell("Caja", escapeHtml(entry.boxName))}
+              ${tableCell("Tipo", escapeHtml(entry.entryType))}
+              ${tableCell("Referencia", escapeHtml(entry.reference || "Sin referencia"))}
+              ${tableCell("Detalle", escapeHtml(entry.detail || "Sin detalle"))}
+              ${tableCell("Registrado por", escapeHtml(entry.registeredBy || "Sistema"))}
+              ${tableCell("Entrada", formatCurrency(entry.inflow || 0))}
+              ${tableCell("Salida", formatCurrency(entry.outflow || 0))}
+              ${tableCell("Saldo neto", formatCurrency(entry.amount || 0))}
+            </tr>
+          `
+        )
+        .join("")
+    : `
+      <tr>
+        <td colspan="9" class="empty-state">
+          No hay movimientos de caja para los filtros actuales.
+        </td>
+      </tr>
+    `;
+}
+
 function createStatCard(label, value, meta) {
   return `
     <article class="stat-card">
@@ -10339,6 +11296,8 @@ function resetMovementForm() {
   elements.linea.value = "Gimnasio";
   setClientSelection("");
   syncCategoryOptions();
+  fillMovementBusinessProductOptions("");
+  elements.movementBusinessProductId.value = "";
   fillMovementInventoryProductOptions({
     selectedValue: "",
   });
@@ -10351,6 +11310,7 @@ function resetMovementForm() {
     elements.medioPago.value = state.lists.mediosPago[0];
   }
   syncComputedPaymentStatus();
+  syncMovementBusinessProductSelection();
   syncMovementInventoryFields();
   elements.editJustification.value = "";
   elements.assistantEditJustificationShell.classList.add("is-hidden");

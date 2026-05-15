@@ -1089,6 +1089,7 @@ app.get("/api/bootstrap", asyncHandler(async (req, res) => {
   const hasInventoryAccess = req.authUser?.role === "administrador";
   const hasInventoryProductLinkAccess =
     hasInventoryAccess || userHasOperationalWriteAccess(req.authUser);
+  const hasBusinessProductAccess = hasInventoryProductLinkAccess;
 
   const [
     catalogResult,
@@ -1107,6 +1108,8 @@ app.get("/api/bootstrap", asyncHandler(async (req, res) => {
     inventoryAssetsResult,
     inventoryProductsResult,
     inventoryStockMovementsResult,
+    businessProductsResult,
+    businessProductComponentsResult,
   ] =
     await Promise.all([
     query(
@@ -1263,6 +1266,35 @@ app.get("/api/bootstrap", asyncHandler(async (req, res) => {
           `
         )
       : Promise.resolve({ rows: [] }),
+    hasBusinessProductAccess
+      ? query(
+          `
+            select
+              bp.*,
+              ip.name as direct_inventory_product_name,
+              ip.unit_name as direct_inventory_product_unit_name
+            from business_products bp
+            left join inventory_products ip
+              on ip.id = bp.direct_inventory_product_id
+            order by bp.is_active desc, bp.business_line asc, bp.item_type asc, bp.name asc, bp.id asc
+          `
+        )
+      : Promise.resolve({ rows: [] }),
+    hasBusinessProductAccess
+      ? query(
+          `
+            select
+              bpc.*,
+              ip.name as inventory_product_name,
+              ip.area as inventory_product_area,
+              ip.unit_name as inventory_product_unit_name
+            from business_product_components bpc
+            join inventory_products ip
+              on ip.id = bpc.inventory_product_id
+            order by bpc.business_product_id asc, bpc.sort_order asc, bpc.id asc
+          `
+        )
+      : Promise.resolve({ rows: [] }),
   ]);
 
   res.json({
@@ -1283,6 +1315,9 @@ app.get("/api/bootstrap", asyncHandler(async (req, res) => {
     inventoryProducts: inventoryProductsResult.rows.map(mapInventoryProductRow),
     inventoryStockMovements:
       inventoryStockMovementsResult.rows.map(mapInventoryStockMovementRow),
+    businessProducts: businessProductsResult.rows.map(mapBusinessProductRow),
+    businessProductComponents:
+      businessProductComponentsResult.rows.map(mapBusinessProductComponentRow),
     notes: mapNotesRows(notesResult.rows),
   });
 }));
@@ -1504,6 +1539,7 @@ app.post("/api/movements", requireOperationalWriteAccess, asyncHandler(async (re
             movement_date,
             movement_type,
             category,
+            business_product_id,
             client_name,
             description,
             payment_status,
@@ -1522,7 +1558,7 @@ app.post("/api/movements", requireOperationalWriteAccess, asyncHandler(async (re
           )
           values (
             $1, $2, $3, $4, $5, $6, $7, $8,
-            $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19
+            $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20
           )
           returning *
         `,
@@ -1531,6 +1567,7 @@ app.post("/api/movements", requireOperationalWriteAccess, asyncHandler(async (re
           payload.fecha,
           payload.tipo,
           payload.categoria,
+          payload.businessProductId || null,
           payload.cliente,
           payload.descripcion,
           payload.estadoPago,
@@ -1634,21 +1671,22 @@ app.put("/api/movements/:id", requireOperationalWriteAccess, asyncHandler(async 
             movement_date = $3,
             movement_type = $4,
             category = $5,
-            client_name = $6,
-            description = $7,
-            payment_status = $8,
-            payment_method = $9,
-            total_amount = $10,
-            paid_amount = $11,
-            balance_due = $12,
-            cash_flow = $13,
-            inventory_product_id = $14,
-            inventory_quantity = $15,
-            inventory_effect = $16,
-            year = $17,
-            month_number = $18,
-            month_name = $19,
-            notes = $20,
+            business_product_id = $6,
+            client_name = $7,
+            description = $8,
+            payment_status = $9,
+            payment_method = $10,
+            total_amount = $11,
+            paid_amount = $12,
+            balance_due = $13,
+            cash_flow = $14,
+            inventory_product_id = $15,
+            inventory_quantity = $16,
+            inventory_effect = $17,
+            year = $18,
+            month_number = $19,
+            month_name = $20,
+            notes = $21,
             updated_at = now()
           where id = $1
           returning *
@@ -1659,6 +1697,7 @@ app.put("/api/movements/:id", requireOperationalWriteAccess, asyncHandler(async 
           payload.fecha,
           payload.tipo,
           payload.categoria,
+          payload.businessProductId || null,
           payload.cliente,
           payload.descripcion,
           payload.estadoPago,
@@ -2590,6 +2629,265 @@ app.post(
   })
 );
 
+app.post(
+  "/api/business-products",
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const payload = normalizeBusinessProductPayload(req.body);
+    validateBusinessProductPayload(payload);
+
+    const result = await query(
+      `
+        insert into business_products (
+          name,
+          business_line,
+          item_type,
+          category,
+          default_amount,
+          direct_inventory_product_id,
+          direct_inventory_quantity,
+          notes,
+          is_active
+        )
+        values ($1, $2, $3, $4, $5, $6, $7, $8, true)
+        returning *
+      `,
+      [
+        payload.name,
+        payload.businessLine,
+        payload.itemType,
+        payload.category,
+        payload.defaultAmount,
+        payload.directInventoryProductId || null,
+        payload.directInventoryProductId ? payload.directInventoryQuantity : 0,
+        payload.notes,
+      ]
+    );
+
+    res.status(201).json(mapBusinessProductRow(result.rows[0]));
+  })
+);
+
+app.put(
+  "/api/business-products/:id",
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const productId = Number(req.params.id);
+    const payload = normalizeBusinessProductPayload(req.body);
+    validateBusinessProductPayload(payload);
+
+    if (!Number.isInteger(productId) || productId <= 0) {
+      return res.status(400).json({ error: "Producto o servicio invalido." });
+    }
+
+    const result = await query(
+      `
+        update business_products
+        set
+          name = $2,
+          business_line = $3,
+          item_type = $4,
+          category = $5,
+          default_amount = $6,
+          direct_inventory_product_id = $7,
+          direct_inventory_quantity = $8,
+          notes = $9,
+          updated_at = now()
+        where id = $1
+        returning *
+      `,
+      [
+        productId,
+        payload.name,
+        payload.businessLine,
+        payload.itemType,
+        payload.category,
+        payload.defaultAmount,
+        payload.directInventoryProductId || null,
+        payload.directInventoryProductId ? payload.directInventoryQuantity : 0,
+        payload.notes,
+      ]
+    );
+
+    if (!result.rows.length) {
+      return res.status(404).json({ error: "Producto o servicio no encontrado." });
+    }
+
+    res.json(mapBusinessProductRow(result.rows[0]));
+  })
+);
+
+app.patch(
+  "/api/business-products/:id/active",
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const productId = Number(req.params.id);
+    const isActive = Boolean(req.body.isActive);
+
+    if (!Number.isInteger(productId) || productId <= 0) {
+      return res.status(400).json({ error: "Producto o servicio invalido." });
+    }
+
+    const result = await query(
+      `
+        update business_products
+        set
+          is_active = $2,
+          updated_at = now()
+        where id = $1
+        returning *
+      `,
+      [productId, isActive]
+    );
+
+    if (!result.rows.length) {
+      return res.status(404).json({ error: "Producto o servicio no encontrado." });
+    }
+
+    res.json(mapBusinessProductRow(result.rows[0]));
+  })
+);
+
+app.post(
+  "/api/business-products/:id/components",
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const businessProductId = Number(req.params.id);
+    const payload = normalizeBusinessProductComponentPayload(req.body);
+    validateBusinessProductComponentPayload(payload);
+
+    if (!Number.isInteger(businessProductId) || businessProductId <= 0) {
+      return res.status(400).json({ error: "Producto o servicio invalido." });
+    }
+
+    const result = await withClient(async (client) => {
+      await client.query("begin");
+
+      try {
+        const productResult = await client.query(
+          `
+            select id
+            from business_products
+            where id = $1
+            limit 1
+            for update
+          `,
+          [businessProductId]
+        );
+
+        if (!productResult.rows.length) {
+          throw httpError(404, "Producto o servicio no encontrado.");
+        }
+
+        const duplicateResult = await client.query(
+          `
+            select id
+            from business_product_components
+            where business_product_id = $1
+              and inventory_product_id = $2
+            limit 1
+          `,
+          [businessProductId, payload.inventoryProductId]
+        );
+
+        if (duplicateResult.rows.length) {
+          throw httpError(
+            400,
+            "Ese insumo ya hace parte de la receta. Edita el existente o elimínalo primero."
+          );
+        }
+
+        const insertResult = await client.query(
+          `
+            insert into business_product_components (
+              business_product_id,
+              inventory_product_id,
+              quantity,
+              notes,
+              sort_order
+            )
+            values (
+              $1,
+              $2,
+              $3,
+              $4,
+              coalesce(
+                (select max(sort_order) + 1 from business_product_components where business_product_id = $1),
+                1
+              )
+            )
+            returning *
+          `,
+          [
+            businessProductId,
+            payload.inventoryProductId,
+            payload.quantity,
+            payload.notes,
+          ]
+        );
+
+        await client.query("commit");
+        return insertResult.rows[0];
+      } catch (error) {
+        await client.query("rollback");
+        throw error;
+      }
+    });
+
+    const hydrated = await query(
+      `
+        select
+          bpc.*,
+          ip.name as inventory_product_name,
+          ip.area as inventory_product_area,
+          ip.unit_name as inventory_product_unit_name
+        from business_product_components bpc
+        join inventory_products ip
+          on ip.id = bpc.inventory_product_id
+        where bpc.id = $1
+        limit 1
+      `,
+      [Number(result.id)]
+    );
+
+    res.status(201).json(mapBusinessProductComponentRow(hydrated.rows[0]));
+  })
+);
+
+app.delete(
+  "/api/business-products/:productId/components/:componentId",
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const businessProductId = Number(req.params.productId);
+    const componentId = Number(req.params.componentId);
+
+    if (
+      !Number.isInteger(businessProductId) ||
+      businessProductId <= 0 ||
+      !Number.isInteger(componentId) ||
+      componentId <= 0
+    ) {
+      return res.status(400).json({ error: "Componente de receta invalido." });
+    }
+
+    const result = await query(
+      `
+        delete from business_product_components
+        where id = $1
+          and business_product_id = $2
+        returning id
+      `,
+      [componentId, businessProductId]
+    );
+
+    if (!result.rows.length) {
+      return res.status(404).json({ error: "Componente de receta no encontrado." });
+    }
+
+    res.status(204).send();
+  })
+);
+
 app.get("*", (_req, res) => {
   res.sendFile(path.join(rootDir, "index.html"));
 });
@@ -2649,6 +2947,35 @@ function normalizeInventoryStockMovementPayload(body) {
     quantity: Number(body.quantity || 0),
     unitCost: Math.max(Number(body.unitCost || 0), 0),
     reference: String(body.reference || "").trim(),
+    notes: String(body.notes || "").trim(),
+  };
+}
+
+function normalizeBusinessProductPayload(body) {
+  const directInventoryProductId = Number(body.directInventoryProductId || 0);
+
+  return {
+    name: String(body.name || "").trim(),
+    businessLine: String(body.businessLine || "").trim(),
+    itemType: String(body.itemType || "").trim() || "Producto",
+    category: String(body.category || "").trim(),
+    defaultAmount: Math.max(Number(body.defaultAmount || 0), 0),
+    directInventoryProductId: Number.isInteger(directInventoryProductId)
+      ? directInventoryProductId
+      : 0,
+    directInventoryQuantity: Math.max(Number(body.directInventoryQuantity || 0), 0),
+    notes: String(body.notes || "").trim(),
+  };
+}
+
+function normalizeBusinessProductComponentPayload(body) {
+  const inventoryProductId = Number(body.inventoryProductId || 0);
+
+  return {
+    inventoryProductId: Number.isInteger(inventoryProductId)
+      ? inventoryProductId
+      : 0,
+    quantity: Number(body.quantity || 0),
     notes: String(body.notes || "").trim(),
   };
 }
@@ -2742,6 +3069,41 @@ function validateInventoryStockMovementPayload(payload) {
   }
 }
 
+function validateBusinessProductPayload(payload) {
+  if (!payload.name) {
+    throw httpError(400, "El nombre del producto o servicio es obligatorio.");
+  }
+
+  if (!["Gimnasio", "Restaurante"].includes(payload.businessLine)) {
+    throw httpError(400, "La linea del producto o servicio no es valida.");
+  }
+
+  if (!payload.category) {
+    throw httpError(400, "La categoria o familia comercial es obligatoria.");
+  }
+
+  if (!(payload.defaultAmount >= 0)) {
+    throw httpError(400, "El valor sugerido del producto o servicio no es valido.");
+  }
+
+  if (payload.directInventoryProductId > 0 && !(payload.directInventoryQuantity > 0)) {
+    throw httpError(
+      400,
+      "Si enlazas un insumo o producto directo, la cantidad por venta debe ser mayor que cero."
+    );
+  }
+}
+
+function validateBusinessProductComponentPayload(payload) {
+  if (!(payload.inventoryProductId > 0)) {
+    throw httpError(400, "Selecciona el insumo del inventario que hace parte de la receta.");
+  }
+
+  if (!Number.isFinite(payload.quantity) || !(payload.quantity > 0)) {
+    throw httpError(400, "La cantidad del insumo debe ser mayor que cero.");
+  }
+}
+
 function normalizeMovementPayload(body) {
   const fecha = String(body.fecha || "").trim();
   const [ano, mesNumero] = fecha.split("-").map(Number);
@@ -2752,6 +3114,7 @@ function normalizeMovementPayload(body) {
   const estadoPago = derivePaymentStatus(valorTotal, abono);
   const inventoryProductId = Number(body.inventoryProductId || 0);
   const inventoryQuantity = Math.max(Number(body.inventoryQuantity || 0), 0);
+  const businessProductId = Number(body.businessProductId || 0);
   const inventoryEffect =
     String(body.inventoryEffect || "ninguno").trim() || "ninguno";
 
@@ -2773,6 +3136,9 @@ function normalizeMovementPayload(body) {
     mesNombre: monthNames[(mesNumero || 1) - 1] || "",
     observaciones: String(body.observaciones || "").trim(),
     justificacionEdicion: String(body.justificacionEdicion || "").trim(),
+    businessProductId: Number.isInteger(businessProductId)
+      ? businessProductId
+      : 0,
     inventoryProductId: Number.isInteger(inventoryProductId)
       ? inventoryProductId
       : 0,
@@ -3052,6 +3418,10 @@ function validateMovementPayload(payload, options = {}) {
 
   if (!(payload.valorTotal > 0)) {
     throw httpError(400, "El valor total debe ser mayor a cero.");
+  }
+
+  if (payload.businessProductId < 0) {
+    throw httpError(400, "El producto o servicio relacionado no es valido.");
   }
 
   if (payload.abono < 0) {
@@ -5142,6 +5512,57 @@ async function lockInventoryProductForMovement(client, productId) {
   return result.rows[0];
 }
 
+async function getBusinessProductInventoryProfile(client, businessProductId, businessLine) {
+  if (!(Number(businessProductId) > 0)) {
+    return null;
+  }
+
+  const productResult = await client.query(
+    `
+      select
+        bp.*,
+        ip.name as direct_inventory_product_name
+      from business_products bp
+      left join inventory_products ip
+        on ip.id = bp.direct_inventory_product_id
+      where bp.id = $1
+      limit 1
+    `,
+    [businessProductId]
+  );
+
+  if (!productResult.rows.length) {
+    throw httpError(404, "El producto o servicio relacionado no existe.");
+  }
+
+  const productRow = productResult.rows[0];
+  if (businessLine && productRow.business_line !== businessLine) {
+    throw httpError(
+      400,
+      "El producto o servicio seleccionado no corresponde a la línea del movimiento."
+    );
+  }
+
+  const componentsResult = await client.query(
+    `
+      select
+        bpc.*,
+        ip.name as inventory_product_name
+      from business_product_components bpc
+      join inventory_products ip
+        on ip.id = bpc.inventory_product_id
+      where bpc.business_product_id = $1
+      order by bpc.sort_order asc, bpc.id asc
+    `,
+    [businessProductId]
+  );
+
+  return {
+    product: productRow,
+    components: componentsResult.rows,
+  };
+}
+
 async function revertMovementInventoryLink(client, movementId) {
   const linkResult = await client.query(
     `
@@ -5291,6 +5712,265 @@ async function applyMovementInventoryLink(client, movementId, payload, authUserI
   };
 }
 
+function buildInventoryLinksFromMovementPayload(payload, businessProductProfile = null) {
+  const links = [];
+
+  if (normalizeMovementInventoryEffect(payload.inventoryEffect) !== "ninguno") {
+    links.push({
+      inventoryProductId: Number(payload.inventoryProductId),
+      quantity: Number(payload.inventoryQuantity || 0),
+      effect: normalizeMovementInventoryEffect(payload.inventoryEffect),
+      referenceParts: [payload.tipo, payload.categoria, "Manual"],
+      notes: payload.observaciones || payload.descripcion || "",
+      sourceType: "manual",
+    });
+  }
+
+  if (!businessProductProfile) {
+    return links;
+  }
+
+  const { product, components } = businessProductProfile;
+  const hasAutomaticInventory =
+    Number(product.direct_inventory_product_id || 0) > 0 || components.length > 0;
+
+  if (hasAutomaticInventory && links.length) {
+    throw httpError(
+      400,
+      "Si seleccionas un producto o servicio con receta o stock directo, no combines un enlace manual de inventario en el mismo movimiento."
+    );
+  }
+
+  if ((Number(product.direct_inventory_product_id || 0) > 0) && payload.tipo !== "Ingreso") {
+    throw httpError(
+      400,
+      "Los productos o servicios con impacto de inventario automático solo se pueden usar en movimientos de ingreso."
+    );
+  }
+
+  if (components.length && payload.tipo !== "Ingreso") {
+    throw httpError(
+      400,
+      "Las recetas solo se descuentan automáticamente cuando registras una venta o ingreso."
+    );
+  }
+
+  if (Number(product.direct_inventory_product_id || 0) > 0) {
+    links.push({
+      inventoryProductId: Number(product.direct_inventory_product_id),
+      quantity: Number(product.direct_inventory_quantity || 0) || 1,
+      effect: "salida",
+      referenceParts: [payload.tipo, product.name, "Venta directa"],
+      notes: payload.observaciones || payload.descripcion || product.notes || "",
+      sourceType: "business-product-direct",
+    });
+  }
+
+  components.forEach((component) => {
+    links.push({
+      inventoryProductId: Number(component.inventory_product_id),
+      quantity: Number(component.quantity || 0),
+      effect: "salida",
+      referenceParts: [payload.tipo, product.name, "Receta"],
+      notes:
+        payload.observaciones ||
+        payload.descripcion ||
+        component.notes ||
+        product.notes ||
+        "",
+      sourceType: "business-product-component",
+    });
+  });
+
+  return links;
+}
+
+async function revertMovementInventoryLink(client, movementId) {
+  const linkResult = await client.query(
+    `
+      select
+        ism.*,
+        ip.name as product_name,
+        ip.current_stock,
+        ip.cost_price
+      from inventory_stock_movements ism
+      join inventory_products ip
+        on ip.id = ism.inventory_product_id
+      where ism.source_movement_id = $1
+      order by ism.id desc
+      for update of ism, ip
+    `,
+    [movementId]
+  );
+
+  if (!linkResult.rows.length) {
+    return [];
+  }
+
+  const currentStocks = new Map();
+
+  for (const linkRow of linkResult.rows) {
+    const productId = Number(linkRow.inventory_product_id || 0);
+    const delta = Number(
+      (
+        Number(linkRow.stock_after || 0) - Number(linkRow.stock_before || 0)
+      ).toFixed(2)
+    );
+    const currentStock = currentStocks.has(productId)
+      ? Number(currentStocks.get(productId) || 0)
+      : Number(linkRow.current_stock || 0);
+    const revertedStock = Number((currentStock - delta).toFixed(2));
+
+    if (revertedStock < 0) {
+      throw httpError(
+        400,
+        `No se puede modificar este movimiento porque el inventario de ${linkRow.product_name} ya fue consumido y quedaria negativo.`
+      );
+    }
+
+    await client.query(
+      `
+        update inventory_products
+        set
+          current_stock = $2,
+          updated_at = now()
+        where id = $1
+      `,
+      [productId, revertedStock]
+    );
+
+    currentStocks.set(productId, revertedStock);
+  }
+
+  await client.query(
+    `
+      delete from inventory_stock_movements
+      where source_movement_id = $1
+    `,
+    [movementId]
+  );
+
+  return linkResult.rows;
+}
+
+async function applyMovementInventoryLink(client, movementId, payload, authUserId) {
+  const businessProductProfile = payload.businessProductId
+    ? await getBusinessProductInventoryProfile(
+        client,
+        payload.businessProductId,
+        payload.linea
+      )
+    : null;
+  const links = buildInventoryLinksFromMovementPayload(payload, businessProductProfile);
+
+  if (!links.length) {
+    return [];
+  }
+
+  const appliedLinks = [];
+
+  for (const link of links) {
+    if (!(link.inventoryProductId > 0) || !(link.quantity > 0)) {
+      continue;
+    }
+
+    const productRow = await lockInventoryProductForMovement(
+      client,
+      link.inventoryProductId
+    );
+    const movementType = movementInventoryEffectToStockType(link.effect);
+    const stockBefore = Number(productRow.current_stock || 0);
+    const delta = getInventoryStockDelta(movementType, link.quantity);
+    const stockAfter = Number((stockBefore + delta).toFixed(2));
+
+    if (stockAfter < 0) {
+      throw httpError(
+        400,
+        `El producto ${productRow.name} no tiene stock suficiente para registrar esa salida.`
+      );
+    }
+
+    const unitCost =
+      movementType === "entrada"
+        ? resolveInventoryUnitCostFromMovement(
+            {
+              ...payload,
+              inventoryQuantity: link.quantity,
+              inventoryEffect: link.effect,
+            },
+            productRow
+          )
+        : Number(productRow.cost_price || 0);
+    const reference = [
+      `Movimiento #${movementId}`,
+      ...link.referenceParts,
+    ]
+      .filter(Boolean)
+      .join(" · ");
+
+    await client.query(
+      `
+        insert into inventory_stock_movements (
+          inventory_product_id,
+          source_movement_id,
+          movement_date,
+          movement_type,
+          quantity,
+          unit_cost,
+          stock_before,
+          stock_after,
+          reference,
+          notes,
+          registered_by_user_id
+        )
+        values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+      `,
+      [
+        link.inventoryProductId,
+        movementId,
+        payload.fecha,
+        movementType,
+        link.quantity,
+        unitCost,
+        stockBefore,
+        stockAfter,
+        reference,
+        link.notes || "",
+        Number(authUserId),
+      ]
+    );
+
+    await client.query(
+      `
+        update inventory_products
+        set
+          current_stock = $2,
+          cost_price = case
+            when $3 > 0 and $4 = 'entrada' then $3
+            else cost_price
+          end,
+          updated_at = now()
+        where id = $1
+      `,
+      [
+        link.inventoryProductId,
+        stockAfter,
+        unitCost,
+        movementType,
+      ]
+    );
+
+    appliedLinks.push({
+      inventoryProductId: Number(link.inventoryProductId),
+      inventoryQuantity: Number(link.quantity),
+      inventoryEffect: normalizeMovementInventoryEffect(link.effect),
+      sourceType: link.sourceType,
+    });
+  }
+
+  return appliedLinks;
+}
+
 function mapInventoryAssetRow(row) {
   return {
     id: Number(row.id || 0),
@@ -5322,6 +6002,41 @@ function mapInventoryProductRow(row) {
     salePrice: Number(row.sale_price || 0),
     notes: row.notes || "",
     isActive: Boolean(row.is_active),
+    createdAt: row.created_at || null,
+    updatedAt: row.updated_at || null,
+  };
+}
+
+function mapBusinessProductRow(row) {
+  return {
+    id: Number(row.id || 0),
+    name: row.name || "",
+    businessLine: row.business_line || "",
+    itemType: row.item_type || "Producto",
+    category: row.category || "",
+    defaultAmount: Number(row.default_amount || 0),
+    directInventoryProductId: Number(row.direct_inventory_product_id || 0),
+    directInventoryProductName: row.direct_inventory_product_name || "",
+    directInventoryProductUnitName: row.direct_inventory_product_unit_name || "",
+    directInventoryQuantity: Number(row.direct_inventory_quantity || 0),
+    notes: row.notes || "",
+    isActive: Boolean(row.is_active),
+    createdAt: row.created_at || null,
+    updatedAt: row.updated_at || null,
+  };
+}
+
+function mapBusinessProductComponentRow(row) {
+  return {
+    id: Number(row.id || 0),
+    businessProductId: Number(row.business_product_id || 0),
+    inventoryProductId: Number(row.inventory_product_id || 0),
+    inventoryProductName: row.inventory_product_name || "",
+    inventoryProductArea: row.inventory_product_area || "",
+    inventoryProductUnitName: row.inventory_product_unit_name || "",
+    quantity: Number(row.quantity || 0),
+    notes: row.notes || "",
+    sortOrder: Number(row.sort_order || 0),
     createdAt: row.created_at || null,
     updatedAt: row.updated_at || null,
   };
@@ -5396,6 +6111,7 @@ function mapMovementRow(row) {
     fecha,
     tipo: row.movement_type,
     categoria: row.category,
+    businessProductId: Number(row.business_product_id || 0),
     cliente: row.client_name || "",
     descripcion: row.description,
     estadoPago: row.payment_status,

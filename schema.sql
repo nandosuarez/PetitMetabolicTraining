@@ -434,6 +434,33 @@ create table if not exists inventory_products (
   updated_at timestamptz not null default now()
 );
 
+create table if not exists business_products (
+  id bigserial primary key,
+  name text not null,
+  business_line text not null check (business_line in ('Gimnasio', 'Restaurante')),
+  item_type text not null default 'Producto',
+  category text not null default '',
+  default_amount numeric(14, 2) not null default 0,
+  direct_inventory_product_id bigint references inventory_products(id) on delete set null,
+  direct_inventory_quantity numeric(14, 2) not null default 0,
+  notes text not null default '',
+  is_active boolean not null default true,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create table if not exists business_product_components (
+  id bigserial primary key,
+  business_product_id bigint not null references business_products(id) on delete cascade,
+  inventory_product_id bigint not null references inventory_products(id) on delete restrict,
+  quantity numeric(14, 2) not null check (quantity > 0),
+  notes text not null default '',
+  sort_order integer not null default 1,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique (business_product_id, inventory_product_id)
+);
+
 create table if not exists inventory_stock_movements (
   id bigserial primary key,
   inventory_product_id bigint not null references inventory_products(id) on delete cascade,
@@ -454,6 +481,12 @@ create table if not exists inventory_stock_movements (
 
 create index if not exists inventory_stock_movements_product_idx
   on inventory_stock_movements(inventory_product_id, movement_date desc, created_at desc);
+
+create index if not exists business_products_line_idx
+  on business_products(business_line, is_active, name);
+
+create index if not exists business_product_components_product_idx
+  on business_product_components(business_product_id, sort_order, id);
 
 alter table movements
   add column if not exists inventory_product_id bigint;
@@ -477,6 +510,9 @@ alter table movements
 alter table movements
   add constraint movements_inventory_product_id_fkey
   foreign key (inventory_product_id) references inventory_products(id);
+
+alter table movements
+  add column if not exists business_product_id bigint references business_products(id) on delete set null;
 
 alter table inventory_stock_movements
   add column if not exists source_movement_id bigint references movements(id) on delete set null;

@@ -289,6 +289,16 @@
                   <select id="categoria" name="categoria" required></select>
                 </label>
 
+                <label>
+                  Producto / servicio
+                  <select id="movement-business-product-id" name="businessProductId">
+                    <option value="">Sin producto o servicio</option>
+                  </select>
+                  <span id="movement-business-product-feedback" class="inline-hint">
+                    Si seleccionas un producto o servicio, el sistema puede sugerir valor y descontar inventario segun su configuracion.
+                  </span>
+                </label>
+
                 <label class="search-field">
                   Cliente
                   <input
@@ -2140,6 +2150,13 @@
               <button
                 class="client-menu-button"
                 type="button"
+                data-inventory-panel="comercial"
+              >
+                Productos y servicios
+              </button>
+              <button
+                class="client-menu-button"
+                type="button"
                 data-inventory-panel="movimientos"
               >
                 Movimientos stock
@@ -2417,6 +2434,204 @@
                     <tbody id="inventory-products-table"></tbody>
                   </table>
                 </div>
+              </section>
+            </div>
+          </section>
+
+          <section id="inventory-panel-comercial" class="inventory-panel">
+            <div class="content-grid align-start">
+              <div class="content-grid two-up align-start">
+                <section class="panel">
+                  <div class="panel-head">
+                    <div>
+                      <p class="section-kicker">Catalogo comercial</p>
+                      <h3>Registrar producto o servicio</h3>
+                    </div>
+                  </div>
+
+                  <form id="inventory-business-product-form" class="form-grid">
+                    <input id="inventory-business-product-id" type="hidden" />
+
+                    <label>
+                      Nombre
+                      <input id="inventory-business-product-name" type="text" required />
+                    </label>
+
+                    <label>
+                      Linea
+                      <select id="inventory-business-product-line">
+                        <option value="Gimnasio">Gimnasio</option>
+                        <option value="Restaurante">Restaurante</option>
+                      </select>
+                    </label>
+
+                    <label>
+                      Tipo comercial
+                      <select id="inventory-business-product-type">
+                        <option value="Producto">Producto</option>
+                        <option value="Servicio">Servicio</option>
+                        <option value="Membresia">Membresia</option>
+                        <option value="Cena">Cena</option>
+                        <option value="Desayuno">Desayuno</option>
+                        <option value="Bebida">Bebida</option>
+                        <option value="Snack">Snack</option>
+                        <option value="Suplemento">Suplemento</option>
+                        <option value="Combo">Combo</option>
+                        <option value="Otro">Otro</option>
+                      </select>
+                    </label>
+
+                    <label>
+                      Categoria comercial
+                      <input
+                        id="inventory-business-product-category"
+                        type="text"
+                        placeholder="Ejemplo: Membresias, Cenas, Bebidas"
+                        required
+                      />
+                    </label>
+
+                    <label>
+                      Valor sugerido
+                      <input
+                        id="inventory-business-product-amount"
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value="0"
+                      />
+                    </label>
+
+                    <label>
+                      Producto directo de inventario
+                      <select id="inventory-business-product-direct-product-id">
+                        <option value="">Sin producto directo</option>
+                      </select>
+                    </label>
+
+                    <label>
+                      Cantidad por venta
+                      <input
+                        id="inventory-business-product-direct-quantity"
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value="0"
+                      />
+                    </label>
+
+                    <label class="span-2">
+                      Notas
+                      <textarea id="inventory-business-product-notes" rows="3"></textarea>
+                    </label>
+
+                    <div id="inventory-business-product-feedback" class="form-note span-2">
+                      Aqui puedes crear membresias, cenas, desayunos, bebidas o cualquier servicio/combo para vender sin depender solo de categorias.
+                    </div>
+
+                    <div class="form-actions span-2">
+                      <button class="primary-button" type="submit">
+                        Guardar producto o servicio
+                      </button>
+                      <button
+                        id="inventory-business-product-cancel-edit"
+                        class="ghost-button is-hidden"
+                        type="button"
+                      >
+                        Cancelar edicion
+                      </button>
+                    </div>
+                  </form>
+                </section>
+
+                <section class="panel">
+                  <div class="panel-head">
+                    <div>
+                      <p class="section-kicker">Consulta</p>
+                      <h3>Productos y servicios creados</h3>
+                    </div>
+                    <label class="inline-label portfolio-search">
+                      Buscar
+                      <input
+                        id="inventory-business-product-query"
+                        type="search"
+                        placeholder="Nombre, linea, tipo o categoria..."
+                      />
+                    </label>
+                  </div>
+
+                  <div id="inventory-business-products-metrics" class="mini-stats"></div>
+
+                  <div class="table-wrap">
+                    <table>
+                      <thead>
+                        <tr>
+                          <th>Nombre</th>
+                          <th>Linea</th>
+                          <th>Tipo</th>
+                          <th>Valor</th>
+                          <th>Inventario</th>
+                          <th>Acciones</th>
+                        </tr>
+                      </thead>
+                      <tbody id="inventory-business-products-table"></tbody>
+                    </table>
+                  </div>
+                </section>
+              </div>
+
+              <section class="panel">
+                <div class="panel-head">
+                  <div>
+                    <p class="section-kicker">Recetario</p>
+                    <h3 id="inventory-business-product-recipe-title">
+                      Receta del producto o servicio seleccionado
+                    </h3>
+                  </div>
+                </div>
+
+                <div id="inventory-business-product-recipe-context" class="collection-context">
+                  <strong>Sin seleccion activa</strong>
+                  <small>Guarda o edita un producto/servicio para asociarle insumos desde inventario.</small>
+                </div>
+
+                <form id="inventory-business-component-form" class="form-grid">
+                  <label class="span-2">
+                    Insumo
+                    <select id="inventory-business-component-product-id">
+                      <option value="">Selecciona un insumo del inventario</option>
+                    </select>
+                  </label>
+
+                  <label>
+                    Cantidad por venta
+                    <input
+                      id="inventory-business-component-quantity"
+                      type="number"
+                      min="0.01"
+                      step="0.01"
+                    />
+                  </label>
+
+                  <label class="span-2">
+                    Nota del insumo
+                    <input
+                      id="inventory-business-component-notes"
+                      type="text"
+                      placeholder="Ejemplo: porcion cocida, empaque, acompanamiento..."
+                    />
+                  </label>
+
+                  <div id="inventory-business-component-feedback" class="form-note span-2">
+                    Si esta venta descuenta varios ingredientes, agregalos aqui como receta.
+                  </div>
+
+                  <div class="form-actions span-2">
+                    <button class="primary-button" type="submit">Agregar insumo a la receta</button>
+                  </div>
+                </form>
+
+                <div id="inventory-business-components-list" class="stack-list"></div>
               </section>
             </div>
           </section>
