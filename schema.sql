@@ -423,6 +423,7 @@ create table if not exists inventory_products (
   name text not null,
   area text not null check (area in ('Gimnasio', 'Restaurante', 'Tienda', 'Suplementos', 'General')),
   item_kind text not null default 'Insumo',
+  tracks_stock boolean not null default true,
   category text not null,
   unit_name text not null,
   current_stock numeric(14, 2) not null default 0,
@@ -438,14 +439,22 @@ create table if not exists inventory_products (
 alter table if exists inventory_products
   add column if not exists item_kind text not null default 'Insumo';
 
+alter table if exists inventory_products
+  add column if not exists tracks_stock boolean not null default true;
+
 update inventory_products
 set item_kind = 'Insumo'
 where coalesce(trim(item_kind), '') = '';
+
+update inventory_products
+set tracks_stock = false
+where item_kind = 'Servicio';
 
 create table if not exists business_products (
   id bigserial primary key,
   name text not null,
   business_line text not null check (business_line in ('Gimnasio', 'Restaurante')),
+  inventory_product_id bigint references inventory_products(id) on delete set null,
   item_type text not null default 'Producto',
   category text not null default '',
   default_amount numeric(14, 2) not null default 0,
@@ -456,6 +465,14 @@ create table if not exists business_products (
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+
+alter table if exists business_products
+  add column if not exists inventory_product_id bigint references inventory_products(id) on delete set null;
+
+update business_products
+set inventory_product_id = direct_inventory_product_id
+where inventory_product_id is null
+  and direct_inventory_product_id is not null;
 
 create table if not exists business_product_components (
   id bigserial primary key,

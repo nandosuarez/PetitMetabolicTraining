@@ -1271,9 +1271,15 @@ app.get("/api/bootstrap", asyncHandler(async (req, res) => {
           `
             select
               bp.*,
+              bip.name as inventory_product_name,
+              bip.area as inventory_product_area,
+              bip.item_kind as inventory_product_kind,
+              bip.unit_name as inventory_product_unit_name,
               ip.name as direct_inventory_product_name,
               ip.unit_name as direct_inventory_product_unit_name
             from business_products bp
+            left join inventory_products bip
+              on bip.id = bp.inventory_product_id
             left join inventory_products ip
               on ip.id = bp.direct_inventory_product_id
             order by bp.is_active desc, bp.business_line asc, bp.item_type asc, bp.name asc, bp.id asc
@@ -2314,6 +2320,7 @@ app.post(
               name,
               area,
               item_kind,
+              tracks_stock,
               category,
               unit_name,
               current_stock,
@@ -2323,13 +2330,14 @@ app.post(
               notes,
               is_active
             )
-            values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, true)
+            values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, true)
             returning *
           `,
           [
             payload.name,
             payload.area,
             payload.itemKind,
+            payload.tracksStock,
             payload.category,
             payload.unitName,
             payload.currentStock,
@@ -2426,13 +2434,14 @@ app.put(
               name = $2,
               area = $3,
               item_kind = $4,
-              category = $5,
-              unit_name = $6,
-              current_stock = $7,
-              minimum_stock = $8,
-              cost_price = $9,
-              sale_price = $10,
-              notes = $11,
+              tracks_stock = $5,
+              category = $6,
+              unit_name = $7,
+              current_stock = $8,
+              minimum_stock = $9,
+              cost_price = $10,
+              sale_price = $11,
+              notes = $12,
               updated_at = now()
             where id = $1
             returning *
@@ -2442,6 +2451,7 @@ app.put(
             payload.name,
             payload.area,
             payload.itemKind,
+            payload.tracksStock,
             payload.category,
             payload.unitName,
             nextStock,
@@ -2645,6 +2655,7 @@ app.post(
         insert into business_products (
           name,
           business_line,
+          inventory_product_id,
           item_type,
           category,
           default_amount,
@@ -2653,12 +2664,13 @@ app.post(
           notes,
           is_active
         )
-        values ($1, $2, $3, $4, $5, $6, $7, $8, true)
+        values ($1, $2, $3, $4, $5, $6, $7, $8, $9, true)
         returning *
       `,
       [
         payload.name,
         payload.businessLine,
+        payload.inventoryProductId || null,
         payload.itemType,
         payload.category,
         payload.defaultAmount,
@@ -2690,12 +2702,14 @@ app.put(
         set
           name = $2,
           business_line = $3,
-          item_type = $4,
-          category = $5,
-          default_amount = $6,
-          direct_inventory_product_id = $7,
-          direct_inventory_quantity = $8,
-          notes = $9,
+          inventory_product_id = $4,
+          item_type = $5,
+          category = $6,
+          default_amount = $7,
+          direct_inventory_product_id = $8,
+          direct_inventory_quantity = $9,
+          notes = $10,
+          is_active = true,
           updated_at = now()
         where id = $1
         returning *
@@ -2704,6 +2718,7 @@ app.put(
         productId,
         payload.name,
         payload.businessLine,
+        payload.inventoryProductId || null,
         payload.itemType,
         payload.category,
         payload.defaultAmount,
@@ -2931,15 +2946,19 @@ function normalizeInventoryAssetPayload(body) {
 }
 
 function normalizeInventoryProductPayload(body) {
+  const itemKind = String(body.itemKind || "").trim() || "Insumo";
+  const tracksStock = Boolean(body.tracksStock) && itemKind !== "Servicio";
+
   return {
     name: String(body.name || "").trim(),
     area: String(body.area || "").trim(),
-    itemKind: String(body.itemKind || "").trim() || "Insumo",
+    itemKind,
+    tracksStock,
     category: String(body.category || "").trim(),
     unitName: String(body.unitName || "").trim(),
-    currentStock: Math.max(Number(body.currentStock || 0), 0),
-    minimumStock: Math.max(Number(body.minimumStock || 0), 0),
-    costPrice: Math.max(Number(body.costPrice || 0), 0),
+    currentStock: tracksStock ? Math.max(Number(body.currentStock || 0), 0) : 0,
+    minimumStock: tracksStock ? Math.max(Number(body.minimumStock || 0), 0) : 0,
+    costPrice: tracksStock ? Math.max(Number(body.costPrice || 0), 0) : 0,
     salePrice: Math.max(Number(body.salePrice || 0), 0),
     notes: String(body.notes || "").trim(),
   };
@@ -2958,12 +2977,16 @@ function normalizeInventoryStockMovementPayload(body) {
 
 function normalizeBusinessProductPayload(body) {
   const directInventoryProductId = Number(body.directInventoryProductId || 0);
+  const inventoryProductId = Number(body.inventoryProductId || 0);
   const category = String(body.category || "").trim();
   const itemType = String(body.itemType || "").trim();
 
   return {
     name: String(body.name || "").trim(),
     businessLine: String(body.businessLine || "").trim(),
+    inventoryProductId: Number.isInteger(inventoryProductId)
+      ? inventoryProductId
+      : 0,
     itemType: itemType || category || "Producto",
     category,
     defaultAmount: Math.max(Number(body.defaultAmount || 0), 0),
@@ -3067,6 +3090,10 @@ function validateInventoryProductPayload(payload) {
 
   if (!payload.unitName) {
     throw httpError(400, "La unidad del producto es obligatoria.");
+  }
+
+  if (payload.itemKind === "Servicio" && payload.tracksStock) {
+    throw httpError(400, "Un servicio no puede manejar stock.");
   }
 }
 
@@ -6014,6 +6041,7 @@ function mapInventoryProductRow(row) {
     name: row.name || "",
     area: row.area || "",
     itemKind: row.item_kind || "Insumo",
+    tracksStock: Boolean(row.tracks_stock),
     category: row.category || "",
     unitName: row.unit_name || "",
     currentStock: Number(row.current_stock || 0),
@@ -6032,6 +6060,11 @@ function mapBusinessProductRow(row) {
     id: Number(row.id || 0),
     name: row.name || "",
     businessLine: row.business_line || "",
+    inventoryProductId: Number(row.inventory_product_id || 0),
+    inventoryProductName: row.inventory_product_name || "",
+    inventoryProductArea: row.inventory_product_area || "",
+    inventoryProductKind: row.inventory_product_kind || "",
+    inventoryProductUnitName: row.inventory_product_unit_name || "",
     itemType: row.item_type || "Producto",
     category: row.category || "",
     defaultAmount: Number(row.default_amount || 0),

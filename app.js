@@ -306,15 +306,38 @@ const elements = {
   inventoryAssetsTable: document.getElementById("inventory-assets-table"),
   inventoryProductForm: document.getElementById("inventory-product-form"),
   inventoryProductId: document.getElementById("inventory-product-id"),
+  inventoryProductBusinessProductId: document.getElementById(
+    "inventory-product-business-product-id"
+  ),
   inventoryProductName: document.getElementById("inventory-product-name"),
   inventoryProductArea: document.getElementById("inventory-product-area"),
+  inventoryProductOfferType: document.getElementById("inventory-product-offer-type"),
   inventoryProductKind: document.getElementById("inventory-product-kind"),
+  inventoryProductIsSellable: document.getElementById("inventory-product-is-sellable"),
+  inventoryProductTracksStock: document.getElementById("inventory-product-tracks-stock"),
+  inventoryProductIsIngredient: document.getElementById("inventory-product-is-ingredient"),
+  inventoryProductIsDirectSale: document.getElementById("inventory-product-is-direct-sale"),
   inventoryProductCategory: document.getElementById("inventory-product-category"),
+  inventoryProductBusinessLine: document.getElementById(
+    "inventory-product-business-line"
+  ),
+  inventoryProductBusinessCategory: document.getElementById(
+    "inventory-product-business-category"
+  ),
+  inventoryProductBusinessDetail: document.getElementById(
+    "inventory-product-business-detail"
+  ),
   inventoryProductUnit: document.getElementById("inventory-product-unit"),
   inventoryProductCurrentStock: document.getElementById("inventory-product-current-stock"),
   inventoryProductMinimumStock: document.getElementById("inventory-product-minimum-stock"),
   inventoryProductCostPrice: document.getElementById("inventory-product-cost-price"),
   inventoryProductSalePrice: document.getElementById("inventory-product-sale-price"),
+  inventoryProductBusinessAmount: document.getElementById(
+    "inventory-product-business-amount"
+  ),
+  inventoryProductDirectQuantity: document.getElementById(
+    "inventory-product-direct-quantity"
+  ),
   inventoryProductNotes: document.getElementById("inventory-product-notes"),
   inventoryProductFeedback: document.getElementById("inventory-product-feedback"),
   inventoryProductCancelEdit: document.getElementById("inventory-product-cancel-edit"),
@@ -1025,6 +1048,36 @@ function bindEvents() {
     elements.inventoryProductKind,
     "change",
     syncInventoryProductKindFields
+  );
+  addListener(
+    elements.inventoryProductOfferType,
+    "change",
+    syncUnifiedInventorySaleFields
+  );
+  addListener(
+    elements.inventoryProductIsSellable,
+    "change",
+    syncUnifiedInventorySaleFields
+  );
+  addListener(
+    elements.inventoryProductTracksStock,
+    "change",
+    syncUnifiedInventorySaleFields
+  );
+  addListener(
+    elements.inventoryProductIsIngredient,
+    "change",
+    syncUnifiedInventorySaleFields
+  );
+  addListener(
+    elements.inventoryProductIsDirectSale,
+    "change",
+    syncUnifiedInventorySaleFields
+  );
+  addListener(
+    elements.inventoryProductBusinessLine,
+    "change",
+    syncUnifiedInventorySaleFields
   );
   addListener(elements.inventoryProductQuery, "input", renderInventoryView);
   addListener(
@@ -3546,6 +3599,8 @@ function renderInventoryView() {
 
   fillInventoryProductSelect();
   syncInventoryProductKindFields();
+  fillInventoryProductBusinessCategoryOptions();
+  syncUnifiedInventorySaleFields();
   fillInventoryBusinessProductCategoryOptions();
   fillBusinessProductDirectInventoryOptions();
   fillBusinessProductComponentInventoryOptions();
@@ -3566,7 +3621,7 @@ function renderInventorySummary() {
   const activeAssets = assets.filter((item) => item.isActive);
   const activeProducts = products.filter((item) => item.isActive);
   const lowStockProducts = activeProducts.filter(
-    (item) => item.currentStock <= item.minimumStock
+    (item) => isInventoryProductStockTracked(item) && item.currentStock <= item.minimumStock
   );
   const assetValue = activeAssets.reduce(
     (total, item) => total + Number(item.purchaseValue || 0),
@@ -3574,7 +3629,10 @@ function renderInventorySummary() {
   );
   const stockValue = activeProducts.reduce(
     (total, item) =>
-      total + Number(item.currentStock || 0) * Number(item.costPrice || 0),
+      total +
+      (isInventoryProductStockTracked(item)
+        ? Number(item.currentStock || 0) * Number(item.costPrice || 0)
+        : 0),
     0
   );
 
@@ -3585,9 +3643,9 @@ function renderInventorySummary() {
       `${assets.length} registros · Valor ${formatCurrency(assetValue)}`
     ),
     createStatCard(
-      "Base inventario",
+      "Productos y servicios",
       String(activeProducts.length),
-      `${lowStockProducts.length} con stock bajo`
+      `${lowStockProducts.length} inventariables con stock bajo`
     ),
     createStatCard(
       "Costo inventario",
@@ -3608,6 +3666,10 @@ function renderInventorySummary() {
 }
 
 function isInventoryProductStockTracked(item) {
+  if (item?.tracksStock === true || item?.tracksStock === false) {
+    return Boolean(item.tracksStock);
+  }
+
   return (item?.itemKind || "Insumo") !== "Servicio";
 }
 
@@ -3793,7 +3855,7 @@ function renderInventoryProductsTable() {
   if (!items.length) {
     elements.inventoryProductsTable.innerHTML = `
       <tr>
-        <td colspan="7" class="empty-state">No hay items de inventario registrados para esos filtros.</td>
+        <td colspan="7" class="empty-state">No hay productos o servicios registrados para esos filtros.</td>
       </tr>
     `;
     return;
@@ -3806,6 +3868,23 @@ function renderInventoryProductsTable() {
         item.isActive &&
         isInventoryProductStockTracked(item) &&
         item.currentStock <= item.minimumStock;
+      const linkedBusinessProduct = getLinkedBusinessProductForInventoryProduct(item.id);
+      const recipeComponents = linkedBusinessProduct
+        ? getBusinessProductComponents(linkedBusinessProduct.id)
+        : [];
+      const classificationHints = [
+        isInventoryProductStockTracked(item) ? "Inventariable" : "Sin stock",
+        item.itemKind || "Insumo",
+        linkedBusinessProduct?.isActive ? "Se vende" : "",
+        item.itemKind === "Insumo" ? "Es insumo" : "",
+        linkedBusinessProduct?.isActive && linkedBusinessProduct?.directInventoryProductId > 0
+          ? "Venta directa"
+          : "",
+        linkedBusinessProduct?.isActive && recipeComponents.length > 0 ? "Con receta" : "",
+      ].filter(Boolean);
+      const saleValue = linkedBusinessProduct?.isActive
+        ? linkedBusinessProduct?.defaultAmount || item.salePrice || 0
+        : 0;
       return `
         <tr class="${isLowStock ? "inventory-row-low-stock" : ""}">
           <td>
@@ -3813,7 +3892,7 @@ function renderInventoryProductsTable() {
             <div class="inline-hint">${escapeHtml(item.category)} · ${escapeHtml(item.unitName)}</div>
           </td>
           <td>${escapeHtml(item.area)}</td>
-          <td>${escapeHtml(item.itemKind || "Insumo")}</td>
+          <td>${escapeHtml(classificationHints.join(" | "))}</td>
           <td>${escapeHtml(
             isInventoryProductStockTracked(item)
               ? formatInventoryQuantity(item.currentStock, item.unitName)
@@ -3824,15 +3903,15 @@ function renderInventoryProductsTable() {
               ? formatInventoryQuantity(item.minimumStock, item.unitName)
               : "-"
           )}</td>
-          <td>${formatCurrency(item.salePrice)}</td>
+          <td>${formatCurrency(saleValue)}</td>
           <td>
             <div class="row-actions row-actions--compact">
               <button
                 class="table-button icon-button"
                 type="button"
                 data-inventory-product-edit-id="${item.id}"
-                title="Editar item de inventario"
-                aria-label="Editar item de inventario"
+                title="Editar producto o servicio"
+                aria-label="Editar producto o servicio"
               >
                 <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
                   <path d="M4 20h4l10-10-4-4L4 16v4Z"></path>
@@ -3844,8 +3923,8 @@ function renderInventoryProductsTable() {
                 type="button"
                 data-inventory-product-status-id="${item.id}"
                 data-inventory-product-next-active="${nextActive}"
-                title="${item.isActive ? "Inactivar item de inventario" : "Activar item de inventario"}"
-                aria-label="${item.isActive ? "Inactivar item de inventario" : "Activar item de inventario"}"
+                title="${item.isActive ? "Inactivar producto o servicio" : "Activar producto o servicio"}"
+                aria-label="${item.isActive ? "Inactivar producto o servicio" : "Activar producto o servicio"}"
               >
                 <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
                   <path d="M12 3v7"></path>
@@ -3971,7 +4050,10 @@ function fillBusinessProductDirectInventoryOptions(selectedValue = "") {
 
 function fillBusinessProductComponentInventoryOptions(selectedValue = "") {
   const products = (state.inventoryProducts || []).filter(
-    (item) => item.isActive && isInventoryProductStockTracked(item)
+    (item) =>
+      item.isActive &&
+      isInventoryProductStockTracked(item) &&
+      item.itemKind === "Insumo"
   );
   fillSelectFromRecords(elements.inventoryBusinessComponentProductId, products, {
     selectedValue: String(selectedValue || elements.inventoryBusinessComponentProductId?.value || ""),
@@ -4082,8 +4164,8 @@ function renderInventoryBusinessProducts() {
 
   if (elements.inventoryBusinessProductRecipeTitle) {
     elements.inventoryBusinessProductRecipeTitle.textContent = selectedProduct
-      ? `Receta de ${selectedProduct.name}`
-      : "Receta del producto o servicio seleccionado";
+      ? `Receta y descuento automatico de ${selectedProduct.name}`
+      : "Configuracion de receta y descuento automatico";
   }
 
   if (elements.inventoryBusinessProductRecipeContext) {
@@ -4098,7 +4180,7 @@ function renderInventoryBusinessProducts() {
       `
       : `
         <strong>Sin seleccion activa</strong>
-        <small>Guarda o edita un producto/servicio para asociarle insumos desde inventario.</small>
+        <small>Edita un producto o servicio arriba para definir si se vende directo o si descuenta varios insumos por receta.</small>
       `;
   }
 
@@ -4225,7 +4307,7 @@ function fillInventoryProductSelect(selectedValue = "") {
 
   if (!products.length) {
     elements.inventoryMovementProductId.innerHTML = `
-      <option value="">Primero crea un producto de inventario</option>
+      <option value="">Primero crea un producto inventariable</option>
     `;
     elements.inventoryMovementProductId.disabled = true;
     return;
@@ -4255,17 +4337,162 @@ function syncInventoryProductKindFields() {
     return;
   }
 
-  const isService = elements.inventoryProductKind.value === "Servicio";
+  const isService =
+    elements.inventoryProductOfferType?.value === "Servicio" ||
+    elements.inventoryProductKind.value === "Servicio";
+  const tracksStock = Boolean(
+    elements.inventoryProductTracksStock?.checked && !isService
+  );
 
   if (isService) {
     elements.inventoryProductUnit.value = "Servicio";
     elements.inventoryProductCurrentStock.value = "0";
     elements.inventoryProductMinimumStock.value = "0";
+    elements.inventoryProductCostPrice.value = "0";
   }
 
   elements.inventoryProductUnit.disabled = isService;
-  elements.inventoryProductCurrentStock.disabled = isService;
-  elements.inventoryProductMinimumStock.disabled = isService;
+  elements.inventoryProductCurrentStock.disabled = !tracksStock;
+  elements.inventoryProductMinimumStock.disabled = !tracksStock;
+  elements.inventoryProductCostPrice.disabled = !tracksStock;
+
+  const stockFields = document.querySelectorAll(".inventory-stock-config");
+  stockFields.forEach((field) => {
+    field.classList.toggle("is-hidden", !tracksStock);
+    field.setAttribute("aria-hidden", String(!tracksStock));
+  });
+
+  if (!tracksStock) {
+    elements.inventoryProductCurrentStock.value = "0";
+    elements.inventoryProductMinimumStock.value = "0";
+    elements.inventoryProductCostPrice.value = "0";
+  }
+}
+
+function getLinkedBusinessProductForInventoryProduct(inventoryProductId) {
+  return (state.businessProducts || []).find(
+    (item) => Number(item.inventoryProductId || 0) === Number(inventoryProductId || 0)
+  );
+}
+
+function fillInventoryProductBusinessCategoryOptions(selectedValue = "") {
+  fillSelect(
+    elements.inventoryProductBusinessCategory,
+    getActiveCategoryValuesForLine(
+      elements.inventoryProductBusinessLine?.value || "Gimnasio"
+    ),
+    {
+      includeValue: String(
+        selectedValue || elements.inventoryProductBusinessCategory?.value || ""
+      ),
+    }
+  );
+}
+
+function syncUnifiedInventorySaleFields() {
+  if (!elements.inventoryProductForm) {
+    return;
+  }
+
+  const isService = elements.inventoryProductOfferType?.value === "Servicio";
+  const isSellable = Boolean(elements.inventoryProductIsSellable?.checked || isService);
+  const isIngredient = Boolean(elements.inventoryProductIsIngredient?.checked);
+  const isDirectSale = Boolean(
+    elements.inventoryProductIsDirectSale?.checked && isSellable && !isService
+  );
+  let tracksStock = Boolean(elements.inventoryProductTracksStock?.checked && !isService);
+
+  if (elements.inventoryProductIsSellable && isService) {
+    elements.inventoryProductIsSellable.checked = true;
+    elements.inventoryProductIsSellable.disabled = true;
+  } else if (elements.inventoryProductIsSellable) {
+    elements.inventoryProductIsSellable.disabled = false;
+  }
+
+  if (elements.inventoryProductIsIngredient) {
+    elements.inventoryProductIsIngredient.disabled = isService;
+    if (isService) {
+      elements.inventoryProductIsIngredient.checked = false;
+    }
+  }
+
+  if (elements.inventoryProductIsDirectSale) {
+    elements.inventoryProductIsDirectSale.disabled = !isSellable || isService;
+    if (!isSellable || isService) {
+      elements.inventoryProductIsDirectSale.checked = false;
+    }
+  }
+
+  if (isService) {
+    tracksStock = false;
+  } else if (isIngredient || isDirectSale) {
+    tracksStock = true;
+  }
+
+  if (elements.inventoryProductTracksStock) {
+    elements.inventoryProductTracksStock.checked = tracksStock;
+    elements.inventoryProductTracksStock.disabled =
+      isService || isIngredient || isDirectSale;
+  }
+
+  if (elements.inventoryProductKind) {
+    if (isService) {
+      elements.inventoryProductKind.value = "Servicio";
+      elements.inventoryProductKind.disabled = true;
+    } else {
+      if (isIngredient) {
+        elements.inventoryProductKind.value = "Insumo";
+      } else if (isSellable) {
+        elements.inventoryProductKind.value = "Producto de venta";
+      } else {
+        elements.inventoryProductKind.value = "Suministro interno";
+      }
+      elements.inventoryProductKind.disabled = true;
+    }
+  }
+
+  syncInventoryProductKindFields();
+  fillInventoryProductBusinessCategoryOptions();
+
+  const saleFields = document.querySelectorAll(".inventory-sale-config");
+  saleFields.forEach((field) => {
+    field.classList.toggle("is-hidden", !isSellable);
+    field.setAttribute("aria-hidden", String(!isSellable));
+  });
+
+  if (elements.inventoryProductBusinessAmount) {
+    elements.inventoryProductBusinessAmount.disabled = !isSellable;
+  }
+
+  if (elements.inventoryProductBusinessLine) {
+    elements.inventoryProductBusinessLine.disabled = !isSellable;
+  }
+
+  if (elements.inventoryProductBusinessCategory) {
+    elements.inventoryProductBusinessCategory.disabled = !isSellable;
+  }
+
+  if (elements.inventoryProductBusinessDetail) {
+    elements.inventoryProductBusinessDetail.disabled = !isSellable;
+  }
+
+  if (elements.inventoryProductDirectQuantity) {
+    elements.inventoryProductDirectQuantity.disabled = !isDirectSale;
+    if (!isDirectSale) {
+      elements.inventoryProductDirectQuantity.value = "1";
+    }
+  }
+
+  if (isSellable && elements.inventoryProductBusinessAmount) {
+    const normalizedAmount = Math.max(
+      Number(elements.inventoryProductBusinessAmount.value || elements.inventoryProductSalePrice.value || 0),
+      0
+    );
+    elements.inventoryProductBusinessAmount.value = String(normalizedAmount);
+    elements.inventoryProductSalePrice.value = String(normalizedAmount);
+  } else if (!isSellable && elements.inventoryProductSalePrice) {
+    elements.inventoryProductSalePrice.value = "0";
+  }
 }
 
 async function handleInventoryAssetSubmit(event) {
@@ -4406,33 +4633,110 @@ async function handleInventoryProductSubmit(event) {
   event.preventDefault();
 
   const productId = Number(elements.inventoryProductId?.value || 0);
+  const businessProductId = Number(
+    elements.inventoryProductBusinessProductId?.value || 0
+  );
+  const isService = elements.inventoryProductOfferType.value === "Servicio";
+  const isSellable = Boolean(elements.inventoryProductIsSellable.checked || isService);
+  const isIngredient = Boolean(elements.inventoryProductIsIngredient.checked);
+  const isDirectSale = Boolean(
+    elements.inventoryProductIsDirectSale.checked && isSellable && !isService
+  );
+  const tracksStock = Boolean(
+    elements.inventoryProductTracksStock.checked && !isService
+  );
+  const resolvedItemKind = isService
+    ? "Servicio"
+    : isIngredient
+      ? "Insumo"
+      : isSellable
+        ? "Producto de venta"
+        : "Suministro interno";
   const payload = {
     name: elements.inventoryProductName.value.trim(),
     area: elements.inventoryProductArea.value,
-    itemKind: elements.inventoryProductKind.value,
+    itemKind: resolvedItemKind,
+    tracksStock,
     category: elements.inventoryProductCategory.value.trim(),
-    unitName: elements.inventoryProductUnit.value,
-    currentStock: Number(elements.inventoryProductCurrentStock.value || 0),
-    minimumStock: Number(elements.inventoryProductMinimumStock.value || 0),
-    costPrice: Number(elements.inventoryProductCostPrice.value || 0),
-    salePrice: Number(elements.inventoryProductSalePrice.value || 0),
+    unitName: isService ? "Servicio" : elements.inventoryProductUnit.value,
+    currentStock: tracksStock ? Number(elements.inventoryProductCurrentStock.value || 0) : 0,
+    minimumStock: tracksStock ? Number(elements.inventoryProductMinimumStock.value || 0) : 0,
+    costPrice: tracksStock ? Number(elements.inventoryProductCostPrice.value || 0) : 0,
+    salePrice: isSellable
+      ? Number(elements.inventoryProductBusinessAmount.value || 0)
+      : 0,
     notes: elements.inventoryProductNotes.value.trim(),
   };
 
   if (!payload.name || !payload.category) {
     elements.inventoryProductFeedback.textContent =
-      "El nombre y la categoria del item de inventario son obligatorios.";
+      "El nombre y la categoria del producto o servicio son obligatorios.";
+    return;
+  }
+
+  if (
+    isSellable &&
+    !String(elements.inventoryProductBusinessCategory.value || "").trim()
+  ) {
+    elements.inventoryProductFeedback.textContent =
+      "Si este producto o servicio se vende al cliente, debes escoger la categoria de venta.";
     return;
   }
 
   try {
-    await apiRequest(
+    const savedInventoryProduct = await apiRequest(
       productId > 0 ? `/api/inventory/products/${productId}` : "/api/inventory/products",
       {
         method: productId > 0 ? "PUT" : "POST",
         body: JSON.stringify(payload),
       }
     );
+
+    if (isSellable) {
+      const saleCategory = String(
+        elements.inventoryProductBusinessCategory.value || ""
+      ).trim();
+
+      const businessPayload = {
+        name: payload.name,
+        businessLine: elements.inventoryProductBusinessLine.value,
+        inventoryProductId: Number(savedInventoryProduct.id || 0),
+        itemType:
+          String(elements.inventoryProductBusinessDetail.value || "").trim() ||
+          saleCategory,
+        category: saleCategory,
+        defaultAmount: Number(
+          elements.inventoryProductBusinessAmount.value || payload.salePrice || 0
+        ),
+        directInventoryProductId: isDirectSale ? Number(savedInventoryProduct.id || 0) : 0,
+        directInventoryQuantity: isDirectSale
+          ? Math.max(Number(elements.inventoryProductDirectQuantity.value || 1), 0.01)
+          : 0,
+        notes: payload.notes,
+      };
+
+      const savedBusinessProduct = await apiRequest(
+        businessProductId > 0
+          ? `/api/business-products/${businessProductId}`
+          : "/api/business-products",
+        {
+          method: businessProductId > 0 ? "PUT" : "POST",
+          body: JSON.stringify(businessPayload),
+        }
+      );
+
+      if (elements.inventoryBusinessProductId) {
+        elements.inventoryBusinessProductId.value = String(savedBusinessProduct.id || "");
+      }
+    } else if (businessProductId > 0) {
+      await apiRequest(`/api/business-products/${businessProductId}/active`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          isActive: false,
+        }),
+      });
+    }
+
     resetInventoryProductForm();
     await loadBootstrap();
     switchView("inventario", {
@@ -4440,8 +4744,8 @@ async function handleInventoryProductSubmit(event) {
     });
     elements.inventoryProductFeedback.textContent =
       productId > 0
-        ? "Item de inventario actualizado correctamente."
-        : "Item de inventario registrado correctamente.";
+        ? "Producto o servicio actualizado correctamente."
+        : "Producto o servicio registrado correctamente.";
   } catch (error) {
     elements.inventoryProductFeedback.textContent = error.message;
   }
@@ -4454,21 +4758,36 @@ function resetInventoryProductForm() {
 
   elements.inventoryProductForm.reset();
   elements.inventoryProductId.value = "";
+  elements.inventoryProductBusinessProductId.value = "";
+  if (elements.inventoryBusinessProductId) {
+    elements.inventoryBusinessProductId.value = "";
+  }
   elements.inventoryProductArea.value = "Gimnasio";
+  elements.inventoryProductOfferType.value = "Producto";
   elements.inventoryProductKind.value = "Insumo";
+  elements.inventoryProductIsSellable.checked = false;
+  elements.inventoryProductTracksStock.checked = true;
+  elements.inventoryProductIsIngredient.checked = false;
+  elements.inventoryProductIsDirectSale.checked = false;
+  elements.inventoryProductBusinessLine.value = "Gimnasio";
+  fillInventoryProductBusinessCategoryOptions("");
+  elements.inventoryProductBusinessDetail.value = "";
+  elements.inventoryProductBusinessAmount.value = "0";
+  elements.inventoryProductDirectQuantity.value = "1";
   elements.inventoryProductUnit.value = "Unidad";
   elements.inventoryProductCurrentStock.value = "0";
   elements.inventoryProductMinimumStock.value = "0";
   elements.inventoryProductCostPrice.value = "0";
   elements.inventoryProductSalePrice.value = "0";
   syncInventoryProductKindFields();
+  syncUnifiedInventorySaleFields();
   elements.inventoryProductFeedback.textContent =
-    "Aqui registras la base del inventario: insumos, productos de venta, servicios, empaques o suministros con su stock, costo y precio.";
+    "Aqui registras una sola vez cada producto o servicio y defines si se vende, si maneja stock, si actua como insumo y si descuenta directo o por receta.";
   elements.inventoryProductCancelEdit.classList.add("is-hidden");
 
   const submitButton = elements.inventoryProductForm.querySelector('button[type="submit"]');
   if (submitButton) {
-    submitButton.textContent = "Guardar item";
+    submitButton.textContent = "Guardar producto o servicio";
   }
 }
 
@@ -4477,8 +4796,12 @@ async function handleInventoryProductsTableClick(event) {
   const statusButton = event.target.closest("[data-inventory-product-status-id]");
 
   if (editButton) {
+    const inventoryProductId = editButton.dataset.inventoryProductEditId;
     const product = (state.inventoryProducts || []).find(
-      (item) => String(item.id) === String(editButton.dataset.inventoryProductEditId)
+      (item) => String(item.id) === String(inventoryProductId)
+    );
+    const linkedBusinessProduct = getLinkedBusinessProductForInventoryProduct(
+      inventoryProductId
     );
 
     if (!product) {
@@ -4488,19 +4811,49 @@ async function handleInventoryProductsTableClick(event) {
     }
 
     elements.inventoryProductId.value = String(product.id);
+    elements.inventoryProductBusinessProductId.value = String(
+      linkedBusinessProduct?.id || ""
+    );
     elements.inventoryProductName.value = product.name || "";
     elements.inventoryProductArea.value = product.area || "Gimnasio";
+    elements.inventoryProductOfferType.value =
+      product.itemKind === "Servicio" ? "Servicio" : "Producto";
     elements.inventoryProductKind.value = product.itemKind || "Insumo";
+    elements.inventoryProductIsSellable.checked = Boolean(linkedBusinessProduct?.isActive);
+    elements.inventoryProductTracksStock.checked = isInventoryProductStockTracked(product);
+    elements.inventoryProductIsIngredient.checked =
+      product.itemKind === "Insumo";
+    elements.inventoryProductIsDirectSale.checked = Boolean(
+      linkedBusinessProduct?.isActive &&
+        Number(linkedBusinessProduct.directInventoryProductId || 0) ===
+          Number(product.id)
+    );
     elements.inventoryProductCategory.value = product.category || "";
+    elements.inventoryProductBusinessLine.value =
+      linkedBusinessProduct?.businessLine || "Gimnasio";
+    fillInventoryProductBusinessCategoryOptions(
+      linkedBusinessProduct?.category || ""
+    );
+    elements.inventoryProductBusinessDetail.value =
+      linkedBusinessProduct && linkedBusinessProduct.itemType !== linkedBusinessProduct.category
+        ? linkedBusinessProduct.itemType || ""
+        : "";
     elements.inventoryProductUnit.value = product.unitName || "Unidad";
     elements.inventoryProductCurrentStock.value = String(product.currentStock || 0);
     elements.inventoryProductMinimumStock.value = String(product.minimumStock || 0);
     elements.inventoryProductCostPrice.value = String(product.costPrice || 0);
     elements.inventoryProductSalePrice.value = String(product.salePrice || 0);
+    elements.inventoryProductBusinessAmount.value = String(
+      linkedBusinessProduct?.defaultAmount || product.salePrice || 0
+    );
+    elements.inventoryProductDirectQuantity.value = String(
+      linkedBusinessProduct?.directInventoryQuantity || 1
+    );
     syncInventoryProductKindFields();
+    syncUnifiedInventorySaleFields();
     elements.inventoryProductNotes.value = product.notes || "";
     elements.inventoryProductFeedback.textContent =
-      "Actualiza la ficha del producto. Si cambias el stock, el sistema deja trazabilidad del ajuste.";
+      "Actualiza la ficha del producto o servicio. Si es inventariable y cambias el stock, el sistema deja trazabilidad del ajuste.";
     elements.inventoryProductCancelEdit.classList.remove("is-hidden");
 
     const submitButton = elements.inventoryProductForm.querySelector('button[type="submit"]');
@@ -4511,6 +4864,12 @@ async function handleInventoryProductsTableClick(event) {
     switchView("inventario", {
       inventoryPanel: "productos",
     });
+    if (elements.inventoryBusinessProductId) {
+      elements.inventoryBusinessProductId.value = String(
+        linkedBusinessProduct?.id || ""
+      );
+    }
+    renderInventoryBusinessProducts();
     elements.inventoryProductName.focus();
     return;
   }
@@ -6423,8 +6782,8 @@ function renderInventoryBusinessProducts() {
 
   if (elements.inventoryBusinessProductRecipeTitle) {
     elements.inventoryBusinessProductRecipeTitle.textContent = selectedProduct
-      ? `Receta de ${selectedProduct.name}`
-      : "Receta del producto o servicio seleccionado";
+      ? `Receta y descuento automatico de ${selectedProduct.name}`
+      : "Configuracion de receta y descuento automatico";
   }
 
   if (elements.inventoryBusinessProductRecipeContext) {
@@ -6441,7 +6800,7 @@ function renderInventoryBusinessProducts() {
       `
       : `
         <strong>Sin seleccion activa</strong>
-        <small>Guarda o edita un producto/servicio para asociarle insumos desde inventario.</small>
+        <small>Edita un producto o servicio arriba para definir si se vende directo o si descuenta varios insumos por receta.</small>
       `;
   }
 
@@ -10376,6 +10735,10 @@ function normalizeInventoryProducts(items) {
   return items.map((item) => ({
     ...item,
     id: Number(item.id || 0),
+    tracksStock:
+      item.tracksStock === true || item.tracksStock === false
+        ? Boolean(item.tracksStock)
+        : (item.itemKind || "Insumo") !== "Servicio",
     currentStock: Number(item.currentStock || 0),
     minimumStock: Number(item.minimumStock || 0),
     costPrice: Number(item.costPrice || 0),
@@ -10409,6 +10772,7 @@ function normalizeBusinessProducts(items) {
   return items.map((item) => ({
     ...item,
     id: Number(item.id || 0),
+    inventoryProductId: Number(item.inventoryProductId || 0),
     defaultAmount: Number(item.defaultAmount || 0),
     directInventoryProductId: Number(item.directInventoryProductId || 0),
     directInventoryQuantity: Number(item.directInventoryQuantity || 0),

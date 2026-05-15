@@ -2285,13 +2285,14 @@
               <section class="panel">
                 <div class="panel-head">
                   <div>
-                    <p class="section-kicker">Base inventariable</p>
-                    <h3>Registrar item de inventario</h3>
+                    <p class="section-kicker">Registro unificado</p>
+                    <h3>Registrar producto o servicio</h3>
                   </div>
                 </div>
 
                 <form id="inventory-product-form" class="form-grid">
                   <input id="inventory-product-id" type="hidden" />
+                  <input id="inventory-product-business-product-id" type="hidden" />
 
                   <label>
                     Nombre
@@ -2310,6 +2311,14 @@
                   </label>
 
                   <label>
+                    Producto o servicio
+                    <select id="inventory-product-offer-type">
+                      <option value="Producto">Producto</option>
+                      <option value="Servicio">Servicio</option>
+                    </select>
+                  </label>
+
+                  <label class="is-hidden" aria-hidden="true">
                     Clasificacion
                     <select id="inventory-product-kind">
                       <option value="Insumo">Insumo</option>
@@ -2320,9 +2329,51 @@
                     </select>
                   </label>
 
+                  <label class="checkbox-field">
+                    <input id="inventory-product-is-sellable" type="checkbox" />
+                    <span>Se vende al cliente</span>
+                  </label>
+
+                  <label class="checkbox-field">
+                    <input id="inventory-product-tracks-stock" type="checkbox" />
+                    <span>Es inventariable</span>
+                  </label>
+
+                  <label class="checkbox-field">
+                    <input id="inventory-product-is-ingredient" type="checkbox" />
+                    <span>Se usa como insumo</span>
+                  </label>
+
+                  <label class="checkbox-field">
+                    <input id="inventory-product-is-direct-sale" type="checkbox" />
+                    <span>Es venta directa</span>
+                  </label>
+
                   <label>
-                    Categoria
+                    Categoria interna
                     <input id="inventory-product-category" type="text" required />
+                  </label>
+
+                  <label class="inventory-sale-config">
+                    Linea de venta
+                    <select id="inventory-product-business-line">
+                      <option value="Gimnasio">Gimnasio</option>
+                      <option value="Restaurante">Restaurante</option>
+                    </select>
+                  </label>
+
+                  <label class="inventory-sale-config">
+                    Categoria comercial
+                    <select id="inventory-product-business-category"></select>
+                  </label>
+
+                  <label class="inventory-sale-config">
+                    Detalle de venta
+                    <input
+                      id="inventory-product-business-detail"
+                      type="text"
+                      placeholder="Ejemplo: mensual, individual, premium..."
+                    />
                   </label>
 
                   <label>
@@ -2339,7 +2390,7 @@
                     </select>
                   </label>
 
-                  <label>
+                  <label class="inventory-stock-config">
                     Stock actual
                     <input
                       id="inventory-product-current-stock"
@@ -2350,7 +2401,29 @@
                     />
                   </label>
 
-                  <label>
+                  <label class="inventory-sale-config">
+                    Valor sugerido de venta
+                    <input
+                      id="inventory-product-business-amount"
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value="0"
+                    />
+                  </label>
+
+                  <label class="inventory-sale-config">
+                    Cantidad por venta directa
+                    <input
+                      id="inventory-product-direct-quantity"
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value="1"
+                    />
+                  </label>
+
+                  <label class="inventory-stock-config">
                     Stock minimo
                     <input
                       id="inventory-product-minimum-stock"
@@ -2361,7 +2434,7 @@
                     />
                   </label>
 
-                  <label>
+                  <label class="inventory-stock-config">
                     Costo compra
                     <input
                       id="inventory-product-cost-price"
@@ -2372,7 +2445,7 @@
                     />
                   </label>
 
-                  <label>
+                  <label class="is-hidden" aria-hidden="true">
                     Precio venta
                     <input
                       id="inventory-product-sale-price"
@@ -2389,11 +2462,11 @@
                   </label>
 
                   <div id="inventory-product-feedback" class="form-note span-2">
-                    Aqui registras la base del inventario: insumos, productos de venta, servicios, empaques o suministros con su stock, costo y precio.
+                    Registra una sola vez el producto o servicio. Aqui decides si se vende, si es inventariable, si funciona como insumo y si la venta es directa o por receta.
                   </div>
 
                   <div class="form-actions span-2">
-                    <button class="primary-button" type="submit">Guardar producto</button>
+                    <button class="primary-button" type="submit">Guardar producto o servicio</button>
                     <button
                       id="inventory-product-cancel-edit"
                       class="ghost-button is-hidden"
@@ -2408,15 +2481,15 @@
               <section class="panel">
                 <div class="panel-head">
                   <div>
-                    <p class="section-kicker">Consulta base</p>
-                    <h3>Items de inventario registrados</h3>
+                    <p class="section-kicker">Consulta general</p>
+                    <h3>Productos y servicios registrados</h3>
                   </div>
                   <label class="inline-label portfolio-search">
                     Buscar
                     <input
                       id="inventory-product-query"
                       type="search"
-                      placeholder="Nombre, area, clasificacion o categoria..."
+                      placeholder="Nombre, area, categoria o clasificacion..."
                     />
                   </label>
                 </div>
@@ -2446,7 +2519,7 @@
           <section id="inventory-panel-comercial" class="inventory-panel">
             <div class="content-grid align-start">
               <div class="content-grid two-up align-start">
-                <section class="panel">
+                <section class="panel is-hidden" aria-hidden="true">
                   <div class="panel-head">
                     <div>
                       <p class="section-kicker">Venta y recetas</p>
@@ -2537,7 +2610,7 @@
                   </form>
                 </section>
 
-                <section class="panel">
+                <section class="panel is-hidden" aria-hidden="true">
                   <div class="panel-head">
                     <div>
                       <p class="section-kicker">Consulta</p>
@@ -2576,16 +2649,16 @@
               <section class="panel">
                 <div class="panel-head">
                   <div>
-                    <p class="section-kicker">Recetario</p>
+                    <p class="section-kicker">Recetas e inventario</p>
                     <h3 id="inventory-business-product-recipe-title">
-                      Receta del producto o servicio seleccionado
+                      Configuracion de receta y descuento automatico
                     </h3>
                   </div>
                 </div>
 
                 <div id="inventory-business-product-recipe-context" class="collection-context">
                   <strong>Sin seleccion activa</strong>
-                  <small>Guarda o edita un producto/servicio para asociarle insumos desde inventario.</small>
+                  <small>Edita un producto o servicio arriba para definir si se vende directo o si descuenta varios insumos por receta.</small>
                 </div>
 
                 <form id="inventory-business-component-form" class="form-grid">
