@@ -2313,6 +2313,7 @@ app.post(
             insert into inventory_products (
               name,
               area,
+              item_kind,
               category,
               unit_name,
               current_stock,
@@ -2322,12 +2323,13 @@ app.post(
               notes,
               is_active
             )
-            values ($1, $2, $3, $4, $5, $6, $7, $8, $9, true)
+            values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, true)
             returning *
           `,
           [
             payload.name,
             payload.area,
+            payload.itemKind,
             payload.category,
             payload.unitName,
             payload.currentStock,
@@ -2423,13 +2425,14 @@ app.put(
             set
               name = $2,
               area = $3,
-              category = $4,
-              unit_name = $5,
-              current_stock = $6,
-              minimum_stock = $7,
-              cost_price = $8,
-              sale_price = $9,
-              notes = $10,
+              item_kind = $4,
+              category = $5,
+              unit_name = $6,
+              current_stock = $7,
+              minimum_stock = $8,
+              cost_price = $9,
+              sale_price = $10,
+              notes = $11,
               updated_at = now()
             where id = $1
             returning *
@@ -2438,6 +2441,7 @@ app.put(
             productId,
             payload.name,
             payload.area,
+            payload.itemKind,
             payload.category,
             payload.unitName,
             nextStock,
@@ -2930,6 +2934,7 @@ function normalizeInventoryProductPayload(body) {
   return {
     name: String(body.name || "").trim(),
     area: String(body.area || "").trim(),
+    itemKind: String(body.itemKind || "").trim() || "Insumo",
     category: String(body.category || "").trim(),
     unitName: String(body.unitName || "").trim(),
     currentStock: Math.max(Number(body.currentStock || 0), 0),
@@ -3046,6 +3051,18 @@ function validateInventoryProductPayload(payload) {
 
   if (!payload.category) {
     throw httpError(400, "La categoria del producto es obligatoria.");
+  }
+
+  if (
+    ![
+      "Insumo",
+      "Producto de venta",
+      "Servicio",
+      "Empaque",
+      "Suministro interno",
+    ].includes(payload.itemKind)
+  ) {
+    throw httpError(400, "La clasificacion del producto no es valida.");
   }
 
   if (!payload.unitName) {
@@ -5996,6 +6013,7 @@ function mapInventoryProductRow(row) {
     id: Number(row.id || 0),
     name: row.name || "",
     area: row.area || "",
+    itemKind: row.item_kind || "Insumo",
     category: row.category || "",
     unitName: row.unit_name || "",
     currentStock: Number(row.current_stock || 0),

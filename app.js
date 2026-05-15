@@ -308,6 +308,7 @@ const elements = {
   inventoryProductId: document.getElementById("inventory-product-id"),
   inventoryProductName: document.getElementById("inventory-product-name"),
   inventoryProductArea: document.getElementById("inventory-product-area"),
+  inventoryProductKind: document.getElementById("inventory-product-kind"),
   inventoryProductCategory: document.getElementById("inventory-product-category"),
   inventoryProductUnit: document.getElementById("inventory-product-unit"),
   inventoryProductCurrentStock: document.getElementById("inventory-product-current-stock"),
@@ -1019,6 +1020,11 @@ function bindEvents() {
     elements.inventoryProductsTable,
     "click",
     handleInventoryProductsTableClick
+  );
+  addListener(
+    elements.inventoryProductKind,
+    "change",
+    syncInventoryProductKindFields
   );
   addListener(elements.inventoryProductQuery, "input", renderInventoryView);
   addListener(
@@ -1870,7 +1876,11 @@ function normalizeBoxPanel(panel) {
 }
 
 function normalizeInventoryPanel(panel) {
-  return ["activos", "productos", "comercial", "movimientos"].includes(panel)
+  if (panel === "comercial") {
+    return "productos";
+  }
+
+  return ["activos", "productos", "movimientos"].includes(panel)
     ? panel
     : defaultInventoryPanelForCurrentUser();
 }
@@ -1936,8 +1946,11 @@ function renderInventoryPanels() {
       return;
     }
 
-    panel.classList.toggle("active", key === normalizedPanel);
-    panel.classList.toggle("is-hidden", key !== normalizedPanel);
+    const shouldShow =
+      key === normalizedPanel ||
+      (normalizedPanel === "productos" && key === "comercial");
+    panel.classList.toggle("active", shouldShow);
+    panel.classList.toggle("is-hidden", !shouldShow);
   });
 }
 
@@ -3532,6 +3545,7 @@ function renderInventoryView() {
   }
 
   fillInventoryProductSelect();
+  syncInventoryProductKindFields();
   fillInventoryBusinessProductCategoryOptions();
   fillBusinessProductDirectInventoryOptions();
   fillBusinessProductComponentInventoryOptions();
@@ -3571,9 +3585,9 @@ function renderInventorySummary() {
       `${assets.length} registros · Valor ${formatCurrency(assetValue)}`
     ),
     createStatCard(
-      "Productos con stock",
+      "Base inventario",
       String(activeProducts.length),
-      `${lowStockProducts.length} por debajo del minimo`
+      `${lowStockProducts.length} con stock bajo`
     ),
     createStatCard(
       "Costo inventario",
@@ -3586,11 +3600,15 @@ function renderInventorySummary() {
       "Entradas, salidas y ajustes registrados"
     ),
     createStatCard(
-      "Productos y servicios",
+      "Venta y recetas",
       String((state.businessProducts || []).filter((item) => item.isActive).length),
       `${(state.businessProductComponents || []).length} componentes de receta configurados`
     ),
   ].join("");
+}
+
+function isInventoryProductStockTracked(item) {
+  return (item?.itemKind || "Insumo") !== "Servicio";
 }
 
 function getFilteredInventoryAssets() {
@@ -3630,6 +3648,7 @@ function getFilteredInventoryProducts() {
       [
         item.name,
         item.area,
+        item.itemKind,
         item.category,
         item.unitName,
         item.notes,
@@ -3753,11 +3772,14 @@ function renderInventoryProductsTable() {
   const items = getFilteredInventoryProducts();
   const activeProducts = items.filter((item) => item.isActive);
   const lowStockProducts = activeProducts.filter(
-    (item) => item.currentStock <= item.minimumStock
+    (item) => isInventoryProductStockTracked(item) && item.currentStock <= item.minimumStock
   );
   const stockValue = activeProducts.reduce(
     (total, item) =>
-      total + Number(item.currentStock || 0) * Number(item.costPrice || 0),
+      total +
+      (isInventoryProductStockTracked(item)
+        ? Number(item.currentStock || 0) * Number(item.costPrice || 0)
+        : 0),
     0
   );
 
@@ -3771,7 +3793,7 @@ function renderInventoryProductsTable() {
   if (!items.length) {
     elements.inventoryProductsTable.innerHTML = `
       <tr>
-        <td colspan="6" class="empty-state">No hay productos registrados para esos filtros.</td>
+        <td colspan="7" class="empty-state">No hay items de inventario registrados para esos filtros.</td>
       </tr>
     `;
     return;
@@ -3780,7 +3802,10 @@ function renderInventoryProductsTable() {
   elements.inventoryProductsTable.innerHTML = items
     .map((item) => {
       const nextActive = item.isActive ? "false" : "true";
-      const isLowStock = item.isActive && item.currentStock <= item.minimumStock;
+      const isLowStock =
+        item.isActive &&
+        isInventoryProductStockTracked(item) &&
+        item.currentStock <= item.minimumStock;
       return `
         <tr class="${isLowStock ? "inventory-row-low-stock" : ""}">
           <td>
@@ -3788,8 +3813,17 @@ function renderInventoryProductsTable() {
             <div class="inline-hint">${escapeHtml(item.category)} · ${escapeHtml(item.unitName)}</div>
           </td>
           <td>${escapeHtml(item.area)}</td>
-          <td>${escapeHtml(formatInventoryQuantity(item.currentStock, item.unitName))}</td>
-          <td>${escapeHtml(formatInventoryQuantity(item.minimumStock, item.unitName))}</td>
+          <td>${escapeHtml(item.itemKind || "Insumo")}</td>
+          <td>${escapeHtml(
+            isInventoryProductStockTracked(item)
+              ? formatInventoryQuantity(item.currentStock, item.unitName)
+              : "No maneja stock"
+          )}</td>
+          <td>${escapeHtml(
+            isInventoryProductStockTracked(item)
+              ? formatInventoryQuantity(item.minimumStock, item.unitName)
+              : "-"
+          )}</td>
           <td>${formatCurrency(item.salePrice)}</td>
           <td>
             <div class="row-actions row-actions--compact">
@@ -3797,8 +3831,8 @@ function renderInventoryProductsTable() {
                 class="table-button icon-button"
                 type="button"
                 data-inventory-product-edit-id="${item.id}"
-                title="Editar producto"
-                aria-label="Editar producto"
+                title="Editar item de inventario"
+                aria-label="Editar item de inventario"
               >
                 <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
                   <path d="M4 20h4l10-10-4-4L4 16v4Z"></path>
@@ -3810,8 +3844,8 @@ function renderInventoryProductsTable() {
                 type="button"
                 data-inventory-product-status-id="${item.id}"
                 data-inventory-product-next-active="${nextActive}"
-                title="${item.isActive ? "Inactivar producto" : "Activar producto"}"
-                aria-label="${item.isActive ? "Inactivar producto" : "Activar producto"}"
+                title="${item.isActive ? "Inactivar item de inventario" : "Activar item de inventario"}"
+                aria-label="${item.isActive ? "Inactivar item de inventario" : "Activar item de inventario"}"
               >
                 <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
                   <path d="M12 3v7"></path>
@@ -3921,7 +3955,9 @@ function getBusinessProductDetailLabel(item) {
 }
 
 function fillBusinessProductDirectInventoryOptions(selectedValue = "") {
-  const products = (state.inventoryProducts || []).filter((item) => item.isActive);
+  const products = (state.inventoryProducts || []).filter(
+    (item) => item.isActive && isInventoryProductStockTracked(item)
+  );
   fillSelectFromRecords(elements.inventoryBusinessProductDirectProductId, products, {
     selectedValue: String(selectedValue || elements.inventoryBusinessProductDirectProductId?.value || ""),
     placeholder: "Sin producto directo",
@@ -3934,7 +3970,9 @@ function fillBusinessProductDirectInventoryOptions(selectedValue = "") {
 }
 
 function fillBusinessProductComponentInventoryOptions(selectedValue = "") {
-  const products = (state.inventoryProducts || []).filter((item) => item.isActive);
+  const products = (state.inventoryProducts || []).filter(
+    (item) => item.isActive && isInventoryProductStockTracked(item)
+  );
   fillSelectFromRecords(elements.inventoryBusinessComponentProductId, products, {
     selectedValue: String(selectedValue || elements.inventoryBusinessComponentProductId?.value || ""),
     placeholder: "Selecciona un insumo del inventario",
@@ -4182,7 +4220,7 @@ function fillInventoryProductSelect(selectedValue = "") {
   }
 
   const products = (state.inventoryProducts || [])
-    .filter((item) => item.isActive)
+    .filter((item) => item.isActive && isInventoryProductStockTracked(item))
     .sort((a, b) => a.name.localeCompare(b.name, "es"));
 
   if (!products.length) {
@@ -4210,6 +4248,24 @@ function fillInventoryProductSelect(selectedValue = "") {
   }
 
   elements.inventoryMovementProductId.value = String(products[0].id);
+}
+
+function syncInventoryProductKindFields() {
+  if (!elements.inventoryProductKind) {
+    return;
+  }
+
+  const isService = elements.inventoryProductKind.value === "Servicio";
+
+  if (isService) {
+    elements.inventoryProductUnit.value = "Servicio";
+    elements.inventoryProductCurrentStock.value = "0";
+    elements.inventoryProductMinimumStock.value = "0";
+  }
+
+  elements.inventoryProductUnit.disabled = isService;
+  elements.inventoryProductCurrentStock.disabled = isService;
+  elements.inventoryProductMinimumStock.disabled = isService;
 }
 
 async function handleInventoryAssetSubmit(event) {
@@ -4353,6 +4409,7 @@ async function handleInventoryProductSubmit(event) {
   const payload = {
     name: elements.inventoryProductName.value.trim(),
     area: elements.inventoryProductArea.value,
+    itemKind: elements.inventoryProductKind.value,
     category: elements.inventoryProductCategory.value.trim(),
     unitName: elements.inventoryProductUnit.value,
     currentStock: Number(elements.inventoryProductCurrentStock.value || 0),
@@ -4364,7 +4421,7 @@ async function handleInventoryProductSubmit(event) {
 
   if (!payload.name || !payload.category) {
     elements.inventoryProductFeedback.textContent =
-      "El nombre y la categoria del producto son obligatorios.";
+      "El nombre y la categoria del item de inventario son obligatorios.";
     return;
   }
 
@@ -4383,8 +4440,8 @@ async function handleInventoryProductSubmit(event) {
     });
     elements.inventoryProductFeedback.textContent =
       productId > 0
-        ? "Producto actualizado correctamente."
-        : "Producto registrado correctamente.";
+        ? "Item de inventario actualizado correctamente."
+        : "Item de inventario registrado correctamente.";
   } catch (error) {
     elements.inventoryProductFeedback.textContent = error.message;
   }
@@ -4398,18 +4455,20 @@ function resetInventoryProductForm() {
   elements.inventoryProductForm.reset();
   elements.inventoryProductId.value = "";
   elements.inventoryProductArea.value = "Gimnasio";
+  elements.inventoryProductKind.value = "Insumo";
   elements.inventoryProductUnit.value = "Unidad";
   elements.inventoryProductCurrentStock.value = "0";
   elements.inventoryProductMinimumStock.value = "0";
   elements.inventoryProductCostPrice.value = "0";
   elements.inventoryProductSalePrice.value = "0";
+  syncInventoryProductKindFields();
   elements.inventoryProductFeedback.textContent =
-    "Aqui puedes registrar agua, proteina, yogurt, ingredientes, empaques y cualquier insumo de venta o consumo.";
+    "Aqui registras la base del inventario: insumos, productos de venta, servicios, empaques o suministros con su stock, costo y precio.";
   elements.inventoryProductCancelEdit.classList.add("is-hidden");
 
   const submitButton = elements.inventoryProductForm.querySelector('button[type="submit"]');
   if (submitButton) {
-    submitButton.textContent = "Guardar producto";
+    submitButton.textContent = "Guardar item";
   }
 }
 
@@ -4431,12 +4490,14 @@ async function handleInventoryProductsTableClick(event) {
     elements.inventoryProductId.value = String(product.id);
     elements.inventoryProductName.value = product.name || "";
     elements.inventoryProductArea.value = product.area || "Gimnasio";
+    elements.inventoryProductKind.value = product.itemKind || "Insumo";
     elements.inventoryProductCategory.value = product.category || "";
     elements.inventoryProductUnit.value = product.unitName || "Unidad";
     elements.inventoryProductCurrentStock.value = String(product.currentStock || 0);
     elements.inventoryProductMinimumStock.value = String(product.minimumStock || 0);
     elements.inventoryProductCostPrice.value = String(product.costPrice || 0);
     elements.inventoryProductSalePrice.value = String(product.salePrice || 0);
+    syncInventoryProductKindFields();
     elements.inventoryProductNotes.value = product.notes || "";
     elements.inventoryProductFeedback.textContent =
       "Actualiza la ficha del producto. Si cambias el stock, el sistema deja trazabilidad del ajuste.";
@@ -4532,7 +4593,7 @@ async function handleInventoryBusinessProductSubmit(event) {
     );
     await loadBootstrap();
     switchView("inventario", {
-      inventoryPanel: "comercial",
+      inventoryPanel: "productos",
     });
     elements.inventoryBusinessProductFeedback.textContent =
       businessProductId > 0
@@ -4611,7 +4672,7 @@ async function handleInventoryBusinessProductsTableClick(event) {
     }
 
     switchView("inventario", {
-      inventoryPanel: "comercial",
+      inventoryPanel: "productos",
     });
     renderInventoryBusinessProducts();
     elements.inventoryBusinessProductName.focus();
@@ -4643,7 +4704,7 @@ async function handleInventoryBusinessProductsTableClick(event) {
     });
     await loadBootstrap();
     switchView("inventario", {
-      inventoryPanel: "comercial",
+      inventoryPanel: "productos",
     });
     elements.inventoryBusinessProductFeedback.textContent = activate
       ? "Producto o servicio activado correctamente."
@@ -4689,7 +4750,7 @@ async function handleInventoryBusinessComponentSubmit(event) {
     );
     await loadBootstrap();
     switchView("inventario", {
-      inventoryPanel: "comercial",
+      inventoryPanel: "productos",
     });
     elements.inventoryBusinessComponentFeedback.textContent =
       "Insumo agregado a la receta correctamente.";
@@ -4725,7 +4786,7 @@ async function handleInventoryBusinessComponentsListClick(event) {
     );
     await loadBootstrap();
     switchView("inventario", {
-      inventoryPanel: "comercial",
+      inventoryPanel: "productos",
     });
     elements.inventoryBusinessComponentFeedback.textContent =
       "Insumo retirado de la receta correctamente.";

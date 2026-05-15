@@ -422,6 +422,7 @@ create table if not exists inventory_products (
   id bigserial primary key,
   name text not null,
   area text not null check (area in ('Gimnasio', 'Restaurante', 'Tienda', 'Suplementos', 'General')),
+  item_kind text not null default 'Insumo',
   category text not null,
   unit_name text not null,
   current_stock numeric(14, 2) not null default 0,
@@ -433,6 +434,13 @@ create table if not exists inventory_products (
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+
+alter table if exists inventory_products
+  add column if not exists item_kind text not null default 'Insumo';
+
+update inventory_products
+set item_kind = 'Insumo'
+where coalesce(trim(item_kind), '') = '';
 
 create table if not exists business_products (
   id bigserial primary key,

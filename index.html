@@ -345,14 +345,14 @@
                   <select id="medioPago" name="medioPago" required></select>
                 </label>
 
-                <label>
+                <label class="is-hidden" aria-hidden="true">
                   Producto de inventario manual
                   <select id="movement-inventory-product-id" name="inventoryProductId">
                     <option value="">Sin producto enlazado</option>
                   </select>
                 </label>
 
-                <label>
+                <label class="is-hidden" aria-hidden="true">
                   Impacto manual en inventario
                   <select id="movement-inventory-effect" name="inventoryEffect">
                     <option value="ninguno">Sin mover inventario</option>
@@ -361,7 +361,7 @@
                   </select>
                 </label>
 
-                <label>
+                <label class="is-hidden" aria-hidden="true">
                   Cantidad inventario
                   <input
                     id="movement-inventory-quantity"
@@ -431,7 +431,7 @@
                   mantener la misma lógica del Excel.
                 </div>
 
-                <div class="form-note span-2" id="movement-inventory-feedback">
+                <div class="form-note span-2 is-hidden" id="movement-inventory-feedback" aria-hidden="true">
                   Usa estos campos solo cuando el ajuste de inventario sea manual. Si vendes un producto o servicio con receta, el sistema lo descuenta automaticamente.
                 </div>
 
@@ -2145,13 +2145,6 @@
                 type="button"
                 data-inventory-panel="productos"
               >
-                Insumos y productos
-              </button>
-              <button
-                class="client-menu-button"
-                type="button"
-                data-inventory-panel="comercial"
-              >
                 Productos y servicios
               </button>
               <button
@@ -2292,8 +2285,8 @@
               <section class="panel">
                 <div class="panel-head">
                   <div>
-                    <p class="section-kicker">Stock</p>
-                    <h3>Registrar producto</h3>
+                    <p class="section-kicker">Base inventariable</p>
+                    <h3>Registrar item de inventario</h3>
                   </div>
                 </div>
 
@@ -2313,6 +2306,17 @@
                       <option value="Tienda">Tienda</option>
                       <option value="Suplementos">Suplementos</option>
                       <option value="General">General</option>
+                    </select>
+                  </label>
+
+                  <label>
+                    Clasificacion
+                    <select id="inventory-product-kind">
+                      <option value="Insumo">Insumo</option>
+                      <option value="Producto de venta">Producto de venta</option>
+                      <option value="Servicio">Servicio</option>
+                      <option value="Empaque">Empaque</option>
+                      <option value="Suministro interno">Suministro interno</option>
                     </select>
                   </label>
 
@@ -2385,7 +2389,7 @@
                   </label>
 
                   <div id="inventory-product-feedback" class="form-note span-2">
-                    Aqui puedes registrar agua, proteina, yogurt, ingredientes, empaques y cualquier insumo de venta o consumo.
+                    Aqui registras la base del inventario: insumos, productos de venta, servicios, empaques o suministros con su stock, costo y precio.
                   </div>
 
                   <div class="form-actions span-2">
@@ -2404,15 +2408,15 @@
               <section class="panel">
                 <div class="panel-head">
                   <div>
-                    <p class="section-kicker">Consulta</p>
-                    <h3>Productos registrados</h3>
+                    <p class="section-kicker">Consulta base</p>
+                    <h3>Items de inventario registrados</h3>
                   </div>
                   <label class="inline-label portfolio-search">
                     Buscar
                     <input
                       id="inventory-product-query"
                       type="search"
-                      placeholder="Nombre, area, categoria..."
+                      placeholder="Nombre, area, clasificacion o categoria..."
                     />
                   </label>
                 </div>
@@ -2425,6 +2429,7 @@
                       <tr>
                         <th>Nombre</th>
                         <th>Area</th>
+                        <th>Clasificacion</th>
                         <th>Stock</th>
                         <th>Minimo</th>
                         <th>Venta</th>
@@ -2444,8 +2449,8 @@
                 <section class="panel">
                   <div class="panel-head">
                     <div>
-                      <p class="section-kicker">Catalogo comercial</p>
-                      <h3>Registrar producto o servicio</h3>
+                      <p class="section-kicker">Venta y recetas</p>
+                      <h3>Registrar producto o servicio de venta</h3>
                     </div>
                   </div>
 
@@ -2514,7 +2519,7 @@
                     </label>
 
                     <div id="inventory-business-product-feedback" class="form-note span-2">
-                      La categoria mantiene el analisis historico. El detalle opcional te sirve para distinguir versiones como mensual, premium, con bebida o menu ejecutivo.
+                      Usa esta ficha para lo que realmente vendes: membresias, cenas, desayunos, bebidas o servicios. Se puede enlazar a un item base o a varios insumos por receta.
                     </div>
 
                     <div class="form-actions span-2">
