@@ -1111,6 +1111,7 @@ app.get("/api/bootstrap", asyncHandler(async (req, res) => {
     inventoryStockMovementsResult,
     businessProductsResult,
     businessProductComponentsResult,
+    salesComboRulesResult,
   ] =
     await Promise.all([
     query(
@@ -1302,6 +1303,9 @@ app.get("/api/bootstrap", asyncHandler(async (req, res) => {
           `
         )
       : Promise.resolve({ rows: [] }),
+    hasBusinessProductAccess
+      ? listSalesComboRulesRows()
+      : Promise.resolve({ rows: [] }),
   ]);
 
   res.json({
@@ -1325,6 +1329,7 @@ app.get("/api/bootstrap", asyncHandler(async (req, res) => {
     businessProducts: businessProductsResult.rows.map(mapBusinessProductRow),
     businessProductComponents:
       businessProductComponentsResult.rows.map(mapBusinessProductComponentRow),
+    salesComboRules: salesComboRulesResult.rows.map(mapSalesComboRuleRow),
     notes: mapNotesRows(notesResult.rows),
   });
 }));
@@ -2908,6 +2913,192 @@ app.delete(
   })
 );
 
+app.post(
+  "/api/sales-combo-rules",
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    await ensureSalesComboRulesTable();
+
+    const payload = normalizeSalesComboRulePayload(req.body);
+    validateSalesComboRulePayload(payload);
+
+    let createdRule;
+    try {
+      createdRule = await withClient(async (client) => {
+        await client.query("begin");
+
+        try {
+          await assertSalesComboBusinessProducts(client, payload);
+
+          const insertResult = await client.query(
+            `
+              insert into sales_combo_rules (
+                name,
+                business_line,
+                trigger_business_product_id,
+                target_business_product_id,
+                target_unit_price,
+                max_target_units_per_trigger,
+                notes,
+                is_active
+              )
+              values ($1, $2, $3, $4, $5, $6, $7, true)
+              returning *
+            `,
+            [
+              payload.name,
+              payload.businessLine,
+              payload.triggerBusinessProductId,
+              payload.targetBusinessProductId,
+              payload.targetUnitPrice,
+              payload.maxTargetUnitsPerTrigger,
+              payload.notes,
+            ]
+          );
+
+          await client.query("commit");
+          return insertResult.rows[0];
+        } catch (error) {
+          await client.query("rollback");
+          throw error;
+        }
+      });
+    } catch (error) {
+      if (error?.code === "23505") {
+        throw httpError(
+          400,
+          "Ya existe una regla activa o registrada con esa combinacion de productos."
+        );
+      }
+      throw error;
+    }
+
+    const hydratedRule = await readSalesComboRuleById(createdRule.id);
+    res.status(201).json(hydratedRule || mapSalesComboRuleRow(createdRule));
+  })
+);
+
+app.put(
+  "/api/sales-combo-rules/:id",
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    await ensureSalesComboRulesTable();
+
+    const ruleId = Number(req.params.id);
+    const payload = normalizeSalesComboRulePayload(req.body);
+    validateSalesComboRulePayload(payload);
+
+    if (!Number.isInteger(ruleId) || ruleId <= 0) {
+      return res.status(400).json({ error: "Regla de combo invalida." });
+    }
+
+    let updatedRule;
+    try {
+      updatedRule = await withClient(async (client) => {
+        await client.query("begin");
+
+        try {
+          const existingResult = await client.query(
+            `
+              select id
+              from sales_combo_rules
+              where id = $1
+              limit 1
+              for update
+            `,
+            [ruleId]
+          );
+
+          if (!existingResult.rows.length) {
+            throw httpError(404, "Regla de combo no encontrada.");
+          }
+
+          await assertSalesComboBusinessProducts(client, payload);
+
+          const updateResult = await client.query(
+            `
+              update sales_combo_rules
+              set
+                name = $2,
+                business_line = $3,
+                trigger_business_product_id = $4,
+                target_business_product_id = $5,
+                target_unit_price = $6,
+                max_target_units_per_trigger = $7,
+                notes = $8,
+                is_active = true,
+                updated_at = now()
+              where id = $1
+              returning *
+            `,
+            [
+              ruleId,
+              payload.name,
+              payload.businessLine,
+              payload.triggerBusinessProductId,
+              payload.targetBusinessProductId,
+              payload.targetUnitPrice,
+              payload.maxTargetUnitsPerTrigger,
+              payload.notes,
+            ]
+          );
+
+          await client.query("commit");
+          return updateResult.rows[0];
+        } catch (error) {
+          await client.query("rollback");
+          throw error;
+        }
+      });
+    } catch (error) {
+      if (error?.code === "23505") {
+        throw httpError(
+          400,
+          "Ya existe una regla activa o registrada con esa combinacion de productos."
+        );
+      }
+      throw error;
+    }
+
+    const hydratedRule = await readSalesComboRuleById(updatedRule.id);
+    res.json(hydratedRule || mapSalesComboRuleRow(updatedRule));
+  })
+);
+
+app.patch(
+  "/api/sales-combo-rules/:id/active",
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    await ensureSalesComboRulesTable();
+
+    const ruleId = Number(req.params.id);
+    const isActive = Boolean(req.body.isActive);
+
+    if (!Number.isInteger(ruleId) || ruleId <= 0) {
+      return res.status(400).json({ error: "Regla de combo invalida." });
+    }
+
+    const result = await query(
+      `
+        update sales_combo_rules
+        set
+          is_active = $2,
+          updated_at = now()
+        where id = $1
+        returning *
+      `,
+      [ruleId, isActive]
+    );
+
+    if (!result.rows.length) {
+      return res.status(404).json({ error: "Regla de combo no encontrada." });
+    }
+
+    const hydratedRule = await readSalesComboRuleById(ruleId);
+    res.json(hydratedRule || mapSalesComboRuleRow(result.rows[0]));
+  })
+);
+
 app.get("*", (_req, res) => {
   res.sendFile(path.join(rootDir, "index.html"));
 });
@@ -3007,6 +3198,28 @@ function normalizeBusinessProductComponentPayload(body) {
       ? inventoryProductId
       : 0,
     quantity: Number(body.quantity || 0),
+    notes: String(body.notes || "").trim(),
+  };
+}
+
+function normalizeSalesComboRulePayload(body) {
+  const triggerBusinessProductId = Number(body.triggerBusinessProductId || 0);
+  const targetBusinessProductId = Number(body.targetBusinessProductId || 0);
+  const maxTargetUnitsPerTrigger = Number(body.maxTargetUnitsPerTrigger || 0);
+
+  return {
+    name: String(body.name || "").trim(),
+    businessLine: String(body.businessLine || "").trim(),
+    triggerBusinessProductId: Number.isInteger(triggerBusinessProductId)
+      ? triggerBusinessProductId
+      : 0,
+    targetBusinessProductId: Number.isInteger(targetBusinessProductId)
+      ? targetBusinessProductId
+      : 0,
+    targetUnitPrice: Math.max(Number(body.targetUnitPrice || 0), 0),
+    maxTargetUnitsPerTrigger: Number.isInteger(maxTargetUnitsPerTrigger)
+      ? maxTargetUnitsPerTrigger
+      : 0,
     notes: String(body.notes || "").trim(),
   };
 }
@@ -3148,6 +3361,51 @@ function validateBusinessProductComponentPayload(payload) {
 
   if (!Number.isFinite(payload.quantity) || !(payload.quantity > 0)) {
     throw httpError(400, "La cantidad del insumo debe ser mayor que cero.");
+  }
+}
+
+function validateSalesComboRulePayload(payload) {
+  if (!payload.name) {
+    throw httpError(400, "El nombre de la regla de combo es obligatorio.");
+  }
+
+  if (!["Gimnasio", "Restaurante"].includes(payload.businessLine)) {
+    throw httpError(400, "La linea de la regla de combo no es valida.");
+  }
+
+  if (!(payload.triggerBusinessProductId > 0)) {
+    throw httpError(
+      400,
+      "Selecciona el producto o servicio que activa el combo."
+    );
+  }
+
+  if (!(payload.targetBusinessProductId > 0)) {
+    throw httpError(
+      400,
+      "Selecciona el producto o servicio al que se aplicara el precio promocional."
+    );
+  }
+
+  if (payload.triggerBusinessProductId === payload.targetBusinessProductId) {
+    throw httpError(
+      400,
+      "El producto que activa el combo debe ser diferente al que recibe el descuento."
+    );
+  }
+
+  if (!Number.isFinite(payload.targetUnitPrice) || !(payload.targetUnitPrice > 0)) {
+    throw httpError(400, "El precio promocional debe ser mayor que cero.");
+  }
+
+  if (
+    !Number.isInteger(payload.maxTargetUnitsPerTrigger) ||
+    !(payload.maxTargetUnitsPerTrigger > 0)
+  ) {
+    throw httpError(
+      400,
+      "La cantidad de unidades en combo por cada activador debe ser un entero mayor que cero."
+    );
   }
 }
 
@@ -6026,6 +6284,122 @@ async function applyMovementInventoryLink(client, movementId, payload, authUserI
   return appliedLinks;
 }
 
+async function ensureSalesComboRulesTable() {
+  await query(
+    `
+      create table if not exists sales_combo_rules (
+        id bigserial primary key,
+        name text not null,
+        business_line text not null check (business_line in ('Gimnasio', 'Restaurante')),
+        trigger_business_product_id bigint not null references business_products(id) on delete restrict,
+        target_business_product_id bigint not null references business_products(id) on delete restrict,
+        target_unit_price numeric(14, 2) not null check (target_unit_price >= 0),
+        max_target_units_per_trigger integer not null default 1 check (max_target_units_per_trigger > 0),
+        notes text not null default '',
+        is_active boolean not null default true,
+        created_at timestamptz not null default now(),
+        updated_at timestamptz not null default now(),
+        unique (business_line, trigger_business_product_id, target_business_product_id)
+      )
+    `
+  );
+
+  await query(
+    `
+      create index if not exists sales_combo_rules_line_idx
+        on sales_combo_rules(business_line, is_active, id)
+    `
+  );
+}
+
+async function listSalesComboRulesRows() {
+  await ensureSalesComboRulesTable();
+
+  return query(
+    `
+      select
+        scr.*,
+        trigger_bp.name as trigger_business_product_name,
+        trigger_bp.item_type as trigger_business_product_item_type,
+        target_bp.name as target_business_product_name,
+        target_bp.item_type as target_business_product_item_type
+      from sales_combo_rules scr
+      join business_products trigger_bp
+        on trigger_bp.id = scr.trigger_business_product_id
+      join business_products target_bp
+        on target_bp.id = scr.target_business_product_id
+      order by
+        scr.is_active desc,
+        scr.business_line asc,
+        scr.name asc,
+        scr.id asc
+    `
+  );
+}
+
+async function readSalesComboRuleById(ruleId) {
+  await ensureSalesComboRulesTable();
+
+  const result = await query(
+    `
+      select
+        scr.*,
+        trigger_bp.name as trigger_business_product_name,
+        trigger_bp.item_type as trigger_business_product_item_type,
+        target_bp.name as target_business_product_name,
+        target_bp.item_type as target_business_product_item_type
+      from sales_combo_rules scr
+      join business_products trigger_bp
+        on trigger_bp.id = scr.trigger_business_product_id
+      join business_products target_bp
+        on target_bp.id = scr.target_business_product_id
+      where scr.id = $1
+      limit 1
+    `,
+    [Number(ruleId || 0)]
+  );
+
+  if (!result.rows.length) {
+    return null;
+  }
+
+  return mapSalesComboRuleRow(result.rows[0]);
+}
+
+async function assertSalesComboBusinessProducts(client, payload) {
+  const productsResult = await client.query(
+    `
+      select id, business_line
+      from business_products
+      where id = any($1::bigint[])
+    `,
+    [[payload.triggerBusinessProductId, payload.targetBusinessProductId]]
+  );
+
+  const rowsById = new Map(
+    productsResult.rows.map((row) => [Number(row.id || 0), row])
+  );
+  const triggerProduct = rowsById.get(Number(payload.triggerBusinessProductId || 0));
+  const targetProduct = rowsById.get(Number(payload.targetBusinessProductId || 0));
+
+  if (!triggerProduct || !targetProduct) {
+    throw httpError(
+      400,
+      "Uno de los productos o servicios seleccionados no existe."
+    );
+  }
+
+  if (
+    triggerProduct.business_line !== payload.businessLine ||
+    targetProduct.business_line !== payload.businessLine
+  ) {
+    throw httpError(
+      400,
+      "Los productos del combo deben pertenecer a la misma linea de negocio de la regla."
+    );
+  }
+}
+
 function mapInventoryAssetRow(row) {
   return {
     id: Number(row.id || 0),
@@ -6099,6 +6473,26 @@ function mapBusinessProductComponentRow(row) {
     quantity: Number(row.quantity || 0),
     notes: row.notes || "",
     sortOrder: Number(row.sort_order || 0),
+    createdAt: row.created_at || null,
+    updatedAt: row.updated_at || null,
+  };
+}
+
+function mapSalesComboRuleRow(row) {
+  return {
+    id: Number(row.id || 0),
+    name: row.name || "",
+    businessLine: row.business_line || "",
+    triggerBusinessProductId: Number(row.trigger_business_product_id || 0),
+    triggerBusinessProductName: row.trigger_business_product_name || "",
+    triggerBusinessProductType: row.trigger_business_product_item_type || "",
+    targetBusinessProductId: Number(row.target_business_product_id || 0),
+    targetBusinessProductName: row.target_business_product_name || "",
+    targetBusinessProductType: row.target_business_product_item_type || "",
+    targetUnitPrice: Number(row.target_unit_price || 0),
+    maxTargetUnitsPerTrigger: Number(row.max_target_units_per_trigger || 0),
+    notes: row.notes || "",
+    isActive: Boolean(row.is_active),
     createdAt: row.created_at || null,
     updatedAt: row.updated_at || null,
   };

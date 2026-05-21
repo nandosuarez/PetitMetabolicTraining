@@ -572,6 +572,21 @@ create table if not exists business_product_components (
   unique (business_product_id, inventory_product_id)
 );
 
+create table if not exists sales_combo_rules (
+  id bigserial primary key,
+  name text not null,
+  business_line text not null check (business_line in ('Gimnasio', 'Restaurante')),
+  trigger_business_product_id bigint not null references business_products(id) on delete restrict,
+  target_business_product_id bigint not null references business_products(id) on delete restrict,
+  target_unit_price numeric(14, 2) not null check (target_unit_price >= 0),
+  max_target_units_per_trigger integer not null default 1 check (max_target_units_per_trigger > 0),
+  notes text not null default '',
+  is_active boolean not null default true,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique (business_line, trigger_business_product_id, target_business_product_id)
+);
+
 create table if not exists inventory_stock_movements (
   id bigserial primary key,
   inventory_product_id bigint not null references inventory_products(id) on delete cascade,
@@ -598,6 +613,9 @@ create index if not exists business_products_line_idx
 
 create index if not exists business_product_components_product_idx
   on business_product_components(business_product_id, sort_order, id);
+
+create index if not exists sales_combo_rules_line_idx
+  on sales_combo_rules(business_line, is_active, id);
 
 alter table movements
   add column if not exists inventory_product_id bigint;

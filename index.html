@@ -2984,6 +2984,136 @@
 
                 <div id="inventory-business-components-list" class="stack-list"></div>
               </section>
+
+              <section class="panel">
+                <div class="panel-head">
+                  <div>
+                    <p class="section-kicker">Promociones</p>
+                    <h3>Combos y descuentos automáticos</h3>
+                  </div>
+                </div>
+
+                <div class="content-grid two-up align-start">
+                  <form id="sales-combo-form" class="form-grid">
+                    <input id="sales-combo-id" type="hidden" />
+
+                    <label class="span-2">
+                      Nombre del combo
+                      <input
+                        id="sales-combo-name"
+                        type="text"
+                        placeholder="Ejemplo: Pollo + Proteína"
+                        required
+                      />
+                    </label>
+
+                    <label>
+                      Línea de negocio
+                      <select id="sales-combo-line" required>
+                        <option value="Gimnasio">Gimnasio</option>
+                        <option value="Restaurante">Restaurante</option>
+                      </select>
+                    </label>
+
+                    <label>
+                      Unidades con descuento por activador
+                      <input
+                        id="sales-combo-max-units"
+                        type="number"
+                        min="1"
+                        step="1"
+                        value="1"
+                        required
+                      />
+                    </label>
+
+                    <label class="span-2">
+                      Producto que activa combo
+                      <select id="sales-combo-trigger-product" required>
+                        <option value="">Selecciona producto activador</option>
+                      </select>
+                    </label>
+
+                    <label class="span-2">
+                      Producto con precio promocional
+                      <select id="sales-combo-target-product" required>
+                        <option value="">Selecciona producto objetivo</option>
+                      </select>
+                    </label>
+
+                    <label>
+                      Precio promocional
+                      <input
+                        id="sales-combo-target-price"
+                        type="number"
+                        min="0.01"
+                        step="0.01"
+                        placeholder="0"
+                        required
+                      />
+                    </label>
+
+                    <label>
+                      Notas
+                      <input
+                        id="sales-combo-notes"
+                        type="text"
+                        placeholder="Opcional: condiciones del combo"
+                      />
+                    </label>
+
+                    <div id="sales-combo-feedback" class="form-note span-2">
+                      Crea reglas para aplicar descuentos automáticos en ventas cuando un producto active otro.
+                    </div>
+
+                    <div class="form-actions span-2">
+                      <button class="primary-button" type="submit">Guardar combo</button>
+                      <button
+                        id="sales-combo-cancel-edit"
+                        class="ghost-button is-hidden"
+                        type="button"
+                      >
+                        Cancelar edición
+                      </button>
+                    </div>
+                  </form>
+
+                  <section class="panel">
+                    <div class="panel-head">
+                      <div>
+                        <p class="section-kicker">Reglas activas</p>
+                        <h3>Listado de combos</h3>
+                      </div>
+                      <label class="inline-label portfolio-search">
+                        Buscar
+                        <input
+                          id="sales-combo-query"
+                          type="search"
+                          placeholder="Nombre, activador, objetivo..."
+                        />
+                      </label>
+                    </div>
+
+                    <div id="sales-combos-metrics" class="mini-stats"></div>
+
+                    <div class="table-wrap">
+                      <table>
+                        <thead>
+                          <tr>
+                            <th>Combo</th>
+                            <th>Línea</th>
+                            <th>Regla</th>
+                            <th>Precio promo</th>
+                            <th>Estado</th>
+                            <th>Acciones</th>
+                          </tr>
+                        </thead>
+                        <tbody id="sales-combos-table"></tbody>
+                      </table>
+                    </div>
+                  </section>
+                </div>
+              </section>
             </div>
           </section>
 

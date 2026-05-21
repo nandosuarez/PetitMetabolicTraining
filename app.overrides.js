@@ -48,6 +48,22 @@
     itemsList: document.getElementById("sales-items-list"),
     itemsSummary: document.getElementById("sales-items-summary"),
   };
+  const comboElements = {
+    form: document.getElementById("sales-combo-form"),
+    id: document.getElementById("sales-combo-id"),
+    name: document.getElementById("sales-combo-name"),
+    businessLine: document.getElementById("sales-combo-line"),
+    maxUnits: document.getElementById("sales-combo-max-units"),
+    triggerProductId: document.getElementById("sales-combo-trigger-product"),
+    targetProductId: document.getElementById("sales-combo-target-product"),
+    targetUnitPrice: document.getElementById("sales-combo-target-price"),
+    notes: document.getElementById("sales-combo-notes"),
+    feedback: document.getElementById("sales-combo-feedback"),
+    cancelEdit: document.getElementById("sales-combo-cancel-edit"),
+    query: document.getElementById("sales-combo-query"),
+    metrics: document.getElementById("sales-combos-metrics"),
+    table: document.getElementById("sales-combos-table"),
+  };
 
   let salesDraftItems = [];
   let lastAutoSalesDescription = "";
@@ -89,13 +105,153 @@
     return normalizeMoney(normalizeSalesQuantity(quantity) * normalizeMoney(unitPrice));
   }
 
-  function getSalesDraftTotal() {
-    return normalizeMoney(
-      salesDraftItems.reduce(
-        (acc, item) => acc + computeSalesItemSubtotal(item.quantity, item.unitPrice),
-        0
-      )
+  function normalizeSalesComboRuleRecord(item) {
+    const triggerBusinessProductId = Number(item?.triggerBusinessProductId || 0);
+    const targetBusinessProductId = Number(item?.targetBusinessProductId || 0);
+    const maxTargetUnitsPerTrigger = Number(item?.maxTargetUnitsPerTrigger || 0);
+
+    return {
+      id: Number(item?.id || 0),
+      name: String(item?.name || "").trim(),
+      businessLine: String(item?.businessLine || "").trim(),
+      triggerBusinessProductId: Number.isInteger(triggerBusinessProductId)
+        ? triggerBusinessProductId
+        : 0,
+      targetBusinessProductId: Number.isInteger(targetBusinessProductId)
+        ? targetBusinessProductId
+        : 0,
+      targetUnitPrice: normalizeMoney(item?.targetUnitPrice || 0),
+      maxTargetUnitsPerTrigger: Number.isInteger(maxTargetUnitsPerTrigger)
+        ? maxTargetUnitsPerTrigger
+        : 0,
+      notes: String(item?.notes || "").trim(),
+      isActive: item?.isActive !== false,
+      triggerBusinessProductName: String(item?.triggerBusinessProductName || "").trim(),
+      targetBusinessProductName: String(item?.targetBusinessProductName || "").trim(),
+    };
+  }
+
+  function getSalesComboRulesForCurrentState() {
+    if (!Array.isArray(state?.salesComboRules)) {
+      return [];
+    }
+
+    return state.salesComboRules
+      .map(normalizeSalesComboRuleRecord)
+      .filter(
+        (item) =>
+          item.id > 0 &&
+          item.name &&
+          item.businessLine &&
+          item.triggerBusinessProductId > 0 &&
+          item.targetBusinessProductId > 0 &&
+          item.targetUnitPrice > 0 &&
+          item.maxTargetUnitsPerTrigger > 0
+      );
+  }
+
+  function getActiveSalesComboRules() {
+    return getSalesComboRulesForCurrentState().filter((item) => item.isActive);
+  }
+
+  function getSalesDraftPricing(items = salesDraftItems) {
+    const currentLine = String(elements.linea?.value || "Gimnasio");
+    const pricedItems = (items || []).map((item) => {
+      const quantity = normalizeSalesQuantity(item.quantity);
+      const baseUnitPrice = normalizeMoney(item.baseUnitPrice ?? item.unitPrice ?? 0);
+      const appliedTotal = computeSalesItemSubtotal(quantity, baseUnitPrice);
+
+      return {
+        ...item,
+        quantity,
+        baseUnitPrice,
+        appliedUnitPrice: baseUnitPrice,
+        appliedTotal,
+        promoUnits: 0,
+        promoUnitPrice: 0,
+        promoName: "",
+        discountAmount: 0,
+      };
+    });
+
+    const activeRules = getActiveSalesComboRules();
+    activeRules.forEach((rule) => {
+      if (rule.businessLine && rule.businessLine !== currentLine) {
+        return;
+      }
+
+      const triggerUnits = pricedItems
+        .filter(
+          (item) =>
+            Number(item.productId || 0) === Number(rule.triggerBusinessProductId || 0)
+        )
+        .reduce((sum, item) => sum + Number(item.quantity || 0), 0);
+      let remainingPromoUnits = normalizeSalesQuantity(
+        triggerUnits * Number(rule.maxTargetUnitsPerTrigger || 0)
+      );
+
+      if (!(remainingPromoUnits > 0)) {
+        return;
+      }
+
+      const promoUnitPrice = normalizeMoney(rule.targetUnitPrice || 0);
+      if (!(promoUnitPrice > 0)) {
+        return;
+      }
+
+      pricedItems.forEach((item) => {
+        if (!(remainingPromoUnits > 0)) {
+          return;
+        }
+
+        if (
+          Number(item.productId || 0) !== Number(rule.targetBusinessProductId || 0)
+        ) {
+          return;
+        }
+
+        if (!(item.baseUnitPrice > promoUnitPrice)) {
+          return;
+        }
+
+        const promoUnits = Math.min(item.quantity, remainingPromoUnits);
+        if (!(promoUnits > 0)) {
+          return;
+        }
+
+        const regularUnits = Math.max(0, item.quantity - promoUnits);
+        const regularTotal = computeSalesItemSubtotal(regularUnits, item.baseUnitPrice);
+        const promoTotal = computeSalesItemSubtotal(promoUnits, promoUnitPrice);
+        const lineTotal = normalizeMoney(regularTotal + promoTotal);
+
+        item.promoUnits = promoUnits;
+        item.promoUnitPrice = promoUnitPrice;
+        item.promoName = rule.name;
+        item.discountAmount = normalizeMoney(
+          (item.baseUnitPrice - promoUnitPrice) * promoUnits
+        );
+        item.appliedTotal = lineTotal;
+        item.appliedUnitPrice =
+          item.quantity > 0
+            ? normalizeMoney(lineTotal / item.quantity)
+            : item.baseUnitPrice;
+
+        remainingPromoUnits = Math.max(0, remainingPromoUnits - promoUnits);
+      });
+    });
+
+    const total = normalizeMoney(
+      pricedItems.reduce((acc, item) => acc + Number(item.appliedTotal || 0), 0)
     );
+    const discount = normalizeMoney(
+      pricedItems.reduce((acc, item) => acc + Number(item.discountAmount || 0), 0)
+    );
+
+    return { items: pricedItems, total, discount };
+  }
+
+  function getSalesDraftTotal() {
+    return getSalesDraftPricing().total;
   }
 
   function getSalesDraftUnits() {
@@ -136,9 +292,14 @@
       return;
     }
 
-    const total = getSalesDraftTotal();
+    const pricing = getSalesDraftPricing();
+    const total = pricing.total;
     const units = getSalesDraftUnits();
-    salesElements.itemsSummary.textContent = `${salesDraftItems.length} item(s), ${units} unidad(es). Total ${formatCurrency(total)}.`;
+    const discountCopy =
+      pricing.discount > 0
+        ? ` Descuento combos ${formatCurrency(pricing.discount)}.`
+        : "";
+    salesElements.itemsSummary.textContent = `${salesDraftItems.length} item(s), ${units} unidad(es). Total ${formatCurrency(total)}.${discountCopy}`;
   }
 
   function clearSalesDraft(options = {}) {
@@ -168,18 +329,35 @@
       return;
     }
 
-    salesElements.itemsList.innerHTML = salesDraftItems
+    const pricing = getSalesDraftPricing();
+    salesElements.itemsList.innerHTML = pricing.items
       .map((item) => {
-        const subtotal = computeSalesItemSubtotal(item.quantity, item.unitPrice);
+        const subtotal = normalizeMoney(item.appliedTotal || 0);
+        const baseUnitPrice = normalizeMoney(item.baseUnitPrice || 0);
+        const unitPriceCopy =
+          item.promoUnits > 0
+            ? `${formatCurrency(item.appliedUnitPrice)} promedio`
+            : `${formatCurrency(baseUnitPrice)} c/u`;
+        const promoCopy =
+          item.promoUnits > 0
+            ? `<small class="inline-hint">${escapeHtml(
+                item.promoName || "Promoción"
+              )}: ${escapeHtml(
+                String(item.promoUnits)
+              )} unidad(es) a ${escapeHtml(
+                formatCurrency(item.promoUnitPrice)
+              )}. Ahorro ${escapeHtml(formatCurrency(item.discountAmount))}.</small>`
+            : "";
         return `
           <article class="list-item sales-item-row" data-sales-item-id="${escapeHtml(
             item.id
           )}">
             <div class="sales-item-main">
               <strong>${escapeHtml(item.name)}</strong>
-              <small>${escapeHtml(item.categoryLabel)} · ${formatCurrency(
-                item.unitPrice
-              )} c/u</small>
+              <small>${escapeHtml(item.categoryLabel)} · ${escapeHtml(
+                unitPriceCopy
+              )}</small>
+              ${promoCopy}
             </div>
             <div class="sales-item-controls">
               <label class="inline-label">
@@ -318,6 +496,32 @@
       description === lastAutoSalesDescription ||
       description === "Venta múltiple"
     );
+  }
+
+  function syncAutoSalesDescriptionFromDraft() {
+    if (elements.movementId?.value || !elements.descripcion) {
+      return;
+    }
+
+    if (!shouldReplaceAutoSalesDescription(elements.descripcion.value)) {
+      return;
+    }
+
+    if (!salesDraftItems.length) {
+      elements.descripcion.value = "";
+      lastAutoSalesDescription = "";
+      return;
+    }
+
+    if (salesDraftItems.length > 1) {
+      elements.descripcion.value = "Venta múltiple";
+      lastAutoSalesDescription = "Venta múltiple";
+      return;
+    }
+
+    const singleName = String(salesDraftItems[0]?.name || "").trim();
+    elements.descripcion.value = singleName;
+    lastAutoSalesDescription = singleName;
   }
 
   window.fillMovementBusinessProductOptions = function fillMovementOptionsOverride(
@@ -535,7 +739,15 @@
       return;
     }
 
-    const quantity = normalizeSalesQuantity(salesElements.quantity?.value || 0);
+    const rawQuantity = String(salesElements.quantity?.value ?? "").trim();
+    if (!Number.isInteger(Number(rawQuantity || 0))) {
+      elements.movementFeedback.textContent =
+        "La cantidad debe ser un número entero (1, 2, 3...).";
+      salesElements.quantity?.focus();
+      return;
+    }
+
+    const quantity = normalizeSalesQuantity(rawQuantity || 0);
     if (!(quantity > 0)) {
       elements.movementFeedback.textContent =
         "La cantidad del producto debe ser mayor que cero.";
@@ -544,12 +756,11 @@
     }
 
     const existingItem = salesDraftItems.find(
-      (item) =>
-        Number(item.productId || 0) === Number(selectedProduct.id) &&
-        normalizeMoney(item.unitPrice) === normalizeMoney(selectedProduct.defaultAmount)
+      (item) => Number(item.productId || 0) === Number(selectedProduct.id)
     );
     if (existingItem) {
       existingItem.quantity = normalizeSalesQuantity(existingItem.quantity + quantity);
+      existingItem.baseUnitPrice = normalizeMoney(selectedProduct.defaultAmount);
     } else {
       salesDraftItems.push({
         id: `${Date.now()}-${Math.round(Math.random() * 100000)}`,
@@ -557,18 +768,12 @@
         name: selectedProduct.name,
         categoryLabel:
           selectedProduct.category || getBusinessProductCategoryLabel(selectedProduct),
-        unitPrice: normalizeMoney(selectedProduct.defaultAmount),
+        baseUnitPrice: normalizeMoney(selectedProduct.defaultAmount),
         quantity,
       });
     }
 
-    if (salesDraftItems.length > 1) {
-      elements.descripcion.value = "Venta múltiple";
-      lastAutoSalesDescription = "Venta múltiple";
-    } else if (shouldReplaceAutoSalesDescription(elements.descripcion.value)) {
-      elements.descripcion.value = selectedProduct.name;
-      lastAutoSalesDescription = selectedProduct.name;
-    }
+    syncAutoSalesDescriptionFromDraft();
 
     if (salesElements.quantity) {
       salesElements.quantity.value = "1";
@@ -591,6 +796,7 @@
     }
 
     salesDraftItems = salesDraftItems.filter((item) => String(item.id) !== itemId);
+    syncAutoSalesDescriptionFromDraft();
     renderSalesDraftItems();
     syncSalesTotalField();
   }
@@ -612,12 +818,20 @@
       return;
     }
 
+    if (!Number.isInteger(Number(rawValue))) {
+      elements.movementFeedback.textContent =
+        "La cantidad debe ser entera (1, 2, 3...).";
+      quantityInput.focus();
+      return;
+    }
+
     const quantity = normalizeSalesQuantity(rawValue);
     if (!(quantity > 0)) {
       return;
     }
 
     item.quantity = quantity;
+    syncAutoSalesDescriptionFromDraft();
     renderSalesDraftItems();
     syncSalesTotalField();
   }
@@ -643,6 +857,15 @@
           valid: false,
           message:
             "Hay productos sin cantidad. Completa todas las cantidades antes de guardar la venta.",
+          focusNode: input,
+        };
+      }
+
+      if (!Number.isInteger(Number(rawValue))) {
+        return {
+          valid: false,
+          message:
+            "Las cantidades deben ser enteras (1, 2, 3...). No se permiten decimales.",
           focusNode: input,
         };
       }
@@ -730,10 +953,14 @@
           return;
         }
 
-        salesDraftItems = draftValidation.items;
+        salesDraftItems = draftValidation.items.map((item) => ({
+          ...item,
+          baseUnitPrice: normalizeMoney(item.baseUnitPrice ?? item.unitPrice ?? 0),
+        }));
+        const draftPricing = getSalesDraftPricing(salesDraftItems);
         renderSalesDraftItems();
         syncSalesTotalField();
-        const totalAmount = normalizeMoney(elements.valorTotal.value);
+        const totalAmount = normalizeMoney(draftPricing.total);
         const paidAmount = normalizeMoney(elements.abono.value);
 
         if (!(totalAmount > 0)) {
@@ -748,8 +975,14 @@
           return;
         }
 
+        const sharedDescription = String(elements.descripcion.value || "").trim();
+        const hasCustomSharedDescription =
+          Boolean(sharedDescription) &&
+          !shouldReplaceAutoSalesDescription(sharedDescription);
+        const sharedObservations = String(elements.observaciones.value || "").trim();
+
         let remainingPaid = paidAmount;
-        for (const item of salesDraftItems) {
+        for (const item of draftPricing.items) {
           const currentProduct = getBusinessProductById(item.productId);
           if (!currentProduct) {
             elements.movementFeedback.textContent =
@@ -757,9 +990,26 @@
             return;
           }
 
-          const lineTotal = computeSalesItemSubtotal(item.quantity, item.unitPrice);
+          const lineTotal = normalizeMoney(item.appliedTotal || 0);
           const linePaid = normalizeMoney(Math.min(remainingPaid, lineTotal));
           remainingPaid = normalizeMoney(Math.max(0, remainingPaid - linePaid));
+          const promoDetail =
+            item.promoUnits > 0
+              ? `Promo ${item.promoName}: ${item.promoUnits} x ${formatCurrency(
+                  item.promoUnitPrice
+                )}`
+              : "";
+          const autoLineDescription = buildSalesLineDescription(
+            currentProduct,
+            item.quantity,
+            ""
+          );
+          const lineDescription = hasCustomSharedDescription
+            ? `${sharedDescription} · ${autoLineDescription}`
+            : [autoLineDescription, promoDetail].filter(Boolean).join(" · ");
+          const lineObservations = [sharedObservations, promoDetail]
+            .filter(Boolean)
+            .join(" | ");
 
           const payload = buildSalesPayload({
             selectedProduct: currentProduct,
@@ -767,6 +1017,8 @@
             quantity: item.quantity,
             valorTotal: lineTotal,
             abono: linePaid,
+            descripcion: lineDescription,
+            observaciones: lineObservations,
           });
           payload.estadoPago = derivePaymentStatus(payload.valorTotal, payload.abono);
 
@@ -1162,6 +1414,378 @@
     }
   }
 
+  function getComboBusinessProductsByLine(lineValue = "") {
+    const line = String(lineValue || comboElements.businessLine?.value || "Gimnasio");
+    return (state.businessProducts || [])
+      .filter((item) => item.isActive && item.businessLine === line)
+      .sort((a, b) => String(a.name || "").localeCompare(String(b.name || ""), APP_LOCALE));
+  }
+
+  function fillSalesComboProductSelects(options = {}) {
+    if (!comboElements.triggerProductId || !comboElements.targetProductId) {
+      return;
+    }
+
+    const products = getComboBusinessProductsByLine(
+      options.businessLine || comboElements.businessLine?.value || "Gimnasio"
+    );
+    const labelBuilder = (item) =>
+      `${item.name} · ${getBusinessProductCategoryLabel(item)} · ${formatCurrency(
+        item.defaultAmount
+      )}`;
+
+    fillSelectFromRecords(comboElements.triggerProductId, products, {
+      selectedValue: String(
+        options.triggerValue ?? comboElements.triggerProductId.value ?? ""
+      ),
+      placeholder: "Selecciona producto activador",
+      labelBuilder,
+    });
+
+    fillSelectFromRecords(comboElements.targetProductId, products, {
+      selectedValue: String(
+        options.targetValue ?? comboElements.targetProductId.value ?? ""
+      ),
+      placeholder: "Selecciona producto objetivo",
+      labelBuilder,
+    });
+  }
+
+  function resetSalesComboForm(options = {}) {
+    if (!comboElements.form) {
+      return;
+    }
+
+    comboElements.form.reset();
+    if (comboElements.id) {
+      comboElements.id.value = "";
+    }
+    comboElements.businessLine.value = "Restaurante";
+    comboElements.maxUnits.value = "1";
+    comboElements.targetUnitPrice.value = "";
+    comboElements.notes.value = "";
+    fillSalesComboProductSelects({
+      businessLine: comboElements.businessLine.value,
+      triggerValue: "",
+      targetValue: "",
+    });
+    comboElements.cancelEdit?.classList.add("is-hidden");
+
+    const submitButton = comboElements.form.querySelector('button[type="submit"]');
+    if (submitButton) {
+      submitButton.textContent = "Guardar combo";
+    }
+
+    if (!options.preserveFeedback && comboElements.feedback) {
+      comboElements.feedback.textContent =
+        "Crea reglas para aplicar descuentos automáticos en ventas cuando un producto active otro.";
+    }
+  }
+
+  function getFilteredSalesComboRules() {
+    const query = normalizeSearchValue(comboElements.query?.value || "");
+    const rules = getSalesComboRulesForCurrentState();
+
+    if (!query) {
+      return rules;
+    }
+
+    return rules.filter((item) =>
+      normalizeSearchValue(
+        [
+          item.name,
+          item.businessLine,
+          item.triggerBusinessProductName,
+          item.targetBusinessProductName,
+          item.targetUnitPrice,
+          item.maxTargetUnitsPerTrigger,
+          item.notes,
+          item.isActive ? "activo" : "inactivo",
+        ].join(" ")
+      ).includes(query)
+    );
+  }
+
+  function renderSalesComboRulesAdmin() {
+    if (!comboElements.table || !comboElements.metrics) {
+      return;
+    }
+
+    const rules = getFilteredSalesComboRules();
+    const activeRules = rules.filter((item) => item.isActive);
+
+    comboElements.metrics.innerHTML = `
+      <div class="mini-stat"><span>Total</span><strong>${rules.length}</strong></div>
+      <div class="mini-stat"><span>Activos</span><strong>${activeRules.length}</strong></div>
+      <div class="mini-stat"><span>Gimnasio</span><strong>${
+        rules.filter((item) => item.businessLine === "Gimnasio").length
+      }</strong></div>
+      <div class="mini-stat"><span>Restaurante</span><strong>${
+        rules.filter((item) => item.businessLine === "Restaurante").length
+      }</strong></div>
+    `;
+
+    if (!rules.length) {
+      comboElements.table.innerHTML = `
+        <tr>
+          <td colspan="6" class="empty-state">
+            No hay combos registrados para los filtros actuales.
+          </td>
+        </tr>
+      `;
+      applyStackTableLabels(elements.appShell);
+      return;
+    }
+
+    comboElements.table.innerHTML = rules
+      .map((item) => {
+        const nextActive = item.isActive ? "false" : "true";
+        return `
+          <tr>
+            <td>
+              <strong>${escapeHtml(item.name || "Combo")}</strong>
+              <div class="inline-hint">${escapeHtml(item.notes || "Sin notas")}</div>
+            </td>
+            <td>${escapeHtml(item.businessLine || "-")}</td>
+            <td>
+              <strong>${escapeHtml(item.triggerBusinessProductName || "Sin activador")}</strong>
+              <div class="inline-hint">Activa ${escapeHtml(
+                item.targetBusinessProductName || "Sin objetivo"
+              )} · ${escapeHtml(String(item.maxTargetUnitsPerTrigger || 1))} por activador</div>
+            </td>
+            <td>${formatCurrency(item.targetUnitPrice)}</td>
+            <td>
+              <span class="status-pill ${item.isActive ? "status-pagado" : "status-pendiente"}">
+                ${item.isActive ? "Activo" : "Inactivo"}
+              </span>
+            </td>
+            <td>
+              <div class="row-actions row-actions--compact">
+                <button
+                  class="table-button icon-button"
+                  type="button"
+                  data-sales-combo-edit-id="${escapeHtml(String(item.id))}"
+                  title="Editar combo"
+                  aria-label="Editar combo"
+                >
+                  <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                    <path d="M4 20h4l10-10-4-4L4 16v4Z"></path>
+                    <path d="m12 6 4 4"></path>
+                  </svg>
+                </button>
+                <button
+                  class="table-button ${item.isActive ? "danger" : ""} icon-button"
+                  type="button"
+                  data-sales-combo-status-id="${escapeHtml(String(item.id))}"
+                  data-sales-combo-next-active="${nextActive}"
+                  title="${item.isActive ? "Inactivar combo" : "Activar combo"}"
+                  aria-label="${item.isActive ? "Inactivar combo" : "Activar combo"}"
+                >
+                  <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                    <path d="M12 3v7"></path>
+                    <path d="M7.8 5.8A9 9 0 1 0 16.2 5.8"></path>
+                  </svg>
+                </button>
+              </div>
+            </td>
+          </tr>
+        `;
+      })
+      .join("");
+
+    applyStackTableLabels(elements.appShell);
+  }
+
+  function startEditingSalesComboRule(ruleId) {
+    const comboRule = getSalesComboRulesForCurrentState().find(
+      (item) => String(item.id) === String(ruleId)
+    );
+    if (!comboRule) {
+      comboElements.feedback.textContent = "No encontramos el combo que intentas editar.";
+      return;
+    }
+
+    comboElements.id.value = String(comboRule.id);
+    comboElements.name.value = comboRule.name || "";
+    comboElements.businessLine.value = comboRule.businessLine || "Restaurante";
+    fillSalesComboProductSelects({
+      businessLine: comboElements.businessLine.value,
+      triggerValue: String(comboRule.triggerBusinessProductId || ""),
+      targetValue: String(comboRule.targetBusinessProductId || ""),
+    });
+    comboElements.maxUnits.value = String(comboRule.maxTargetUnitsPerTrigger || 1);
+    comboElements.targetUnitPrice.value = String(comboRule.targetUnitPrice || 0);
+    comboElements.notes.value = comboRule.notes || "";
+    comboElements.cancelEdit?.classList.remove("is-hidden");
+    comboElements.feedback.textContent =
+      "Edita la regla y guarda para actualizar el descuento automático.";
+    const submitButton = comboElements.form?.querySelector('button[type="submit"]');
+    if (submitButton) {
+      submitButton.textContent = "Guardar cambios";
+    }
+    comboElements.name?.focus();
+  }
+
+  async function handleSalesComboSubmit(event) {
+    event.preventDefault();
+
+    if (!comboElements.form || !isAdminUser()) {
+      return;
+    }
+
+    const comboId = Number(comboElements.id?.value || 0);
+    const payload = {
+      name: String(comboElements.name?.value || "").trim(),
+      businessLine: comboElements.businessLine?.value || "Restaurante",
+      triggerBusinessProductId: Number(comboElements.triggerProductId?.value || 0),
+      targetBusinessProductId: Number(comboElements.targetProductId?.value || 0),
+      targetUnitPrice: Number(comboElements.targetUnitPrice?.value || 0),
+      maxTargetUnitsPerTrigger: Number(comboElements.maxUnits?.value || 0),
+      notes: String(comboElements.notes?.value || "").trim(),
+    };
+
+    if (!payload.name) {
+      comboElements.feedback.textContent = "Escribe el nombre del combo.";
+      comboElements.name?.focus();
+      return;
+    }
+
+    if (!(payload.triggerBusinessProductId > 0) || !(payload.targetBusinessProductId > 0)) {
+      comboElements.feedback.textContent =
+        "Selecciona el producto activador y el producto objetivo del combo.";
+      return;
+    }
+
+    if (payload.triggerBusinessProductId === payload.targetBusinessProductId) {
+      comboElements.feedback.textContent =
+        "El producto activador debe ser distinto al producto objetivo.";
+      return;
+    }
+
+    if (!(payload.targetUnitPrice > 0)) {
+      comboElements.feedback.textContent =
+        "El precio promocional debe ser mayor que cero.";
+      comboElements.targetUnitPrice?.focus();
+      return;
+    }
+
+    if (!Number.isInteger(payload.maxTargetUnitsPerTrigger) || !(payload.maxTargetUnitsPerTrigger > 0)) {
+      comboElements.feedback.textContent =
+        "Las unidades con descuento por activador deben ser un entero mayor que cero.";
+      comboElements.maxUnits?.focus();
+      return;
+    }
+
+    try {
+      await apiRequest(
+        comboId > 0
+          ? `/api/sales-combo-rules/${comboId}`
+          : "/api/sales-combo-rules",
+        {
+          method: comboId > 0 ? "PUT" : "POST",
+          body: JSON.stringify(payload),
+        }
+      );
+
+      await loadBootstrap();
+      switchView("inventario", {
+        inventoryPanel: "productos",
+      });
+      renderSalesComboRulesAdmin();
+      resetSalesComboForm({
+        preserveFeedback: true,
+      });
+      comboElements.feedback.textContent =
+        comboId > 0
+          ? "Combo actualizado correctamente."
+          : "Combo creado correctamente.";
+    } catch (error) {
+      comboElements.feedback.textContent = error.message;
+    }
+  }
+
+  async function handleSalesComboTableClick(event) {
+    const editButton = event.target.closest("[data-sales-combo-edit-id]");
+    if (editButton) {
+      startEditingSalesComboRule(editButton.dataset.salesComboEditId);
+      return;
+    }
+
+    const statusButton = event.target.closest("[data-sales-combo-status-id]");
+    if (!statusButton) {
+      return;
+    }
+
+    const comboRuleId = Number(statusButton.dataset.salesComboStatusId || 0);
+    const activate = statusButton.dataset.salesComboNextActive === "true";
+    if (!(comboRuleId > 0)) {
+      return;
+    }
+
+    const confirmed = window.confirm(
+      activate
+        ? "¿Deseas activar este combo?"
+        : "¿Deseas inactivar este combo?"
+    );
+    if (!confirmed) {
+      return;
+    }
+
+    try {
+      await apiRequest(`/api/sales-combo-rules/${comboRuleId}/active`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          isActive: activate,
+        }),
+      });
+
+      await loadBootstrap();
+      switchView("inventario", {
+        inventoryPanel: "productos",
+      });
+      renderSalesComboRulesAdmin();
+      comboElements.feedback.textContent = activate
+        ? "Combo activado correctamente."
+        : "Combo inactivado correctamente.";
+    } catch (error) {
+      comboElements.feedback.textContent = error.message;
+    }
+  }
+
+  function refreshSalesComboAdminUi() {
+    if (!comboElements.form) {
+      return;
+    }
+
+    fillSalesComboProductSelects({
+      businessLine: comboElements.businessLine?.value || "Restaurante",
+      triggerValue: comboElements.triggerProductId?.value || "",
+      targetValue: comboElements.targetProductId?.value || "",
+    });
+    renderSalesComboRulesAdmin();
+  }
+
+  function bindSalesComboEvents() {
+    if (!comboElements.form) {
+      return;
+    }
+
+    comboElements.form.addEventListener("submit", handleSalesComboSubmit);
+    comboElements.businessLine?.addEventListener("change", () => {
+      fillSalesComboProductSelects({
+        businessLine: comboElements.businessLine?.value || "Restaurante",
+        triggerValue: "",
+        targetValue: "",
+      });
+    });
+    comboElements.cancelEdit?.addEventListener("click", () => {
+      resetSalesComboForm();
+      renderSalesComboRulesAdmin();
+    });
+    comboElements.query?.addEventListener("input", renderSalesComboRulesAdmin);
+    comboElements.table?.addEventListener("click", handleSalesComboTableClick);
+  }
+
   function bindMovementPanelEvents() {
     movementPanelButtons.forEach((button) => {
       button.addEventListener("click", () =>
@@ -1275,7 +1899,19 @@
           syncSalesTotalField();
         }
       }
+      return;
     }
+
+    if (view === "inventario") {
+      refreshSalesComboAdminUi();
+    }
+  };
+
+  const originalLoadBootstrap = loadBootstrap;
+  window.loadBootstrap = async function loadBootstrapOverride(...args) {
+    const result = await originalLoadBootstrap(...args);
+    refreshSalesComboAdminUi();
+    return result;
   };
 
   window.getFilteredMovements = getFilteredSalesMovements;
@@ -1286,14 +1922,19 @@
   bindCancelEditOverride();
   bindQuickMovementOverride();
   bindPurchaseEvents();
+  bindSalesComboEvents();
 
   resetPurchaseForm();
+  resetSalesComboForm({
+    preserveFeedback: true,
+  });
   applySalesOnlyMode();
   syncMovementBusinessProductSelection({
     preserveValue: true,
     preserveCategoryValue: true,
   });
   renderSalesDraftItems();
+  refreshSalesComboAdminUi();
   syncSalesTotalField();
   setMovementPanel("ventas");
 })();
