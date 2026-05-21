@@ -744,10 +744,16 @@ function bindEvents() {
   addListener(
     elements.movementBusinessProductId,
     "change",
-    syncMovementBusinessProductSelection
+    () => syncMovementBusinessProductSelection()
   );
   addListener(elements.linea, "change", syncMovementInventoryFields);
   addListener(elements.tipo, "change", syncMovementInventoryFields);
+  addListener(elements.tipo, "change", () =>
+    syncMovementBusinessProductSelection({
+      preserveValue: true,
+      preserveQuantity: true,
+    })
+  );
   addListener(elements.categoria, "change", syncCategorySuggestedAmount);
   addListener(
     elements.movementInventoryProductId,
@@ -13722,3 +13728,140 @@ async function handleCatalogItemAction(event) {
     setStatus(error.message);
   }
 }
+syncMovementBusinessProductSelection = function (options = {}) {
+  if (!elements.movementBusinessProductId) {
+    return null;
+  }
+
+  fillMovementBusinessProductOptions(
+    String(
+      options.selectedValue ??
+        elements.movementBusinessProductId.value ??
+        ""
+    )
+  );
+
+  const selectedProduct = getBusinessProductById(
+    elements.movementBusinessProductId.value
+  );
+  const activeLine = elements.linea?.value || "Gimnasio";
+  const movementType = elements.tipo?.value || "Ingreso";
+
+  if (!selectedProduct || selectedProduct.businessLine !== activeLine) {
+    if (!options.preserveValue) {
+      elements.movementBusinessProductId.value = "";
+    }
+
+    syncCategoryOptions({
+      includeValue:
+        options.preserveCategoryValue === false ? "" : elements.categoria?.value || "",
+    });
+    elements.categoria.disabled = false;
+    elements.movementInventoryProductId.disabled = false;
+    elements.movementInventoryEffect.disabled = false;
+    syncMovementInventoryFields({
+      preserveEffect: Boolean(options.preserveEffect),
+      preserveQuantity: Boolean(options.preserveQuantity),
+    });
+
+    if (elements.movementBusinessProductFeedback) {
+      elements.movementBusinessProductFeedback.textContent =
+        "Si seleccionas un producto o servicio, la categoria se completa sola, puede sugerir el valor y tambien mover inventario segun su configuracion.";
+    }
+
+    return null;
+  }
+
+  syncCategoryOptions({
+    includeValue: selectedProduct.category || elements.categoria?.value || "",
+  });
+
+  if (selectedProduct.category) {
+    elements.categoria.value = selectedProduct.category;
+  }
+
+  elements.categoria.disabled = true;
+
+  if (selectedProduct.defaultAmount > 0 && !options.preserveValue) {
+    elements.valorTotal.value = String(selectedProduct.defaultAmount);
+    syncComputedPaymentStatus();
+  }
+
+  if (!elements.descripcion.value.trim()) {
+    elements.descripcion.value = selectedProduct.name;
+  }
+
+  const recipeItems = getBusinessProductComponents(selectedProduct.id).length;
+  const hasDirectInventory = Number(selectedProduct.directInventoryProductId || 0) > 0;
+  const hasAutomaticInventory = hasDirectInventory || recipeItems > 0;
+  const suggestedCostInventoryProductId = Number(
+    selectedProduct.directInventoryProductId || selectedProduct.inventoryProductId || 0
+  );
+  const shouldAutoDiscountInventory =
+    movementType === "Ingreso" && hasAutomaticInventory;
+  const shouldSuggestCostInventory =
+    movementType === "Costo" && suggestedCostInventoryProductId > 0;
+
+  if (shouldAutoDiscountInventory) {
+    fillMovementInventoryProductOptions({
+      selectedValue: "",
+    });
+    elements.movementInventoryProductId.value = "";
+    elements.movementInventoryEffect.value = "ninguno";
+    if (!options.preserveQuantity) {
+      elements.movementInventoryQuantity.value = "";
+    }
+    elements.movementInventoryProductId.disabled = true;
+    elements.movementInventoryEffect.disabled = true;
+    elements.movementInventoryQuantity.disabled = true;
+    syncMovementInventoryFields({
+      preserveEffect: true,
+      preserveQuantity: true,
+    });
+  } else {
+    elements.movementInventoryProductId.disabled = false;
+    elements.movementInventoryEffect.disabled = false;
+
+    if (shouldSuggestCostInventory) {
+      fillMovementInventoryProductOptions({
+        selectedValue: String(suggestedCostInventoryProductId),
+      });
+      elements.movementInventoryProductId.value = String(
+        suggestedCostInventoryProductId
+      );
+      elements.movementInventoryEffect.value = "entrada";
+    }
+
+    syncMovementInventoryFields({
+      preserveEffect: shouldSuggestCostInventory || Boolean(options.preserveEffect),
+      preserveQuantity: Boolean(options.preserveQuantity),
+    });
+  }
+
+  if (elements.movementBusinessProductFeedback) {
+    const stockMessage =
+      shouldAutoDiscountInventory && hasDirectInventory
+        ? `descontara ${formatInventoryQuantity(
+            selectedProduct.directInventoryQuantity || 1,
+            selectedProduct.directInventoryProductUnitName
+          )} de ${selectedProduct.directInventoryProductName || "inventario"}`
+        : shouldAutoDiscountInventory
+          ? `descontara ${recipeItems} insumo(s) configurados en su receta`
+          : shouldSuggestCostInventory
+            ? "como es un costo, se preselecciona el producto de inventario para sumar stock al guardar la cantidad"
+            : hasAutomaticInventory
+              ? "el descuento automatico solo aplica en ingresos; en costos o gastos usa los campos de inventario"
+              : "no mueve inventario automaticamente";
+
+    const categoryLabel = getBusinessProductCategoryLabel(selectedProduct);
+    const detailLabel = getBusinessProductDetailLabel(selectedProduct);
+    elements.movementBusinessProductFeedback.textContent =
+      `${selectedProduct.name} - ${categoryLabel}${
+        detailLabel ? ` - ${detailLabel}` : ""
+      } - ${formatCurrency(
+        selectedProduct.defaultAmount
+      )}. Al registrar este movimiento, ${stockMessage}.`;
+  }
+
+  return selectedProduct;
+};

@@ -345,15 +345,15 @@
                   <select id="medioPago" name="medioPago" required></select>
                 </label>
 
-                <label class="is-hidden" aria-hidden="true">
-                  Producto de inventario manual
+                <label>
+                  Producto de inventario
                   <select id="movement-inventory-product-id" name="inventoryProductId">
                     <option value="">Sin producto enlazado</option>
                   </select>
                 </label>
 
-                <label class="is-hidden" aria-hidden="true">
-                  Impacto manual en inventario
+                <label>
+                  Impacto en inventario
                   <select id="movement-inventory-effect" name="inventoryEffect">
                     <option value="ninguno">Sin mover inventario</option>
                     <option value="entrada">Entrada a inventario</option>
@@ -361,7 +361,7 @@
                   </select>
                 </label>
 
-                <label class="is-hidden" aria-hidden="true">
+                <label>
                   Cantidad inventario
                   <input
                     id="movement-inventory-quantity"
@@ -431,8 +431,8 @@
                   mantener la misma lógica del Excel.
                 </div>
 
-                <div class="form-note span-2 is-hidden" id="movement-inventory-feedback" aria-hidden="true">
-                  Usa estos campos solo cuando el ajuste de inventario sea manual. Si vendes un producto o servicio con receta, el sistema lo descuenta automaticamente.
+                <div class="form-note span-2" id="movement-inventory-feedback">
+                  Si este movimiento compra, consume o vende un producto, enlazalo aqui para que el stock tambien se ajuste.
                 </div>
 
                 <div class="form-actions span-2">

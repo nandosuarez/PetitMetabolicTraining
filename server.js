@@ -5780,6 +5780,14 @@ function buildInventoryLinksFromMovementPayload(payload, businessProductProfile 
   const hasAutomaticInventory =
     Number(product.direct_inventory_product_id || 0) > 0 || components.length > 0;
 
+  if (!hasAutomaticInventory) {
+    return links;
+  }
+
+  if (payload.tipo !== "Ingreso") {
+    return links;
+  }
+
   if (hasAutomaticInventory && links.length) {
     throw httpError(
       400,
