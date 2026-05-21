@@ -331,6 +331,31 @@
                   </span>
                 </label>
 
+                <label>
+                  Cantidad del producto
+                  <input
+                    id="movement-item-quantity"
+                    type="number"
+                    min="0.01"
+                    step="0.01"
+                    value="1"
+                    placeholder="1"
+                  />
+                </label>
+
+                <div class="span-2 sales-detail-shell">
+                  <div class="sales-detail-head">
+                    <p class="section-kicker">Detalle de venta</p>
+                    <button id="movement-add-item" class="ghost-button" type="button">
+                      Agregar producto
+                    </button>
+                  </div>
+                  <div id="sales-items-list" class="stack-list"></div>
+                  <div id="sales-items-summary" class="form-note">
+                    Agrega uno o más productos para registrar la venta.
+                  </div>
+                </div>
+
                 <label class="search-field">
                   Cliente
                   <input
@@ -360,7 +385,7 @@
                     id="descripcion"
                     name="descripcion"
                     type="text"
-                    placeholder="Detalle corto del ingreso o gasto (opcional)"
+                    placeholder="Detalle corto de la venta (opcional)"
                   />
                 </label>
 
@@ -415,6 +440,7 @@
                     step="0.01"
                     placeholder="0"
                     required
+                    readonly
                   />
                 </label>
 
@@ -473,7 +499,7 @@
 
                 <div class="form-actions span-2">
                   <button class="primary-button" type="submit">
-                    Guardar movimiento
+                    Guardar venta
                   </button>
                   <button id="cancel-edit" class="ghost-button" type="button">
                     Cancelar edición

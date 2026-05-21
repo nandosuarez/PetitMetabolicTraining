@@ -755,6 +755,51 @@ button {
   color: var(--muted);
 }
 
+.sales-detail-shell {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border-radius: 16px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.68);
+}
+
+.sales-detail-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.sales-item-row {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.sales-item-main {
+  display: grid;
+  gap: 4px;
+}
+
+.sales-item-controls {
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.sales-item-controls .inline-label {
+  min-width: 104px;
+}
+
+.sales-item-controls .inline-label input {
+  padding-block: 9px;
+}
+
 .month-bars {
   display: grid;
   gap: 12px;

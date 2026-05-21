@@ -42,6 +42,14 @@
     metrics: document.getElementById("purchase-metrics"),
     table: document.getElementById("purchases-table"),
   };
+  const salesElements = {
+    quantity: document.getElementById("movement-item-quantity"),
+    addItemButton: document.getElementById("movement-add-item"),
+    itemsList: document.getElementById("sales-items-list"),
+    itemsSummary: document.getElementById("sales-items-summary"),
+  };
+
+  let salesDraftItems = [];
 
   function normalizeMovementPanel(panel) {
     return ["ventas", "compras"].includes(panel) ? panel : "ventas";
@@ -58,6 +66,182 @@
 
     node.classList.toggle("is-hidden", !visible);
     node.setAttribute("aria-hidden", String(!visible));
+  }
+
+  function normalizeSalesQuantity(value) {
+    const numericValue = Number(value || 0);
+    if (!Number.isFinite(numericValue) || numericValue <= 0) {
+      return 0;
+    }
+    return Number(numericValue.toFixed(2));
+  }
+
+  function normalizeMoney(value) {
+    const numericValue = Number(value || 0);
+    if (!Number.isFinite(numericValue)) {
+      return 0;
+    }
+    return Number(numericValue.toFixed(2));
+  }
+
+  function computeSalesItemSubtotal(quantity, unitPrice) {
+    return normalizeMoney(normalizeSalesQuantity(quantity) * normalizeMoney(unitPrice));
+  }
+
+  function getSalesDraftTotal() {
+    return normalizeMoney(
+      salesDraftItems.reduce(
+        (acc, item) => acc + computeSalesItemSubtotal(item.quantity, item.unitPrice),
+        0
+      )
+    );
+  }
+
+  function getSalesDraftUnits() {
+    return normalizeSalesQuantity(
+      salesDraftItems.reduce((acc, item) => acc + Number(item.quantity || 0), 0)
+    );
+  }
+
+  function syncSalesTotalField() {
+    if (!elements.valorTotal) {
+      return;
+    }
+
+    const total = getSalesDraftTotal();
+    elements.valorTotal.value = total > 0 ? String(total) : "";
+
+    const paid = normalizeMoney(elements.abono?.value);
+    if (total > 0 && paid > total && elements.abono) {
+      elements.abono.value = String(total);
+    }
+
+    syncComputedPaymentStatus();
+  }
+
+  function updateSalesDraftSummary(message = "") {
+    if (!salesElements.itemsSummary) {
+      return;
+    }
+
+    if (message) {
+      salesElements.itemsSummary.textContent = message;
+      return;
+    }
+
+    if (!salesDraftItems.length) {
+      salesElements.itemsSummary.textContent =
+        "Agrega uno o más productos para registrar la venta.";
+      return;
+    }
+
+    const total = getSalesDraftTotal();
+    const units = getSalesDraftUnits();
+    salesElements.itemsSummary.textContent = `${salesDraftItems.length} item(s), ${units} unidad(es). Total ${formatCurrency(total)}.`;
+  }
+
+  function clearSalesDraft(options = {}) {
+    salesDraftItems = [];
+    if (salesElements.quantity) {
+      salesElements.quantity.value = "1";
+    }
+    renderSalesDraftItems();
+    if (options.updateTotal !== false) {
+      syncSalesTotalField();
+    }
+  }
+
+  function renderSalesDraftItems() {
+    if (!salesElements.itemsList) {
+      return;
+    }
+
+    if (!salesDraftItems.length) {
+      salesElements.itemsList.innerHTML = `
+        <article class="list-item">
+          <small>No hay productos agregados en esta venta.</small>
+        </article>
+      `;
+      updateSalesDraftSummary();
+      return;
+    }
+
+    salesElements.itemsList.innerHTML = salesDraftItems
+      .map((item) => {
+        const subtotal = computeSalesItemSubtotal(item.quantity, item.unitPrice);
+        return `
+          <article class="list-item sales-item-row" data-sales-item-id="${escapeHtml(
+            item.id
+          )}">
+            <div class="sales-item-main">
+              <strong>${escapeHtml(item.name)}</strong>
+              <small>${escapeHtml(item.categoryLabel)} · ${formatCurrency(
+                item.unitPrice
+              )} c/u</small>
+            </div>
+            <div class="sales-item-controls">
+              <label class="inline-label">
+                Cantidad
+                <input
+                  type="number"
+                  min="0.01"
+                  step="0.01"
+                  value="${escapeHtml(String(item.quantity))}"
+                  data-sales-item-quantity-id="${escapeHtml(item.id)}"
+                />
+              </label>
+              <strong>${formatCurrency(subtotal)}</strong>
+              <button
+                type="button"
+                class="table-button icon-button danger"
+                data-sales-item-remove-id="${escapeHtml(item.id)}"
+                aria-label="Quitar producto de la venta"
+                title="Quitar producto"
+              >
+                <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                  <path d="M3 6h18" />
+                  <path d="M8 6V4h8v2" />
+                  <path d="M19 6l-1 14H6L5 6" />
+                  <path d="M10 11v6" />
+                  <path d="M14 11v6" />
+                </svg>
+              </button>
+            </div>
+          </article>
+        `;
+      })
+      .join("");
+
+    updateSalesDraftSummary();
+  }
+
+  function syncSalesDraftEditState() {
+    const isEditing = Boolean(elements.movementId?.value);
+    if (elements.valorTotal) {
+      elements.valorTotal.readOnly = !isEditing;
+    }
+    if (salesElements.quantity) {
+      salesElements.quantity.disabled = isEditing;
+    }
+    if (salesElements.addItemButton) {
+      salesElements.addItemButton.disabled = isEditing;
+    }
+
+    if (isEditing) {
+      updateSalesDraftSummary(
+        "En edición se actualiza un solo movimiento. Para venta múltiple, crea una venta nueva."
+      );
+      if (salesElements.itemsList) {
+        salesElements.itemsList.innerHTML = `
+          <article class="list-item">
+            <small>La edición se hace por movimiento individual.</small>
+          </article>
+        `;
+      }
+      return;
+    }
+
+    renderSalesDraftItems();
   }
 
   function setMovementPanel(panel) {
@@ -84,6 +268,10 @@
         preserveValue: true,
         preserveCategoryValue: true,
       });
+      syncSalesDraftEditState();
+      if (!elements.movementId.value) {
+        syncSalesTotalField();
+      }
       renderMovementsView();
       return;
     }
@@ -109,6 +297,8 @@
     if (elements.movementFormTitle && !elements.movementId.value) {
       elements.movementFormTitle.textContent = "Registrar venta";
     }
+
+    syncSalesDraftEditState();
 
     if (elements.movementFeedback && !elements.movementId.value) {
       elements.movementFeedback.textContent =
@@ -200,13 +390,22 @@
       }
       elements.categoria.disabled = true;
 
-      if (selectedProduct.defaultAmount > 0 && !options.preserveValue) {
+      if (
+        selectedProduct.defaultAmount > 0 &&
+        !options.preserveValue &&
+        !salesDraftItems.length &&
+        !elements.movementId.value
+      ) {
         elements.valorTotal.value = String(selectedProduct.defaultAmount);
         syncComputedPaymentStatus();
       }
 
-      if (!elements.descripcion.value.trim()) {
+      if (!elements.descripcion.value.trim() && !salesDraftItems.length) {
         elements.descripcion.value = selectedProduct.name;
+      }
+
+      if (salesDraftItems.length && !elements.movementId.value) {
+        syncSalesTotalField();
       }
 
       if (elements.movementBusinessProductFeedback) {
@@ -233,33 +432,168 @@
       return selectedProduct;
     };
 
-  function buildSalesPayload() {
-    const selectedProduct = getBusinessProductById(
-      elements.movementBusinessProductId.value
-    );
+  function buildSalesLineDescription(selectedProduct, quantity, baseDescription = "") {
+    const normalizedBase = String(baseDescription || "").trim();
+    if (normalizedBase) {
+      return normalizedBase;
+    }
 
+    if (!selectedProduct?.name) {
+      return "Venta";
+    }
+
+    if (normalizeSalesQuantity(quantity) > 1) {
+      return `${selectedProduct.name} x${normalizeSalesQuantity(quantity)}`;
+    }
+
+    return selectedProduct.name;
+  }
+
+  function buildSalesPayload(options = {}) {
+    const selectedProduct =
+      options.selectedProduct ||
+      getBusinessProductById(elements.movementBusinessProductId.value);
+    const quantity = normalizeSalesQuantity(options.quantity || 1) || 1;
+    const totalAmount = normalizeMoney(
+      options.valorTotal ?? options.totalAmount ?? elements.valorTotal.value
+    );
+    const paidAmount = normalizeMoney(
+      options.abono ?? options.paidAmount ?? elements.abono.value
+    );
     const categoryValue =
       selectedProduct?.category ||
       getBusinessProductCategoryLabel(selectedProduct) ||
+      elements.categoria?.value ||
       "Ventas";
+    const productId = Number(
+      options.businessProductId ??
+        selectedProduct?.id ??
+        elements.movementBusinessProductId.value ??
+        0
+    );
+    const description = buildSalesLineDescription(
+      selectedProduct,
+      quantity,
+      options.descripcion ?? elements.descripcion.value
+    );
 
     return {
-      linea: elements.linea.value,
-      fecha: elements.fecha.value,
+      linea: options.linea || elements.linea.value,
+      fecha: options.fecha || elements.fecha.value,
       tipo: "Ingreso",
       categoria: categoryValue,
-      businessProductId: Number(elements.movementBusinessProductId.value || 0),
-      cliente: elements.cliente.value.trim(),
-      descripcion: elements.descripcion.value.trim(),
-      medioPago: elements.medioPago.value,
-      valorTotal: Number(elements.valorTotal.value || 0),
-      abono: Number(elements.abono.value || 0),
+      businessProductId: productId > 0 ? productId : 0,
+      cliente: String(options.cliente ?? elements.cliente.value ?? "").trim(),
+      descripcion: description,
+      medioPago: options.medioPago || elements.medioPago.value,
+      valorTotal: totalAmount,
+      abono: paidAmount,
       inventoryProductId: 0,
       inventoryQuantity: 0,
       inventoryEffect: "ninguno",
-      observaciones: elements.observaciones.value.trim(),
-      justificacionEdicion: elements.editJustification.value.trim(),
+      observaciones: String(
+        options.observaciones ?? elements.observaciones.value ?? ""
+      ).trim(),
+      justificacionEdicion: String(
+        options.justificacionEdicion ?? elements.editJustification.value ?? ""
+      ).trim(),
     };
+  }
+
+  function addSalesDraftItem() {
+    if (elements.movementId.value) {
+      elements.movementFeedback.textContent =
+        "En edición se actualiza un solo movimiento. Crea una venta nueva para registrar varios productos.";
+      return;
+    }
+
+    const selectedProduct = getBusinessProductById(
+      elements.movementBusinessProductId.value
+    );
+    if (!selectedProduct) {
+      elements.movementFeedback.textContent =
+        "Selecciona el producto o servicio que quieres agregar a la venta.";
+      elements.movementBusinessProductId?.focus();
+      return;
+    }
+
+    const quantity = normalizeSalesQuantity(salesElements.quantity?.value || 0);
+    if (!(quantity > 0)) {
+      elements.movementFeedback.textContent =
+        "La cantidad del producto debe ser mayor que cero.";
+      salesElements.quantity?.focus();
+      return;
+    }
+
+    const existingItem = salesDraftItems.find(
+      (item) =>
+        Number(item.productId || 0) === Number(selectedProduct.id) &&
+        normalizeMoney(item.unitPrice) === normalizeMoney(selectedProduct.defaultAmount)
+    );
+    if (existingItem) {
+      existingItem.quantity = normalizeSalesQuantity(existingItem.quantity + quantity);
+    } else {
+      salesDraftItems.push({
+        id: `${Date.now()}-${Math.round(Math.random() * 100000)}`,
+        productId: Number(selectedProduct.id),
+        name: selectedProduct.name,
+        categoryLabel:
+          selectedProduct.category || getBusinessProductCategoryLabel(selectedProduct),
+        unitPrice: normalizeMoney(selectedProduct.defaultAmount),
+        quantity,
+      });
+    }
+
+    if (!elements.descripcion.value.trim()) {
+      elements.descripcion.value = "Venta múltiple";
+    }
+
+    if (salesElements.quantity) {
+      salesElements.quantity.value = "1";
+    }
+    renderSalesDraftItems();
+    syncSalesTotalField();
+
+    elements.movementFeedback.textContent = `${selectedProduct.name} agregado a la venta.`;
+  }
+
+  function handleSalesDraftListClick(event) {
+    const removeButton = event.target.closest("[data-sales-item-remove-id]");
+    if (!removeButton) {
+      return;
+    }
+
+    const itemId = String(removeButton.dataset.salesItemRemoveId || "");
+    if (!itemId) {
+      return;
+    }
+
+    salesDraftItems = salesDraftItems.filter((item) => String(item.id) !== itemId);
+    renderSalesDraftItems();
+    syncSalesTotalField();
+  }
+
+  function handleSalesDraftListInput(event) {
+    const quantityInput = event.target.closest("[data-sales-item-quantity-id]");
+    if (!quantityInput) {
+      return;
+    }
+
+    const itemId = String(quantityInput.dataset.salesItemQuantityId || "");
+    const quantity = normalizeSalesQuantity(quantityInput.value);
+    const item = salesDraftItems.find((entry) => String(entry.id) === itemId);
+    if (!item) {
+      return;
+    }
+
+    if (!(quantity > 0)) {
+      salesDraftItems = salesDraftItems.filter((entry) => String(entry.id) !== itemId);
+    } else {
+      item.quantity = quantity;
+    }
+
+    renderSalesDraftItems();
+    syncSalesTotalField();
   }
 
   async function handleSalesSubmitOverride(event) {
@@ -269,6 +603,8 @@
     if (activeMovementPanel !== "ventas") {
       return;
     }
+
+    const isEditing = Boolean(elements.movementId.value);
 
     const typedClientQuery = String(elements.clienteSearch?.value || "").trim();
     const resolvedClient =
@@ -284,41 +620,94 @@
       return;
     }
 
+    if (!isEditing && !salesDraftItems.length) {
+      elements.movementFeedback.textContent =
+        "Agrega al menos un producto al detalle para registrar la venta.";
+      salesElements.addItemButton?.focus();
+      return;
+    }
+
     const selectedProduct = getBusinessProductById(
       elements.movementBusinessProductId.value
     );
-    if (!selectedProduct) {
-      elements.movementFeedback.textContent =
-        "Selecciona el producto o servicio vendido para registrar la venta.";
-      elements.movementBusinessProductId?.focus();
-      return;
-    }
-
-    const payload = buildSalesPayload();
-    payload.estadoPago = derivePaymentStatus(payload.valorTotal, payload.abono);
-
-    const validation = validateMovement(payload, {
-      isEditing: Boolean(elements.movementId.value),
-    });
-    if (!validation.valid) {
-      elements.movementFeedback.textContent = validation.message;
-      return;
-    }
 
     try {
-      if (elements.movementId.value) {
+      if (isEditing) {
+        const payload = buildSalesPayload({
+          selectedProduct,
+          valorTotal: elements.valorTotal.value,
+          abono: elements.abono.value,
+        });
+        payload.estadoPago = derivePaymentStatus(payload.valorTotal, payload.abono);
+
+        const validation = validateMovement(payload, {
+          isEditing: true,
+        });
+        if (!validation.valid) {
+          elements.movementFeedback.textContent = validation.message;
+          return;
+        }
+
         await apiRequest(`/api/movements/${elements.movementId.value}`, {
           method: "PUT",
           body: JSON.stringify(payload),
         });
       } else {
-        await apiRequest("/api/movements", {
-          method: "POST",
-          body: JSON.stringify(payload),
-        });
+        syncSalesTotalField();
+        const totalAmount = normalizeMoney(elements.valorTotal.value);
+        const paidAmount = normalizeMoney(elements.abono.value);
+
+        if (!(totalAmount > 0)) {
+          elements.movementFeedback.textContent =
+            "El total de la venta debe ser mayor que cero.";
+          return;
+        }
+
+        if (paidAmount < 0 || paidAmount > totalAmount) {
+          elements.movementFeedback.textContent =
+            "El abono total no puede ser negativo ni mayor al valor total de la venta.";
+          return;
+        }
+
+        let remainingPaid = paidAmount;
+        for (const item of salesDraftItems) {
+          const currentProduct = getBusinessProductById(item.productId);
+          if (!currentProduct) {
+            elements.movementFeedback.textContent =
+              `No encontramos el producto ${item.name}. Actualiza el detalle de venta e intenta de nuevo.`;
+            return;
+          }
+
+          const lineTotal = computeSalesItemSubtotal(item.quantity, item.unitPrice);
+          const linePaid = normalizeMoney(Math.min(remainingPaid, lineTotal));
+          remainingPaid = normalizeMoney(Math.max(0, remainingPaid - linePaid));
+
+          const payload = buildSalesPayload({
+            selectedProduct: currentProduct,
+            businessProductId: item.productId,
+            quantity: item.quantity,
+            valorTotal: lineTotal,
+            abono: linePaid,
+          });
+          payload.estadoPago = derivePaymentStatus(payload.valorTotal, payload.abono);
+
+          const validation = validateMovement(payload, {
+            isEditing: false,
+          });
+          if (!validation.valid) {
+            elements.movementFeedback.textContent = validation.message;
+            return;
+          }
+
+          await apiRequest("/api/movements", {
+            method: "POST",
+            body: JSON.stringify(payload),
+          });
+        }
       }
 
       resetMovementForm();
+      clearSalesDraft();
       applySalesOnlyMode();
       syncMovementBusinessProductSelection({
         preserveValue: true,
@@ -727,6 +1116,30 @@
       );
   }
 
+  function bindSalesDraftEvents() {
+    salesElements.addItemButton?.addEventListener("click", addSalesDraftItem);
+    salesElements.quantity?.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter") {
+        return;
+      }
+      event.preventDefault();
+      addSalesDraftItem();
+    });
+
+    salesElements.itemsList?.addEventListener("click", handleSalesDraftListClick);
+    salesElements.itemsList?.addEventListener("input", handleSalesDraftListInput);
+
+    elements.linea?.addEventListener("change", () => {
+      if (elements.movementId.value || !salesDraftItems.length) {
+        return;
+      }
+
+      clearSalesDraft();
+      elements.movementFeedback.textContent =
+        "Cambiaste la línea de negocio, por eso limpiamos el detalle de venta para evitar cruces entre líneas.";
+    });
+  }
+
   function bindSalesSubmitOverride() {
     if (!elements.movementForm) {
       return;
@@ -742,6 +1155,7 @@
 
     elements.cancelEdit.addEventListener("click", () => {
       window.requestAnimationFrame(() => {
+        clearSalesDraft();
         applySalesOnlyMode();
         syncMovementBusinessProductSelection({
           preserveValue: true,
@@ -776,6 +1190,11 @@
       applySalesOnlyMode();
       if (activeMovementPanel === "compras") {
         renderPurchasesModule();
+      } else {
+        syncSalesDraftEditState();
+        if (!elements.movementId.value) {
+          syncSalesTotalField();
+        }
       }
     }
   };
@@ -783,6 +1202,7 @@
   window.getFilteredMovements = getFilteredSalesMovements;
 
   bindMovementPanelEvents();
+  bindSalesDraftEvents();
   bindSalesSubmitOverride();
   bindCancelEditOverride();
   bindQuickMovementOverride();
@@ -794,5 +1214,7 @@
     preserveValue: true,
     preserveCategoryValue: true,
   });
+  renderSalesDraftItems();
+  syncSalesTotalField();
   setMovementPanel("ventas");
 })();
