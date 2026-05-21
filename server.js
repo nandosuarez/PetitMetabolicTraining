@@ -66,6 +66,7 @@ const programmingExerciseFamilies = new Set([
   "multiarticular_tren_superior",
   "aislado_por_musculo",
   "hyrox_oficial",
+  "potencia_explosividad",
 ]);
 
 app.use(express.json({ limit: "25mb" }));
@@ -6533,6 +6534,7 @@ app.use((error, _req, res, _next) => {
 
 async function start() {
   await checkConnection();
+  await ensureProgrammingExerciseFamiliesConstraint();
   await ensureBootstrapAdmin();
 
   app.listen(port, host, () => {
@@ -6545,6 +6547,46 @@ start().catch((error) => {
   console.error(error.message);
   process.exit(1);
 });
+
+async function ensureProgrammingExerciseFamiliesConstraint() {
+  await query(`
+    do $$
+    declare
+      constraint_row record;
+    begin
+      if to_regclass('public.programming_exercises') is not null then
+        for constraint_row in
+          select conname
+          from pg_constraint
+          where conrelid = 'public.programming_exercises'::regclass
+            and contype = 'c'
+            and pg_get_constraintdef(oid) ilike '%family%'
+        loop
+          execute format(
+            'alter table public.programming_exercises drop constraint %I',
+            constraint_row.conname
+          );
+        end loop;
+
+        alter table public.programming_exercises
+          add constraint programming_exercises_family_check
+          check (
+            family in (
+              'multiarticular_tren_inferior',
+              'multiarticular_tren_superior',
+              'aislado_por_musculo',
+              'hyrox_oficial',
+              'potencia_explosividad'
+            )
+          );
+      end if;
+    exception
+      when duplicate_object then
+        null;
+    end
+    $$;
+  `);
+}
 
 async function ensureBootstrapAdmin() {
   const totalUsersResult = await query(

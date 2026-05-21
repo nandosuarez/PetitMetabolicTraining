@@ -9296,6 +9296,10 @@ function getProgrammingFamilyOptions() {
       value: "hyrox_oficial",
       label: "HYROX oficial",
     },
+    {
+      value: "potencia_explosividad",
+      label: "Potencia y explosividad",
+    },
   ];
 }
 

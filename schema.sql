@@ -288,7 +288,8 @@ create table if not exists programming_exercises (
       'multiarticular_tren_inferior',
       'multiarticular_tren_superior',
       'aislado_por_musculo',
-      'hyrox_oficial'
+      'hyrox_oficial',
+      'potencia_explosividad'
     )
   ),
   category text not null,
