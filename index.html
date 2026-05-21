@@ -2351,7 +2351,28 @@
 
                   <label>
                     Categoria interna
-                    <input id="inventory-product-category" type="text" required />
+                    <input
+                      id="inventory-product-category"
+                      type="text"
+                      list="inventory-product-category-list"
+                      placeholder="Selecciona o escribe una categoria"
+                      required
+                    />
+                    <datalist id="inventory-product-category-list">
+                      <option value="Bebidas"></option>
+                      <option value="Lacteos"></option>
+                      <option value="Frutas"></option>
+                      <option value="Condimentos"></option>
+                      <option value="Carnes"></option>
+                      <option value="Huevos"></option>
+                      <option value="Granos"></option>
+                      <option value="Suplementos"></option>
+                      <option value="Snacks"></option>
+                      <option value="Aseo"></option>
+                      <option value="Empaques"></option>
+                      <option value="Servicio"></option>
+                      <option value="Uso interno"></option>
+                    </datalist>
                   </label>
 
                   <label class="inventory-sale-config">
