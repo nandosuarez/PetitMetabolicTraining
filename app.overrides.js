@@ -50,6 +50,7 @@
   };
 
   let salesDraftItems = [];
+  let lastAutoSalesDescription = "";
 
   function normalizeMovementPanel(panel) {
     return ["ventas", "compras"].includes(panel) ? panel : "ventas";
@@ -73,7 +74,7 @@
     if (!Number.isFinite(numericValue) || numericValue <= 0) {
       return 0;
     }
-    return Number(numericValue.toFixed(2));
+    return Math.floor(numericValue);
   }
 
   function normalizeMoney(value) {
@@ -142,6 +143,7 @@
 
   function clearSalesDraft(options = {}) {
     salesDraftItems = [];
+    lastAutoSalesDescription = "";
     if (salesElements.quantity) {
       salesElements.quantity.value = "1";
     }
@@ -184,8 +186,8 @@
                 Cantidad
                 <input
                   type="number"
-                  min="0.01"
-                  step="0.01"
+                  min="1"
+                  step="1"
                   value="${escapeHtml(String(item.quantity))}"
                   data-sales-item-quantity-id="${escapeHtml(item.id)}"
                 />
@@ -306,6 +308,18 @@
     }
   }
 
+  function shouldReplaceAutoSalesDescription(currentDescription) {
+    const description = String(currentDescription || "").trim();
+    if (!description) {
+      return true;
+    }
+
+    return (
+      description === lastAutoSalesDescription ||
+      description === "Venta múltiple"
+    );
+  }
+
   window.fillMovementBusinessProductOptions = function fillMovementOptionsOverride(
     selectedValue = ""
   ) {
@@ -400,8 +414,12 @@
         syncComputedPaymentStatus();
       }
 
-      if (!elements.descripcion.value.trim() && !salesDraftItems.length) {
-        elements.descripcion.value = selectedProduct.name;
+      if (!salesDraftItems.length) {
+        const currentDescription = elements.descripcion.value;
+        if (shouldReplaceAutoSalesDescription(currentDescription)) {
+          elements.descripcion.value = selectedProduct.name;
+          lastAutoSalesDescription = selectedProduct.name;
+        }
       }
 
       if (salesDraftItems.length && !elements.movementId.value) {
@@ -544,8 +562,12 @@
       });
     }
 
-    if (!elements.descripcion.value.trim()) {
+    if (salesDraftItems.length > 1) {
       elements.descripcion.value = "Venta múltiple";
+      lastAutoSalesDescription = "Venta múltiple";
+    } else if (shouldReplaceAutoSalesDescription(elements.descripcion.value)) {
+      elements.descripcion.value = selectedProduct.name;
+      lastAutoSalesDescription = selectedProduct.name;
     }
 
     if (salesElements.quantity) {
@@ -580,20 +602,68 @@
     }
 
     const itemId = String(quantityInput.dataset.salesItemQuantityId || "");
-    const quantity = normalizeSalesQuantity(quantityInput.value);
+    const rawValue = String(quantityInput.value ?? "").trim();
     const item = salesDraftItems.find((entry) => String(entry.id) === itemId);
     if (!item) {
       return;
     }
 
+    if (!rawValue) {
+      return;
+    }
+
+    const quantity = normalizeSalesQuantity(rawValue);
     if (!(quantity > 0)) {
-      salesDraftItems = salesDraftItems.filter((entry) => String(entry.id) !== itemId);
-    } else {
+      return;
+    }
+
+    item.quantity = quantity;
+    renderSalesDraftItems();
+    syncSalesTotalField();
+  }
+
+  function getValidatedSalesDraftItems() {
+    const draftItems = salesDraftItems.map((item) => ({ ...item }));
+    const quantityInputs = [
+      ...(salesElements.itemsList?.querySelectorAll(
+        "[data-sales-item-quantity-id]"
+      ) || []),
+    ];
+
+    for (const input of quantityInputs) {
+      const itemId = String(input.dataset.salesItemQuantityId || "");
+      const item = draftItems.find((entry) => String(entry.id) === itemId);
+      if (!item) {
+        continue;
+      }
+
+      const rawValue = String(input.value ?? "").trim();
+      if (!rawValue) {
+        return {
+          valid: false,
+          message:
+            "Hay productos sin cantidad. Completa todas las cantidades antes de guardar la venta.",
+          focusNode: input,
+        };
+      }
+
+      const quantity = normalizeSalesQuantity(rawValue);
+      if (!(quantity > 0)) {
+        return {
+          valid: false,
+          message:
+            "Todas las cantidades deben ser números enteros mayores que cero.",
+          focusNode: input,
+        };
+      }
+
       item.quantity = quantity;
     }
 
-    renderSalesDraftItems();
-    syncSalesTotalField();
+    return {
+      valid: true,
+      items: draftItems,
+    };
   }
 
   async function handleSalesSubmitOverride(event) {
@@ -653,6 +723,15 @@
           body: JSON.stringify(payload),
         });
       } else {
+        const draftValidation = getValidatedSalesDraftItems();
+        if (!draftValidation.valid) {
+          elements.movementFeedback.textContent = draftValidation.message;
+          draftValidation.focusNode?.focus();
+          return;
+        }
+
+        salesDraftItems = draftValidation.items;
+        renderSalesDraftItems();
         syncSalesTotalField();
         const totalAmount = normalizeMoney(elements.valorTotal.value);
         const paidAmount = normalizeMoney(elements.abono.value);
@@ -1127,7 +1206,7 @@
     });
 
     salesElements.itemsList?.addEventListener("click", handleSalesDraftListClick);
-    salesElements.itemsList?.addEventListener("input", handleSalesDraftListInput);
+    salesElements.itemsList?.addEventListener("change", handleSalesDraftListInput);
 
     elements.linea?.addEventListener("change", () => {
       if (elements.movementId.value || !salesDraftItems.length) {
