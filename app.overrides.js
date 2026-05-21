@@ -1,142 +1,798 @@
-function fillMovementBusinessProductOptions(selectedValue = "") {
-  if (!elements.movementBusinessProductId) {
+(function movementAndPurchasesOverrides() {
+  if (typeof window === "undefined" || typeof elements === "undefined") {
     return;
   }
 
-  const selectedRecord = getBusinessProductById(selectedValue);
-  fillSelectFromRecords(
-    elements.movementBusinessProductId,
-    getAvailableMovementBusinessProducts(),
-    {
-      selectedValue: String(
-        selectedValue || elements.movementBusinessProductId.value || ""
-      ),
-      includeRecord:
-        selectedRecord &&
-        selectedRecord.businessLine === (elements.linea?.value || "Gimnasio")
-          ? selectedRecord
-          : null,
-      placeholder: "Sin producto o servicio",
-      labelBuilder: (item) => {
-        const detailLabel = getBusinessProductDetailLabel(item);
-        return `${item.name} - ${getBusinessProductCategoryLabel(item)}${
-          detailLabel ? ` - ${detailLabel}` : ""
-        } - ${formatCurrency(item.defaultAmount)}`;
-      },
-    }
-  );
-}
+  let activeMovementPanel = "ventas";
 
-function syncMovementBusinessProductSelection(options = {}) {
-  if (!elements.movementBusinessProductId) {
-    return null;
+  const movementPanelButtons = [
+    ...document.querySelectorAll("[data-movement-panel]"),
+  ];
+  const movementPanels = {
+    ventas: document.getElementById("movement-panel-ventas"),
+    compras: document.getElementById("movement-panel-compras"),
+  };
+
+  const purchaseElements = {
+    form: document.getElementById("purchase-form"),
+    movementId: document.getElementById("purchase-movement-id"),
+    linea: document.getElementById("purchase-linea"),
+    fecha: document.getElementById("purchase-fecha"),
+    kind: document.getElementById("purchase-kind"),
+    categoriaShell: document.getElementById("purchase-category-shell"),
+    categoria: document.getElementById("purchase-categoria"),
+    inventoryProductShell: document.getElementById(
+      "purchase-inventory-product-shell"
+    ),
+    inventoryProductId: document.getElementById("purchase-inventory-product-id"),
+    inventoryQuantityShell: document.getElementById("purchase-quantity-shell"),
+    inventoryQuantity: document.getElementById("purchase-inventory-quantity"),
+    unitCostShell: document.getElementById("purchase-unit-cost-shell"),
+    unitCost: document.getElementById("purchase-unit-cost"),
+    medioPago: document.getElementById("purchase-medio-pago"),
+    beneficiary: document.getElementById("purchase-beneficiary"),
+    description: document.getElementById("purchase-description"),
+    total: document.getElementById("purchase-total"),
+    paid: document.getElementById("purchase-paid"),
+    notes: document.getElementById("purchase-notes"),
+    feedback: document.getElementById("purchase-feedback"),
+    filterLine: document.getElementById("purchase-filter-line"),
+    filterKind: document.getElementById("purchase-filter-kind"),
+    filterQuery: document.getElementById("purchase-filter-query"),
+    metrics: document.getElementById("purchase-metrics"),
+    table: document.getElementById("purchases-table"),
+  };
+
+  function normalizeMovementPanel(panel) {
+    return ["ventas", "compras"].includes(panel) ? panel : "ventas";
   }
 
-  fillMovementBusinessProductOptions(
-    String(options.selectedValue ?? elements.movementBusinessProductId.value ?? "")
-  );
+  function isPurchaseKindCost() {
+    return String(purchaseElements.kind?.value || "Costo") === "Costo";
+  }
 
-  const selectedProduct = getBusinessProductById(
-    elements.movementBusinessProductId.value
-  );
-
-  if (
-    !selectedProduct ||
-    selectedProduct.businessLine !== (elements.linea?.value || "Gimnasio")
-  ) {
-    if (!options.preserveValue) {
-      elements.movementBusinessProductId.value = "";
+  function setNodeVisibility(node, visible) {
+    if (!node) {
+      return;
     }
 
-    syncCategoryOptions({
-      includeValue:
-        options.preserveCategoryValue === false ? "" : elements.categoria?.value || "",
+    node.classList.toggle("is-hidden", !visible);
+    node.setAttribute("aria-hidden", String(!visible));
+  }
+
+  function setMovementPanel(panel) {
+    activeMovementPanel = normalizeMovementPanel(panel);
+
+    movementPanelButtons.forEach((button) => {
+      const isActive = button.dataset.movementPanel === activeMovementPanel;
+      button.classList.toggle("active", isActive);
+      button.setAttribute("aria-pressed", String(isActive));
     });
-    elements.categoria.disabled = false;
-    elements.movementInventoryProductId.disabled = false;
-    elements.movementInventoryEffect.disabled = false;
-    syncMovementInventoryFields();
 
-    if (elements.movementBusinessProductFeedback) {
-      elements.movementBusinessProductFeedback.textContent =
-        "Si seleccionas un producto o servicio, la categoria se completa sola, puede sugerir el valor y tambien mover inventario segun su configuracion.";
-    }
+    Object.entries(movementPanels).forEach(([key, section]) => {
+      if (!section) {
+        return;
+      }
+      const isActive = key === activeMovementPanel;
+      section.classList.toggle("is-hidden", !isActive);
+      section.setAttribute("aria-hidden", String(!isActive));
+    });
 
-    return null;
-  }
-
-  syncCategoryOptions({
-    includeValue: selectedProduct.category || elements.categoria?.value || "",
-  });
-
-  if (selectedProduct.category) {
-    elements.categoria.value = selectedProduct.category;
-  }
-
-  elements.categoria.disabled = true;
-
-  if (selectedProduct.defaultAmount > 0 && !options.preserveValue) {
-    elements.valorTotal.value = String(selectedProduct.defaultAmount);
-    syncComputedPaymentStatus();
-  }
-
-  if (!elements.descripcion.value.trim()) {
-    elements.descripcion.value = selectedProduct.name;
-  }
-
-  if (elements.movementBusinessProductFeedback) {
-    const recipeItems = getBusinessProductComponents(selectedProduct.id).length;
-    const categoryLabel = getBusinessProductCategoryLabel(selectedProduct);
-    const detailLabel = getBusinessProductDetailLabel(selectedProduct);
-
-    if (selectedProduct.directInventoryProductId > 0 || recipeItems > 0) {
-      fillMovementInventoryProductOptions({
-        selectedValue: "",
+    if (activeMovementPanel === "ventas") {
+      applySalesOnlyMode();
+      syncMovementBusinessProductSelection({
+        preserveValue: true,
+        preserveCategoryValue: true,
       });
-      elements.movementInventoryProductId.value = "";
-      elements.movementInventoryEffect.value = "ninguno";
-      elements.movementInventoryQuantity.value = "";
-      elements.movementInventoryProductId.disabled = true;
-      elements.movementInventoryEffect.disabled = true;
-      elements.movementInventoryQuantity.disabled = true;
-      syncMovementInventoryFields();
-    } else {
-      elements.movementInventoryProductId.disabled = false;
-      elements.movementInventoryEffect.disabled = false;
-      syncMovementInventoryFields();
+      renderMovementsView();
+      return;
     }
 
-    const stockMessage =
-      selectedProduct.directInventoryProductId > 0
-        ? `descontara ${formatInventoryQuantity(
-            selectedProduct.directInventoryQuantity || 1,
-            selectedProduct.directInventoryProductUnitName
-          )} de ${selectedProduct.directInventoryProductName || "inventario"}`
-        : recipeItems
-          ? `descontara ${recipeItems} insumo(s) configurados en su receta`
-          : "no mueve inventario automaticamente";
-
-    elements.movementBusinessProductFeedback.textContent =
-      `${selectedProduct.name} - ${categoryLabel}${
-        detailLabel ? ` - ${detailLabel}` : ""
-      } - ${formatCurrency(selectedProduct.defaultAmount)}. Al registrar la venta, ${stockMessage}.`;
+    renderPurchasesModule();
   }
 
-  return selectedProduct;
-}
+  function applySalesOnlyMode() {
+    const typeLabel = elements.tipo?.closest("label");
+    const categoryLabel = elements.categoria?.closest("label");
+    setNodeVisibility(typeLabel, false);
+    setNodeVisibility(categoryLabel, false);
 
-if (elements?.movementBusinessProductId) {
-  elements.movementBusinessProductId.addEventListener(
-    "change",
-    (event) => {
-      event.stopImmediatePropagation();
-      syncMovementBusinessProductSelection();
-    },
-    true
-  );
-}
+    if (elements.tipo) {
+      elements.tipo.value = "Ingreso";
+      elements.tipo.disabled = true;
+    }
 
-syncMovementBusinessProductSelection({
-  preserveValue: true,
-  preserveCategoryValue: true,
-});
+    if (elements.categoria) {
+      elements.categoria.disabled = true;
+    }
+
+    if (elements.movementFormTitle && !elements.movementId.value) {
+      elements.movementFormTitle.textContent = "Registrar venta";
+    }
+
+    if (elements.movementFeedback && !elements.movementId.value) {
+      elements.movementFeedback.textContent =
+        "Registra aquí únicamente ventas (ingresos). Compras y gastos van en el panel de Compras y gastos.";
+    }
+  }
+
+  window.fillMovementBusinessProductOptions = function fillMovementOptionsOverride(
+    selectedValue = ""
+  ) {
+    if (!elements.movementBusinessProductId) {
+      return;
+    }
+
+    const selectedRecord = getBusinessProductById(selectedValue);
+    fillSelectFromRecords(
+      elements.movementBusinessProductId,
+      getAvailableMovementBusinessProducts(),
+      {
+        selectedValue: String(
+          selectedValue || elements.movementBusinessProductId.value || ""
+        ),
+        includeRecord:
+          selectedRecord &&
+          selectedRecord.businessLine === (elements.linea?.value || "Gimnasio")
+            ? selectedRecord
+            : null,
+        placeholder: "Selecciona producto o servicio",
+        labelBuilder: (item) => {
+          const detailLabel = getBusinessProductDetailLabel(item);
+          return `${item.name} - ${getBusinessProductCategoryLabel(item)}${
+            detailLabel ? ` - ${detailLabel}` : ""
+          } - ${formatCurrency(item.defaultAmount)}`;
+        },
+      }
+    );
+  };
+
+  window.syncMovementBusinessProductSelection =
+    function syncMovementBusinessProductSelectionOverride(options = {}) {
+      if (!elements.movementBusinessProductId) {
+        return null;
+      }
+
+      fillMovementBusinessProductOptions(
+        String(
+          options.selectedValue ?? elements.movementBusinessProductId.value ?? ""
+        )
+      );
+
+      if (elements.tipo) {
+        elements.tipo.value = "Ingreso";
+      }
+
+      const selectedProduct = getBusinessProductById(
+        elements.movementBusinessProductId.value
+      );
+      const currentLine = elements.linea?.value || "Gimnasio";
+
+      if (!selectedProduct || selectedProduct.businessLine !== currentLine) {
+        if (!options.preserveValue) {
+          elements.movementBusinessProductId.value = "";
+        }
+
+        syncCategoryOptions({
+          includeValue:
+            options.preserveCategoryValue === false
+              ? ""
+              : elements.categoria?.value || "",
+        });
+        if (elements.categoria) {
+          elements.categoria.disabled = true;
+        }
+
+        if (elements.movementBusinessProductFeedback) {
+          elements.movementBusinessProductFeedback.textContent =
+            "Selecciona el producto o servicio vendido para completar automáticamente la categoría y el valor sugerido.";
+        }
+
+        return null;
+      }
+
+      syncCategoryOptions({
+        includeValue: selectedProduct.category || elements.categoria?.value || "",
+      });
+
+      if (selectedProduct.category) {
+        elements.categoria.value = selectedProduct.category;
+      }
+      elements.categoria.disabled = true;
+
+      if (selectedProduct.defaultAmount > 0 && !options.preserveValue) {
+        elements.valorTotal.value = String(selectedProduct.defaultAmount);
+        syncComputedPaymentStatus();
+      }
+
+      if (!elements.descripcion.value.trim()) {
+        elements.descripcion.value = selectedProduct.name;
+      }
+
+      if (elements.movementBusinessProductFeedback) {
+        const recipeItems = getBusinessProductComponents(selectedProduct.id).length;
+        const stockMessage =
+          selectedProduct.directInventoryProductId > 0
+            ? `descontará ${formatInventoryQuantity(
+                selectedProduct.directInventoryQuantity || 1,
+                selectedProduct.directInventoryProductUnitName
+              )} de ${
+                selectedProduct.directInventoryProductName || "inventario"
+              }`
+            : recipeItems > 0
+              ? `descontará ${recipeItems} insumo(s) configurados en su receta`
+              : "no mueve inventario automáticamente";
+        elements.movementBusinessProductFeedback.textContent =
+          `${selectedProduct.name} - ${getBusinessProductCategoryLabel(
+            selectedProduct
+          )} - ${formatCurrency(
+            selectedProduct.defaultAmount
+          )}. Al registrar la venta, ${stockMessage}.`;
+      }
+
+      return selectedProduct;
+    };
+
+  function buildSalesPayload() {
+    const selectedProduct = getBusinessProductById(
+      elements.movementBusinessProductId.value
+    );
+
+    const categoryValue =
+      selectedProduct?.category ||
+      getBusinessProductCategoryLabel(selectedProduct) ||
+      "Ventas";
+
+    return {
+      linea: elements.linea.value,
+      fecha: elements.fecha.value,
+      tipo: "Ingreso",
+      categoria: categoryValue,
+      businessProductId: Number(elements.movementBusinessProductId.value || 0),
+      cliente: elements.cliente.value.trim(),
+      descripcion: elements.descripcion.value.trim(),
+      medioPago: elements.medioPago.value,
+      valorTotal: Number(elements.valorTotal.value || 0),
+      abono: Number(elements.abono.value || 0),
+      inventoryProductId: 0,
+      inventoryQuantity: 0,
+      inventoryEffect: "ninguno",
+      observaciones: elements.observaciones.value.trim(),
+      justificacionEdicion: elements.editJustification.value.trim(),
+    };
+  }
+
+  async function handleSalesSubmitOverride(event) {
+    event.preventDefault();
+    event.stopImmediatePropagation();
+
+    if (activeMovementPanel !== "ventas") {
+      return;
+    }
+
+    const typedClientQuery = String(elements.clienteSearch?.value || "").trim();
+    const resolvedClient =
+      syncMovementClientSelectionFromSearch({
+        allowClosestMatch: true,
+        allowSingleMatch: true,
+      }) || !typedClientQuery;
+
+    if (!resolvedClient && typedClientQuery) {
+      elements.movementFeedback.textContent =
+        "Selecciona un cliente válido de la lista antes de guardar la venta.";
+      elements.clienteSearch?.focus();
+      return;
+    }
+
+    const selectedProduct = getBusinessProductById(
+      elements.movementBusinessProductId.value
+    );
+    if (!selectedProduct) {
+      elements.movementFeedback.textContent =
+        "Selecciona el producto o servicio vendido para registrar la venta.";
+      elements.movementBusinessProductId?.focus();
+      return;
+    }
+
+    const payload = buildSalesPayload();
+    payload.estadoPago = derivePaymentStatus(payload.valorTotal, payload.abono);
+
+    const validation = validateMovement(payload, {
+      isEditing: Boolean(elements.movementId.value),
+    });
+    if (!validation.valid) {
+      elements.movementFeedback.textContent = validation.message;
+      return;
+    }
+
+    try {
+      if (elements.movementId.value) {
+        await apiRequest(`/api/movements/${elements.movementId.value}`, {
+          method: "PUT",
+          body: JSON.stringify(payload),
+        });
+      } else {
+        await apiRequest("/api/movements", {
+          method: "POST",
+          body: JSON.stringify(payload),
+        });
+      }
+
+      resetMovementForm();
+      applySalesOnlyMode();
+      syncMovementBusinessProductSelection({
+        preserveValue: true,
+        preserveCategoryValue: true,
+      });
+      await loadBootstrap();
+      switchView("movimientos");
+      setMovementPanel("ventas");
+    } catch (error) {
+      elements.movementFeedback.textContent = error.message;
+    }
+  }
+
+  function getFilteredSalesMovements() {
+    const line = elements.filterLine.value;
+    const status = elements.filterStatus.value;
+    const query = normalizeSearchValue(elements.filterQuery.value || "");
+    const recordsQuery = normalizeSearchValue(
+      elements.movementRecordsQuery?.value || ""
+    );
+
+    return state.movements.filter((item) => {
+      if (item.tipo !== "Ingreso") {
+        return false;
+      }
+
+      const lineMatches = line === "Todas" || item.linea === line;
+      const statusMatches = status === "Todos" || item.estadoPago === status;
+      const linkedClient = getLinkedClientRecord(item.cliente);
+      const searchText = normalizeSearchValue(
+        [
+          item.linea,
+          item.tipo,
+          item.categoria,
+          item.cliente,
+          linkedClient?.alias,
+          linkedClient?.documentNumber,
+          linkedClient?.phone,
+          linkedClient?.email,
+          item.descripcion,
+          item.estadoPago,
+          item.medioPago,
+          item.observaciones,
+        ].join(" ")
+      );
+      const queryMatches = !query || searchText.includes(query);
+      const recordsQueryMatches = !recordsQuery || searchText.includes(recordsQuery);
+      return lineMatches && statusMatches && queryMatches && recordsQueryMatches;
+    });
+  }
+
+  function fillPurchaseInventoryOptions(selectedValue = "") {
+    const products = (state.inventoryProducts || []).filter(
+      (item) => item.isActive && isInventoryProductStockTracked(item)
+    );
+    fillSelectFromRecords(purchaseElements.inventoryProductId, products, {
+      selectedValue: String(
+        selectedValue || purchaseElements.inventoryProductId.value || ""
+      ),
+      placeholder: "Selecciona producto de inventario",
+      labelBuilder: (item) =>
+        `${item.name} - ${item.area} - Stock ${formatInventoryQuantity(
+          item.currentStock,
+          item.unitName
+        )}`,
+    });
+  }
+
+  function fillPurchaseCategoryOptions(selectedValue = "") {
+    if (!purchaseElements.categoria) {
+      return;
+    }
+
+    const line = purchaseElements.linea?.value || "Gimnasio";
+    fillSelect(purchaseElements.categoria, getActiveCategoryValuesForLine(line), {
+      includeValue: selectedValue || purchaseElements.categoria.value || "",
+    });
+  }
+
+  function fillPurchasePaymentMethods(selectedValue = "") {
+    fillSelect(purchaseElements.medioPago, state.lists.mediosPago, {
+      includeValue: selectedValue || purchaseElements.medioPago.value || "",
+    });
+  }
+
+  function syncPurchaseTotalFromCost() {
+    if (!isPurchaseKindCost()) {
+      return;
+    }
+
+    const quantity = Number(purchaseElements.inventoryQuantity.value || 0);
+    const unitCost = Number(purchaseElements.unitCost.value || 0);
+    const total = Number((quantity * unitCost).toFixed(2));
+    purchaseElements.total.value = total > 0 ? String(total) : "";
+  }
+
+  function syncPurchaseKindUi() {
+    const isCost = isPurchaseKindCost();
+
+    setNodeVisibility(purchaseElements.inventoryProductShell, isCost);
+    setNodeVisibility(purchaseElements.inventoryQuantityShell, isCost);
+    setNodeVisibility(purchaseElements.unitCostShell, isCost);
+    setNodeVisibility(purchaseElements.categoriaShell, !isCost);
+
+    purchaseElements.inventoryProductId.required = isCost;
+    purchaseElements.inventoryQuantity.required = isCost;
+    purchaseElements.unitCost.required = isCost;
+    purchaseElements.categoria.required = !isCost;
+    purchaseElements.total.readOnly = isCost;
+    purchaseElements.total.required = !isCost;
+
+    if (isCost) {
+      syncPurchaseTotalFromCost();
+    } else {
+      purchaseElements.inventoryProductId.value = "";
+      purchaseElements.inventoryQuantity.value = "";
+      purchaseElements.unitCost.value = "";
+    }
+  }
+
+  function resetPurchaseForm() {
+    if (!purchaseElements.form) {
+      return;
+    }
+
+    purchaseElements.form.reset();
+    purchaseElements.movementId.value = "";
+    purchaseElements.fecha.value = getCurrentIsoDate();
+    purchaseElements.linea.value = "Gimnasio";
+    purchaseElements.kind.value = "Costo";
+    fillPurchaseCategoryOptions("");
+    fillPurchaseInventoryOptions("");
+    fillPurchasePaymentMethods("");
+    purchaseElements.feedback.textContent =
+      "Registra aquí costos y gastos. Si es compra de inventario, además actualiza stock.";
+    syncPurchaseKindUi();
+  }
+
+  function getPurchaseFilteredMovements() {
+    const line = purchaseElements.filterLine?.value || "Todas";
+    const kind = purchaseElements.filterKind?.value || "Todos";
+    const query = normalizeSearchValue(purchaseElements.filterQuery?.value || "");
+
+    return state.movements.filter((item) => {
+      if (!["Costo", "Gasto"].includes(item.tipo)) {
+        return false;
+      }
+
+      if (line !== "Todas" && item.linea !== line) {
+        return false;
+      }
+
+      if (kind !== "Todos" && item.tipo !== kind) {
+        return false;
+      }
+
+      if (!query) {
+        return true;
+      }
+
+      const searchText = normalizeSearchValue(
+        [
+          item.fecha,
+          item.linea,
+          item.tipo,
+          item.categoria,
+          item.cliente,
+          item.descripcion,
+          item.medioPago,
+          item.observaciones,
+          item.valorTotal,
+          item.abono,
+        ].join(" ")
+      );
+      return searchText.includes(query);
+    });
+  }
+
+  function renderPurchaseMetrics(items) {
+    if (!purchaseElements.metrics) {
+      return;
+    }
+
+    const totals = items.reduce(
+      (acc, item) => {
+        acc.total += Number(item.valorTotal || 0);
+        acc.paid += Number(item.abono || 0);
+        acc.pending += Number(item.saldoPendiente || 0);
+        return acc;
+      },
+      { total: 0, paid: 0, pending: 0 }
+    );
+    const costsCount = items.filter((item) => item.tipo === "Costo").length;
+    const expensesCount = items.filter((item) => item.tipo === "Gasto").length;
+
+    purchaseElements.metrics.innerHTML = `
+      <div class="mini-stat"><span>Registros</span><strong>${items.length}</strong></div>
+      <div class="mini-stat"><span>Costos</span><strong>${costsCount}</strong></div>
+      <div class="mini-stat"><span>Gastos</span><strong>${expensesCount}</strong></div>
+      <div class="mini-stat"><span>Total egresos</span><strong>${formatCurrency(totals.total)}</strong></div>
+      <div class="mini-stat"><span>Total pagado</span><strong>${formatCurrency(totals.paid)}</strong></div>
+      <div class="mini-stat"><span>Saldo pendiente</span><strong>${formatCurrency(totals.pending)}</strong></div>
+    `;
+  }
+
+  function renderPurchaseTable(items) {
+    if (!purchaseElements.table) {
+      return;
+    }
+
+    if (!items.length) {
+      purchaseElements.table.innerHTML = `
+        <tr>
+          <td colspan="7" class="empty-state">
+            No hay compras o gastos para los filtros seleccionados.
+          </td>
+        </tr>
+      `;
+      applyStackTableLabels(elements.appShell);
+      return;
+    }
+
+    const ordered = getSortedMovements(items);
+    purchaseElements.table.innerHTML = ordered
+      .map((item) => {
+        const summary = [
+          item.categoria || "Sin categoría",
+          item.cliente || "",
+          item.descripcion || "",
+        ]
+          .filter(Boolean)
+          .join(" · ");
+
+        return `
+          <tr>
+            <td>${escapeHtml(formatDate(item.fecha))}</td>
+            <td>${escapeHtml(item.tipo)}</td>
+            <td>${escapeHtml(summary || "Sin detalle")}</td>
+            <td>${escapeHtml(item.medioPago || "Sin caja")}</td>
+            <td>${formatCurrency(item.valorTotal)}</td>
+            <td>${formatCurrency(item.abono)}</td>
+            <td>${formatCurrency(item.saldoPendiente)}</td>
+          </tr>
+        `;
+      })
+      .join("");
+
+    applyStackTableLabels(elements.appShell);
+  }
+
+  function renderPurchasesModule() {
+    if (!purchaseElements.form) {
+      return;
+    }
+
+    fillPurchaseCategoryOptions();
+    fillPurchaseInventoryOptions();
+    fillPurchasePaymentMethods();
+    syncPurchaseKindUi();
+
+    const filtered = getPurchaseFilteredMovements();
+    renderPurchaseMetrics(filtered);
+    renderPurchaseTable(filtered);
+  }
+
+  function buildPurchasePayload() {
+    const isCost = isPurchaseKindCost();
+    const total = Number(purchaseElements.total.value || 0);
+    const paid = Number(purchaseElements.paid.value || 0);
+    const inventoryProductId = Number(purchaseElements.inventoryProductId.value || 0);
+    const inventoryQuantity = Number(
+      purchaseElements.inventoryQuantity.value || 0
+    );
+    const selectedInventoryProduct = getInventoryProductById(inventoryProductId);
+    const beneficiary = String(purchaseElements.beneficiary.value || "").trim();
+    const description = String(purchaseElements.description.value || "").trim();
+
+    let category = String(purchaseElements.categoria.value || "").trim();
+    if (isCost) {
+      category =
+        String(selectedInventoryProduct?.category || "").trim() ||
+        "Compras inventario";
+    }
+
+    return {
+      linea: purchaseElements.linea.value,
+      fecha: purchaseElements.fecha.value,
+      tipo: isCost ? "Costo" : "Gasto",
+      categoria: category,
+      businessProductId: 0,
+      cliente: beneficiary,
+      descripcion:
+        description ||
+        (isCost && selectedInventoryProduct
+          ? `Compra de ${selectedInventoryProduct.name}`
+          : "Gasto operativo"),
+      medioPago: purchaseElements.medioPago.value,
+      valorTotal: total,
+      abono: paid,
+      inventoryProductId: isCost ? inventoryProductId : 0,
+      inventoryQuantity: isCost ? inventoryQuantity : 0,
+      inventoryEffect: isCost ? "entrada" : "ninguno",
+      observaciones: purchaseElements.notes.value.trim(),
+      justificacionEdicion: "",
+    };
+  }
+
+  async function handlePurchaseSubmit(event) {
+    event.preventDefault();
+
+    const isCost = isPurchaseKindCost();
+    const payload = buildPurchasePayload();
+
+    if (isCost) {
+      if (!(payload.inventoryProductId > 0)) {
+        purchaseElements.feedback.textContent =
+          "Selecciona el producto o insumo comprado para actualizar inventario.";
+        purchaseElements.inventoryProductId.focus();
+        return;
+      }
+
+      if (!(payload.inventoryQuantity > 0)) {
+        purchaseElements.feedback.textContent =
+          "La cantidad comprada debe ser mayor que cero.";
+        purchaseElements.inventoryQuantity.focus();
+        return;
+      }
+
+      if (!(Number(purchaseElements.unitCost.value || 0) > 0)) {
+        purchaseElements.feedback.textContent =
+          "El costo unitario debe ser mayor que cero.";
+        purchaseElements.unitCost.focus();
+        return;
+      }
+    } else if (!payload.categoria) {
+      purchaseElements.feedback.textContent =
+        "Selecciona la categoría del gasto operativo.";
+      purchaseElements.categoria.focus();
+      return;
+    }
+
+    payload.estadoPago = derivePaymentStatus(payload.valorTotal, payload.abono);
+
+    const validation = validateMovement(payload, {
+      isEditing: Boolean(purchaseElements.movementId.value),
+    });
+    if (!validation.valid) {
+      purchaseElements.feedback.textContent = validation.message;
+      return;
+    }
+
+    try {
+      if (purchaseElements.movementId.value) {
+        await apiRequest(`/api/movements/${purchaseElements.movementId.value}`, {
+          method: "PUT",
+          body: JSON.stringify(payload),
+        });
+      } else {
+        await apiRequest("/api/movements", {
+          method: "POST",
+          body: JSON.stringify(payload),
+        });
+      }
+
+      resetPurchaseForm();
+      await loadBootstrap();
+      switchView("movimientos");
+      setMovementPanel("compras");
+      purchaseElements.feedback.textContent =
+        "Compra o gasto registrado correctamente.";
+    } catch (error) {
+      purchaseElements.feedback.textContent = error.message;
+    }
+  }
+
+  function bindMovementPanelEvents() {
+    movementPanelButtons.forEach((button) => {
+      button.addEventListener("click", () =>
+        setMovementPanel(button.dataset.movementPanel || "ventas")
+      );
+    });
+  }
+
+  function bindPurchaseEvents() {
+    if (!purchaseElements.form) {
+      return;
+    }
+
+    purchaseElements.form.addEventListener("submit", handlePurchaseSubmit);
+    purchaseElements.linea.addEventListener("change", () => {
+      fillPurchaseCategoryOptions("");
+      renderPurchasesModule();
+    });
+    purchaseElements.kind.addEventListener("change", () => {
+      syncPurchaseKindUi();
+      renderPurchasesModule();
+    });
+    purchaseElements.inventoryQuantity.addEventListener(
+      "input",
+      syncPurchaseTotalFromCost
+    );
+    purchaseElements.unitCost.addEventListener("input", syncPurchaseTotalFromCost);
+    [purchaseElements.filterLine, purchaseElements.filterKind, purchaseElements.filterQuery]
+      .forEach((node) =>
+        node?.addEventListener("input", renderPurchasesModule)
+      );
+  }
+
+  function bindSalesSubmitOverride() {
+    if (!elements.movementForm) {
+      return;
+    }
+
+    elements.movementForm.addEventListener("submit", handleSalesSubmitOverride, true);
+  }
+
+  function bindCancelEditOverride() {
+    if (!elements.cancelEdit) {
+      return;
+    }
+
+    elements.cancelEdit.addEventListener("click", () => {
+      window.requestAnimationFrame(() => {
+        applySalesOnlyMode();
+        syncMovementBusinessProductSelection({
+          preserveValue: true,
+          preserveCategoryValue: true,
+        });
+      });
+    });
+  }
+
+  function bindQuickMovementOverride() {
+    if (!elements.quickMovement) {
+      return;
+    }
+
+    elements.quickMovement.textContent = "Nueva venta";
+    elements.quickMovement.addEventListener(
+      "click",
+      () => {
+        window.requestAnimationFrame(() => {
+          setMovementPanel("ventas");
+        });
+      },
+      true
+    );
+  }
+
+  const originalSwitchView = switchView;
+  window.switchView = function switchViewOverride(view, options = {}) {
+    originalSwitchView(view, options);
+
+    if (view === "movimientos") {
+      applySalesOnlyMode();
+      if (activeMovementPanel === "compras") {
+        renderPurchasesModule();
+      }
+    }
+  };
+
+  window.getFilteredMovements = getFilteredSalesMovements;
+
+  bindMovementPanelEvents();
+  bindSalesSubmitOverride();
+  bindCancelEditOverride();
+  bindQuickMovementOverride();
+  bindPurchaseEvents();
+
+  resetPurchaseForm();
+  applySalesOnlyMode();
+  syncMovementBusinessProductSelection({
+    preserveValue: true,
+    preserveCategoryValue: true,
+  });
+  setMovementPanel("ventas");
+})();

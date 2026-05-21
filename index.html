@@ -254,12 +254,44 @@
         </section>
 
         <section id="movimientos-view" class="view">
+          <section class="panel">
+            <div class="panel-head">
+              <div>
+                <p class="section-kicker">Navegación</p>
+                <h3>Módulo comercial</h3>
+              </div>
+            </div>
+            <div
+              class="client-menu"
+              role="tablist"
+              aria-label="Menú de ventas y compras"
+            >
+              <button
+                class="client-menu-button active"
+                type="button"
+                data-movement-panel="ventas"
+                aria-pressed="true"
+              >
+                Ventas
+              </button>
+              <button
+                class="client-menu-button"
+                type="button"
+                data-movement-panel="compras"
+                aria-pressed="false"
+              >
+                Compras y gastos
+              </button>
+            </div>
+          </section>
+
+          <div id="movement-panel-ventas" class="movement-panel">
           <div class="content-grid two-up align-start">
             <section class="panel">
               <div class="panel-head">
                 <div>
                   <p class="section-kicker">Registro operativo</p>
-                  <h3 id="movement-form-title">Registrar movimiento</h3>
+                  <h3 id="movement-form-title">Registrar venta</h3>
                 </div>
               </div>
 
@@ -279,12 +311,12 @@
                   <input id="fecha" name="fecha" type="date" required />
                 </label>
 
-                <label>
+                <label class="is-hidden" aria-hidden="true">
                   Tipo
                   <select id="tipo" name="tipo" required></select>
                 </label>
 
-                <label>
+                <label class="is-hidden" aria-hidden="true">
                   Categoría
                   <select id="categoria" name="categoria" required></select>
                 </label>
@@ -295,7 +327,7 @@
                     <option value="">Sin producto o servicio</option>
                   </select>
                   <span id="movement-business-product-feedback" class="inline-hint">
-                    Si seleccionas un producto o servicio, la categoria se completa sola y el inventario se mueve segun su configuracion.
+                    Selecciona el producto o servicio vendido. El tipo queda como ingreso y la categoría se completa automáticamente.
                   </span>
                 </label>
 
@@ -345,14 +377,14 @@
                   <select id="medioPago" name="medioPago" required></select>
                 </label>
 
-                <label>
+                <label class="is-hidden" aria-hidden="true">
                   Producto de inventario
                   <select id="movement-inventory-product-id" name="inventoryProductId">
                     <option value="">Sin producto enlazado</option>
                   </select>
                 </label>
 
-                <label>
+                <label class="is-hidden" aria-hidden="true">
                   Impacto en inventario
                   <select id="movement-inventory-effect" name="inventoryEffect">
                     <option value="ninguno">Sin mover inventario</option>
@@ -361,7 +393,7 @@
                   </select>
                 </label>
 
-                <label>
+                <label class="is-hidden" aria-hidden="true">
                   Cantidad inventario
                   <input
                     id="movement-inventory-quantity"
@@ -431,8 +463,12 @@
                   mantener la misma lógica del Excel.
                 </div>
 
-                <div class="form-note span-2" id="movement-inventory-feedback">
-                  Si este movimiento compra, consume o vende un producto, enlazalo aqui para que el stock tambien se ajuste.
+                <div
+                  class="form-note span-2 is-hidden"
+                  id="movement-inventory-feedback"
+                  aria-hidden="true"
+                >
+                  Las compras y entradas de inventario se registran en Inventario, en Movimiento de stock.
                 </div>
 
                 <div class="form-actions span-2">
@@ -515,6 +551,208 @@
               </table>
             </div>
           </section>
+          </div>
+
+          <div id="movement-panel-compras" class="movement-panel is-hidden">
+            <div class="content-grid two-up align-start">
+              <section class="panel">
+                <div class="panel-head">
+                  <div>
+                    <p class="section-kicker">Egresos operativos</p>
+                    <h3>Registrar compra o gasto</h3>
+                  </div>
+                </div>
+
+                <form id="purchase-form" class="form-grid">
+                  <input id="purchase-movement-id" type="hidden" />
+
+                  <label>
+                    Línea de negocio
+                    <select id="purchase-linea" required>
+                      <option value="Gimnasio">Gimnasio</option>
+                      <option value="Restaurante">Restaurante</option>
+                    </select>
+                  </label>
+
+                  <label>
+                    Fecha
+                    <input id="purchase-fecha" type="date" required />
+                  </label>
+
+                  <label>
+                    Tipo de egreso
+                    <select id="purchase-kind" required>
+                      <option value="Costo">Compra de inventario (Costo)</option>
+                      <option value="Gasto">Gasto operativo</option>
+                    </select>
+                  </label>
+
+                  <label id="purchase-category-shell">
+                    Categoría de gasto
+                    <select id="purchase-categoria"></select>
+                  </label>
+
+                  <label id="purchase-inventory-product-shell">
+                    Producto / insumo comprado
+                    <select id="purchase-inventory-product-id"></select>
+                  </label>
+
+                  <label id="purchase-quantity-shell">
+                    Cantidad comprada
+                    <input
+                      id="purchase-inventory-quantity"
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      placeholder="0"
+                    />
+                  </label>
+
+                  <label id="purchase-unit-cost-shell">
+                    Costo unitario
+                    <input
+                      id="purchase-unit-cost"
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      placeholder="0"
+                    />
+                  </label>
+
+                  <label>
+                    Caja / medio de pago
+                    <select id="purchase-medio-pago" required></select>
+                  </label>
+
+                  <label>
+                    Beneficiario / proveedor
+                    <input
+                      id="purchase-beneficiary"
+                      type="text"
+                      placeholder="Ejemplo: Distribuidora XYZ"
+                    />
+                  </label>
+
+                  <label class="span-2">
+                    Descripción
+                    <input
+                      id="purchase-description"
+                      type="text"
+                      placeholder="Detalle corto de la compra o gasto"
+                    />
+                  </label>
+
+                  <label>
+                    Valor total
+                    <input
+                      id="purchase-total"
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      placeholder="0"
+                      required
+                    />
+                  </label>
+
+                  <label>
+                    Abono pagado
+                    <input
+                      id="purchase-paid"
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      placeholder="0"
+                      required
+                    />
+                  </label>
+
+                  <label class="span-2">
+                    Observaciones
+                    <textarea
+                      id="purchase-notes"
+                      rows="3"
+                      placeholder="Notas de soporte de la compra o gasto"
+                    ></textarea>
+                  </label>
+
+                  <div id="purchase-feedback" class="form-note span-2">
+                    Registra aquí costos y gastos. Si es compra de inventario, además actualiza stock.
+                  </div>
+
+                  <div class="form-actions span-2">
+                    <button class="primary-button" type="submit">
+                      Guardar compra / gasto
+                    </button>
+                  </div>
+                </form>
+              </section>
+
+              <section class="panel">
+                <div class="panel-head">
+                  <div>
+                    <p class="section-kicker">Filtros</p>
+                    <h3>Explorar compras y gastos</h3>
+                  </div>
+                </div>
+
+                <div class="filter-grid">
+                  <label>
+                    Línea
+                    <select id="purchase-filter-line">
+                      <option value="Todas">Todas</option>
+                      <option value="Gimnasio">Gimnasio</option>
+                      <option value="Restaurante">Restaurante</option>
+                    </select>
+                  </label>
+
+                  <label>
+                    Tipo
+                    <select id="purchase-filter-kind">
+                      <option value="Todos">Todos</option>
+                      <option value="Costo">Costos</option>
+                      <option value="Gasto">Gastos</option>
+                    </select>
+                  </label>
+
+                  <label class="span-2">
+                    Buscar
+                    <input
+                      id="purchase-filter-query"
+                      type="search"
+                      placeholder="Categoría, proveedor, descripción, caja..."
+                    />
+                  </label>
+                </div>
+
+                <div id="purchase-metrics" class="mini-stats"></div>
+              </section>
+            </div>
+
+            <section class="panel">
+              <div class="panel-head">
+                <div>
+                  <p class="section-kicker">Libro de egresos</p>
+                  <h3>Compras y gastos registrados</h3>
+                </div>
+              </div>
+              <div class="table-wrap adaptive-table-wrap">
+                <table class="stack-table adaptive-stack-table">
+                  <thead>
+                    <tr>
+                      <th>Fecha</th>
+                      <th>Tipo</th>
+                      <th>Resumen</th>
+                      <th>Caja</th>
+                      <th>Total</th>
+                      <th>Abono</th>
+                      <th>Saldo</th>
+                    </tr>
+                  </thead>
+                  <tbody id="purchases-table"></tbody>
+                </table>
+              </div>
+            </section>
+          </div>
         </section>
 
         <section id="diario-view" class="view">

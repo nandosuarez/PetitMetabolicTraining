@@ -6015,6 +6015,18 @@ async function handleMovementSubmit(event) {
     return;
   }
 
+  const editingMovement = elements.movementId.value
+    ? state.movements.find(
+        (item) => String(item.id) === String(elements.movementId.value)
+      ) || null
+    : null;
+  const preserveLegacyInventoryLink = Boolean(
+    editingMovement &&
+      editingMovement.inventoryEffect !== "ninguno" &&
+      Number(editingMovement.inventoryProductId || 0) > 0 &&
+      Number(editingMovement.inventoryQuantity || 0) > 0
+  );
+
   const payload = {
     linea: elements.linea.value,
     fecha: elements.fecha.value,
@@ -6026,9 +6038,15 @@ async function handleMovementSubmit(event) {
     medioPago: elements.medioPago.value,
     valorTotal: Number(elements.valorTotal.value || 0),
     abono: Number(elements.abono.value || 0),
-    inventoryProductId: Number(elements.movementInventoryProductId.value || 0),
-    inventoryQuantity: Number(elements.movementInventoryQuantity.value || 0),
-    inventoryEffect: elements.movementInventoryEffect.value || "ninguno",
+    inventoryProductId: preserveLegacyInventoryLink
+      ? Number(editingMovement.inventoryProductId || 0)
+      : 0,
+    inventoryQuantity: preserveLegacyInventoryLink
+      ? Number(editingMovement.inventoryQuantity || 0)
+      : 0,
+    inventoryEffect: preserveLegacyInventoryLink
+      ? editingMovement.inventoryEffect || "ninguno"
+      : "ninguno",
     observaciones: elements.observaciones.value.trim(),
     justificacionEdicion: elements.editJustification.value.trim(),
   };
@@ -13757,16 +13775,21 @@ syncMovementBusinessProductSelection = function (options = {}) {
         options.preserveCategoryValue === false ? "" : elements.categoria?.value || "",
     });
     elements.categoria.disabled = false;
-    elements.movementInventoryProductId.disabled = false;
-    elements.movementInventoryEffect.disabled = false;
-    syncMovementInventoryFields({
-      preserveEffect: Boolean(options.preserveEffect),
-      preserveQuantity: Boolean(options.preserveQuantity),
+    fillMovementInventoryProductOptions({
+      selectedValue: "",
     });
+    elements.movementInventoryProductId.value = "";
+    elements.movementInventoryEffect.value = "ninguno";
+    if (!options.preserveQuantity) {
+      elements.movementInventoryQuantity.value = "";
+    }
+    elements.movementInventoryProductId.disabled = true;
+    elements.movementInventoryEffect.disabled = true;
+    elements.movementInventoryQuantity.disabled = true;
 
     if (elements.movementBusinessProductFeedback) {
       elements.movementBusinessProductFeedback.textContent =
-        "Si seleccionas un producto o servicio, la categoria se completa sola, puede sugerir el valor y tambien mover inventario segun su configuracion.";
+        "Si seleccionas un producto o servicio, la categoria se completa sola. Las compras de inventario se registran en Inventario > Movimiento stock.";
     }
 
     return null;
@@ -13794,49 +13817,19 @@ syncMovementBusinessProductSelection = function (options = {}) {
   const recipeItems = getBusinessProductComponents(selectedProduct.id).length;
   const hasDirectInventory = Number(selectedProduct.directInventoryProductId || 0) > 0;
   const hasAutomaticInventory = hasDirectInventory || recipeItems > 0;
-  const suggestedCostInventoryProductId = Number(
-    selectedProduct.directInventoryProductId || selectedProduct.inventoryProductId || 0
-  );
   const shouldAutoDiscountInventory =
     movementType === "Ingreso" && hasAutomaticInventory;
-  const shouldSuggestCostInventory =
-    movementType === "Costo" && suggestedCostInventoryProductId > 0;
-
-  if (shouldAutoDiscountInventory) {
-    fillMovementInventoryProductOptions({
-      selectedValue: "",
-    });
-    elements.movementInventoryProductId.value = "";
-    elements.movementInventoryEffect.value = "ninguno";
-    if (!options.preserveQuantity) {
-      elements.movementInventoryQuantity.value = "";
-    }
-    elements.movementInventoryProductId.disabled = true;
-    elements.movementInventoryEffect.disabled = true;
-    elements.movementInventoryQuantity.disabled = true;
-    syncMovementInventoryFields({
-      preserveEffect: true,
-      preserveQuantity: true,
-    });
-  } else {
-    elements.movementInventoryProductId.disabled = false;
-    elements.movementInventoryEffect.disabled = false;
-
-    if (shouldSuggestCostInventory) {
-      fillMovementInventoryProductOptions({
-        selectedValue: String(suggestedCostInventoryProductId),
-      });
-      elements.movementInventoryProductId.value = String(
-        suggestedCostInventoryProductId
-      );
-      elements.movementInventoryEffect.value = "entrada";
-    }
-
-    syncMovementInventoryFields({
-      preserveEffect: shouldSuggestCostInventory || Boolean(options.preserveEffect),
-      preserveQuantity: Boolean(options.preserveQuantity),
-    });
+  fillMovementInventoryProductOptions({
+    selectedValue: "",
+  });
+  elements.movementInventoryProductId.value = "";
+  elements.movementInventoryEffect.value = "ninguno";
+  if (!options.preserveQuantity) {
+    elements.movementInventoryQuantity.value = "";
   }
+  elements.movementInventoryProductId.disabled = true;
+  elements.movementInventoryEffect.disabled = true;
+  elements.movementInventoryQuantity.disabled = true;
 
   if (elements.movementBusinessProductFeedback) {
     const stockMessage =
@@ -13847,11 +13840,9 @@ syncMovementBusinessProductSelection = function (options = {}) {
           )} de ${selectedProduct.directInventoryProductName || "inventario"}`
         : shouldAutoDiscountInventory
           ? `descontara ${recipeItems} insumo(s) configurados en su receta`
-          : shouldSuggestCostInventory
-            ? "como es un costo, se preselecciona el producto de inventario para sumar stock al guardar la cantidad"
-            : hasAutomaticInventory
-              ? "el descuento automatico solo aplica en ingresos; en costos o gastos usa los campos de inventario"
-              : "no mueve inventario automaticamente";
+          : hasAutomaticInventory
+            ? "el descuento automatico de inventario solo aplica cuando registras un ingreso"
+            : "no mueve inventario automaticamente";
 
     const categoryLabel = getBusinessProductCategoryLabel(selectedProduct);
     const detailLabel = getBusinessProductDetailLabel(selectedProduct);
@@ -13860,7 +13851,7 @@ syncMovementBusinessProductSelection = function (options = {}) {
         detailLabel ? ` - ${detailLabel}` : ""
       } - ${formatCurrency(
         selectedProduct.defaultAmount
-      )}. Al registrar este movimiento, ${stockMessage}.`;
+      )}. Al registrar este movimiento, ${stockMessage}. Las compras van en Inventario > Movimiento stock.`;
   }
 
   return selectedProduct;
