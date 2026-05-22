@@ -2221,10 +2221,33 @@ function createDetailItem(label, value, extraClass = "") {
   `;
 }
 
+function getMovementBusinessProductName(item) {
+  const product = getBusinessProductById(item.businessProductId);
+  return product?.name ? String(product.name).trim() : "";
+}
+
+function getMovementSoldLabel(item) {
+  const linkedName = getMovementBusinessProductName(item);
+  if (linkedName) {
+    return linkedName;
+  }
+
+  if (item.tipo === "Ingreso") {
+    return String(item.categoria || item.descripcion || "").trim();
+  }
+
+  return "";
+}
+
 function renderMovementSummary(item, isExpanded) {
-  const summaryTitle = item.cliente || "Sin cliente";
+  const soldLabel = getMovementSoldLabel(item);
+  const hasSoldLabel = Boolean(soldLabel);
+  const summaryTitle = hasSoldLabel ? soldLabel : item.cliente || "Sin cliente";
+  const normalizedSoldLabel = normalizeSearchValue(soldLabel);
+  const normalizedCategory = normalizeSearchValue(item.categoria || "");
   const summaryMeta = [
-    item.categoria || item.descripcion || "Movimiento registrado",
+    hasSoldLabel ? (item.cliente ? `Cliente: ${item.cliente}` : "Sin cliente") : "",
+    item.categoria && normalizedCategory !== normalizedSoldLabel ? item.categoria : "",
     item.linea,
     item.tipo,
     item.medioPago,
@@ -2253,6 +2276,7 @@ function renderMovementSummary(item, isExpanded) {
 }
 
 function renderMovementDetail(item) {
+  const soldLabel = getMovementSoldLabel(item);
   const inventoryProduct = getInventoryProductById(item.inventoryProductId);
   const inventoryProductLabel = inventoryProduct
     ? `${inventoryProduct.name} · ${inventoryProduct.area}`
@@ -2265,6 +2289,11 @@ function renderMovementDetail(item) {
       <div class="detail-grid">
         ${createDetailItem("Caja", escapeHtml(item.medioPago))}
         ${createDetailItem("Abono", formatCurrency(item.abono))}
+        ${
+          soldLabel
+            ? createDetailItem("Producto o servicio", escapeHtml(soldLabel))
+            : ""
+        }
         ${createDetailItem(
           "Flujo neto",
           `<span class="${item.flujoNeto >= 0 ? "positive" : "negative"}">${formatCurrency(
