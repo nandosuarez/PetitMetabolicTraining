@@ -1661,7 +1661,7 @@
     comboElements.notes.value = comboRule.notes || "";
     comboElements.cancelEdit?.classList.remove("is-hidden");
     comboElements.feedback.textContent =
-      "Edita la regla y guarda para actualizar el descuento automático.";
+      "Edita la regla y, si quieres, agrega varios productos objetivo para aplicar el mismo combo en bloque.";
     const submitButton = comboElements.form?.querySelector('button[type="submit"]');
     if (submitButton) {
       submitButton.textContent = "Guardar cambios";
@@ -1678,16 +1678,13 @@
 
     const comboId = Number(comboElements.id?.value || 0);
     const selectedTargetIds = getSelectedSalesComboTargetProductIds();
-    const hadMultipleTargetsWhileEditing =
-      comboId > 0 && selectedTargetIds.length > 1;
-    const targetIdsForSubmit =
-      comboId > 0 ? selectedTargetIds.slice(0, 1) : selectedTargetIds;
+    const isBulkCreateFromEdit = comboId > 0 && selectedTargetIds.length > 1;
     const payload = {
       name: String(comboElements.name?.value || "").trim(),
       businessLine: comboElements.businessLine?.value || "Restaurante",
       triggerBusinessProductId: Number(comboElements.triggerProductId?.value || 0),
-      targetBusinessProductIds: targetIdsForSubmit,
-      targetBusinessProductId: Number(targetIdsForSubmit[0] || 0),
+      targetBusinessProductIds: selectedTargetIds,
+      targetBusinessProductId: Number(selectedTargetIds[0] || 0),
       targetUnitPrice: Number(comboElements.targetUnitPrice?.value || 0),
       maxTargetUnitsPerTrigger: Number(comboElements.maxUnits?.value || 0),
       notes: String(comboElements.notes?.value || "").trim(),
@@ -1699,13 +1696,13 @@
       return;
     }
 
-    if (!(payload.triggerBusinessProductId > 0) || !targetIdsForSubmit.length) {
+    if (!(payload.triggerBusinessProductId > 0) || !selectedTargetIds.length) {
       comboElements.feedback.textContent =
         "Selecciona el producto activador y al menos un producto objetivo del combo.";
       return;
     }
 
-    if (targetIdsForSubmit.includes(payload.triggerBusinessProductId)) {
+    if (selectedTargetIds.includes(payload.triggerBusinessProductId)) {
       comboElements.feedback.textContent =
         "El producto activador no puede estar dentro de los productos objetivo.";
       return;
@@ -1718,7 +1715,10 @@
       return;
     }
 
-    if (!Number.isInteger(payload.maxTargetUnitsPerTrigger) || !(payload.maxTargetUnitsPerTrigger > 0)) {
+    if (
+      !Number.isInteger(payload.maxTargetUnitsPerTrigger) ||
+      !(payload.maxTargetUnitsPerTrigger > 0)
+    ) {
       comboElements.feedback.textContent =
         "Las unidades con descuento por activador deben ser un entero mayor que cero.";
       comboElements.maxUnits?.focus();
@@ -1727,11 +1727,11 @@
 
     try {
       await apiRequest(
-        comboId > 0
+        comboId > 0 && !isBulkCreateFromEdit
           ? `/api/sales-combo-rules/${comboId}`
           : "/api/sales-combo-rules",
         {
-          method: comboId > 0 ? "PUT" : "POST",
+          method: comboId > 0 && !isBulkCreateFromEdit ? "PUT" : "POST",
           body: JSON.stringify(payload),
         }
       );
@@ -1746,8 +1746,8 @@
       });
       comboElements.feedback.textContent =
         comboId > 0
-          ? hadMultipleTargetsWhileEditing
-            ? "Combo actualizado. Tomamos el primer producto objetivo seleccionado."
+          ? isBulkCreateFromEdit
+            ? `Reglas actualizadas/creadas para ${selectedTargetIds.length} productos objetivo.`
             : "Combo actualizado correctamente."
           : selectedTargetIds.length > 1
             ? `Combos creados correctamente para ${selectedTargetIds.length} productos.`
@@ -1830,28 +1830,6 @@
         triggerValue: "",
         targetValues: [],
       });
-    });
-    comboElements.targetProductId?.addEventListener("change", () => {
-      const comboId = Number(comboElements.id?.value || 0);
-      if (!(comboId > 0)) {
-        return;
-      }
-
-      const selectedTargetIds = getSelectedSalesComboTargetProductIds();
-      if (selectedTargetIds.length <= 1) {
-        return;
-      }
-
-      const lastSelectedId = String(
-        selectedTargetIds[selectedTargetIds.length - 1] || ""
-      );
-      fillSalesComboProductSelects({
-        businessLine: comboElements.businessLine?.value || "Restaurante",
-        triggerValue: comboElements.triggerProductId?.value || "",
-        targetValues: [lastSelectedId],
-      });
-      comboElements.feedback.textContent =
-        "En edición solo se conserva un producto objetivo.";
     });
     comboElements.cancelEdit?.addEventListener("click", () => {
       resetSalesComboForm();
