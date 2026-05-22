@@ -3036,9 +3036,16 @@
 
                     <label class="span-2">
                       Producto con precio promocional
-                      <select id="sales-combo-target-product" required>
-                        <option value="">Selecciona producto objetivo</option>
+                      <select
+                        id="sales-combo-target-product"
+                        multiple
+                        size="6"
+                        required
+                      >
                       </select>
+                      <small class="inline-hint">
+                        Selecciona uno o varios productos objetivo para aplicar el mismo combo.
+                      </small>
                     </label>
 
                     <label>

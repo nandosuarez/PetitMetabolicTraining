@@ -1421,6 +1421,50 @@
       .sort((a, b) => String(a.name || "").localeCompare(String(b.name || ""), APP_LOCALE));
   }
 
+  function getSelectedSalesComboTargetProductIds() {
+    if (!comboElements.targetProductId) {
+      return [];
+    }
+
+    const uniqueIds = new Set();
+    [...comboElements.targetProductId.selectedOptions].forEach((option) => {
+      const parsedId = Number(option.value || 0);
+      if (Number.isInteger(parsedId) && parsedId > 0) {
+        uniqueIds.add(parsedId);
+      }
+    });
+
+    return [...uniqueIds];
+  }
+
+  function fillSalesComboTargetProductsSelect(products, selectedValues = []) {
+    if (!comboElements.targetProductId) {
+      return;
+    }
+
+    const selectedSet = new Set(
+      (Array.isArray(selectedValues) ? selectedValues : [])
+        .map((value) => Number(value || 0))
+        .filter((value) => Number.isInteger(value) && value > 0)
+        .map((value) => String(value))
+    );
+
+    comboElements.targetProductId.innerHTML = products
+      .map(
+        (item) =>
+          `<option value="${escapeHtml(String(item.id))}">${escapeHtml(
+            `${item.name} · ${getBusinessProductCategoryLabel(item)} · ${formatCurrency(
+              item.defaultAmount
+            )}`
+          )}</option>`
+      )
+      .join("");
+
+    [...comboElements.targetProductId.options].forEach((option) => {
+      option.selected = selectedSet.has(option.value);
+    });
+  }
+
   function fillSalesComboProductSelects(options = {}) {
     if (!comboElements.triggerProductId || !comboElements.targetProductId) {
       return;
@@ -1442,13 +1486,12 @@
       labelBuilder,
     });
 
-    fillSelectFromRecords(comboElements.targetProductId, products, {
-      selectedValue: String(
-        options.targetValue ?? comboElements.targetProductId.value ?? ""
-      ),
-      placeholder: "Selecciona producto objetivo",
-      labelBuilder,
-    });
+    const targetValues = Array.isArray(options.targetValues)
+      ? options.targetValues
+      : options.targetValue
+        ? [options.targetValue]
+        : getSelectedSalesComboTargetProductIds();
+    fillSalesComboTargetProductsSelect(products, targetValues);
   }
 
   function resetSalesComboForm(options = {}) {
@@ -1467,7 +1510,7 @@
     fillSalesComboProductSelects({
       businessLine: comboElements.businessLine.value,
       triggerValue: "",
-      targetValue: "",
+      targetValues: [],
     });
     comboElements.cancelEdit?.classList.add("is-hidden");
 
@@ -1611,7 +1654,7 @@
     fillSalesComboProductSelects({
       businessLine: comboElements.businessLine.value,
       triggerValue: String(comboRule.triggerBusinessProductId || ""),
-      targetValue: String(comboRule.targetBusinessProductId || ""),
+      targetValues: [String(comboRule.targetBusinessProductId || "")],
     });
     comboElements.maxUnits.value = String(comboRule.maxTargetUnitsPerTrigger || 1);
     comboElements.targetUnitPrice.value = String(comboRule.targetUnitPrice || 0);
@@ -1634,11 +1677,13 @@
     }
 
     const comboId = Number(comboElements.id?.value || 0);
+    const selectedTargetIds = getSelectedSalesComboTargetProductIds();
     const payload = {
       name: String(comboElements.name?.value || "").trim(),
       businessLine: comboElements.businessLine?.value || "Restaurante",
       triggerBusinessProductId: Number(comboElements.triggerProductId?.value || 0),
-      targetBusinessProductId: Number(comboElements.targetProductId?.value || 0),
+      targetBusinessProductIds: selectedTargetIds,
+      targetBusinessProductId: Number(selectedTargetIds[0] || 0),
       targetUnitPrice: Number(comboElements.targetUnitPrice?.value || 0),
       maxTargetUnitsPerTrigger: Number(comboElements.maxUnits?.value || 0),
       notes: String(comboElements.notes?.value || "").trim(),
@@ -1650,15 +1695,21 @@
       return;
     }
 
-    if (!(payload.triggerBusinessProductId > 0) || !(payload.targetBusinessProductId > 0)) {
+    if (!(payload.triggerBusinessProductId > 0) || !selectedTargetIds.length) {
       comboElements.feedback.textContent =
-        "Selecciona el producto activador y el producto objetivo del combo.";
+        "Selecciona el producto activador y al menos un producto objetivo del combo.";
       return;
     }
 
-    if (payload.triggerBusinessProductId === payload.targetBusinessProductId) {
+    if (selectedTargetIds.includes(payload.triggerBusinessProductId)) {
       comboElements.feedback.textContent =
-        "El producto activador debe ser distinto al producto objetivo.";
+        "El producto activador no puede estar dentro de los productos objetivo.";
+      return;
+    }
+
+    if (comboId > 0 && selectedTargetIds.length > 1) {
+      comboElements.feedback.textContent =
+        "Cuando editas una regla debes seleccionar solo un producto objetivo.";
       return;
     }
 
@@ -1698,7 +1749,9 @@
       comboElements.feedback.textContent =
         comboId > 0
           ? "Combo actualizado correctamente."
-          : "Combo creado correctamente.";
+          : selectedTargetIds.length > 1
+            ? `Combos creados correctamente para ${selectedTargetIds.length} productos.`
+            : "Combo creado correctamente.";
     } catch (error) {
       comboElements.feedback.textContent = error.message;
     }
@@ -1760,7 +1813,7 @@
     fillSalesComboProductSelects({
       businessLine: comboElements.businessLine?.value || "Restaurante",
       triggerValue: comboElements.triggerProductId?.value || "",
-      targetValue: comboElements.targetProductId?.value || "",
+      targetValues: getSelectedSalesComboTargetProductIds(),
     });
     renderSalesComboRulesAdmin();
   }
@@ -1775,7 +1828,7 @@
       fillSalesComboProductSelects({
         businessLine: comboElements.businessLine?.value || "Restaurante",
         triggerValue: "",
-        targetValue: "",
+        targetValues: [],
       });
     });
     comboElements.cancelEdit?.addEventListener("click", () => {

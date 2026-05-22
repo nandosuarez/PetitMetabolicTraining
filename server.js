@@ -2922,59 +2922,80 @@ app.post(
     const payload = normalizeSalesComboRulePayload(req.body);
     validateSalesComboRulePayload(payload);
 
-    let createdRule;
-    try {
-      createdRule = await withClient(async (client) => {
-        await client.query("begin");
+    const targetIds = payload.targetBusinessProductIds?.length
+      ? payload.targetBusinessProductIds
+      : payload.targetBusinessProductId > 0
+        ? [payload.targetBusinessProductId]
+        : [];
 
-        try {
-          await assertSalesComboBusinessProducts(client, payload);
+    const savedRuleIds = await withClient(async (client) => {
+      await client.query("begin");
 
-          const insertResult = await client.query(
-            `
-              insert into sales_combo_rules (
-                name,
-                business_line,
-                trigger_business_product_id,
-                target_business_product_id,
-                target_unit_price,
-                max_target_units_per_trigger,
-                notes,
-                is_active
-              )
-              values ($1, $2, $3, $4, $5, $6, $7, true)
-              returning *
-            `,
-            [
-              payload.name,
-              payload.businessLine,
-              payload.triggerBusinessProductId,
-              payload.targetBusinessProductId,
-              payload.targetUnitPrice,
-              payload.maxTargetUnitsPerTrigger,
-              payload.notes,
-            ]
-          );
+      try {
+        await assertSalesComboBusinessProducts(client, payload);
 
-          await client.query("commit");
-          return insertResult.rows[0];
-        } catch (error) {
-          await client.query("rollback");
-          throw error;
-        }
-      });
-    } catch (error) {
-      if (error?.code === "23505") {
-        throw httpError(
-          400,
-          "Ya existe una regla activa o registrada con esa combinacion de productos."
+        const upsertResult = await client.query(
+          `
+            insert into sales_combo_rules (
+              name,
+              business_line,
+              trigger_business_product_id,
+              target_business_product_id,
+              target_unit_price,
+              max_target_units_per_trigger,
+              notes,
+              is_active
+            )
+            select
+              $1,
+              $2,
+              $3,
+              target_id,
+              $4,
+              $5,
+              $6,
+              true
+            from unnest($7::bigint[]) as target_id
+            on conflict (business_line, trigger_business_product_id, target_business_product_id)
+            do update
+              set
+                name = excluded.name,
+                target_unit_price = excluded.target_unit_price,
+                max_target_units_per_trigger = excluded.max_target_units_per_trigger,
+                notes = excluded.notes,
+                is_active = true,
+                updated_at = now()
+            returning id
+          `,
+          [
+            payload.name,
+            payload.businessLine,
+            payload.triggerBusinessProductId,
+            payload.targetUnitPrice,
+            payload.maxTargetUnitsPerTrigger,
+            payload.notes,
+            targetIds,
+          ]
         );
-      }
-      throw error;
-    }
 
-    const hydratedRule = await readSalesComboRuleById(createdRule.id);
-    res.status(201).json(hydratedRule || mapSalesComboRuleRow(createdRule));
+        await client.query("commit");
+        return upsertResult.rows.map((row) => Number(row.id || 0)).filter((id) => id > 0);
+      } catch (error) {
+        await client.query("rollback");
+        throw error;
+      }
+    });
+
+    const rulesResult = await listSalesComboRulesRows();
+    const savedSet = new Set(savedRuleIds.map((id) => Number(id || 0)));
+    const savedRules = rulesResult.rows
+      .map(mapSalesComboRuleRow)
+      .filter((rule) => savedSet.has(Number(rule.id || 0)));
+
+    res.status(201).json({
+      count: savedRules.length,
+      rules: savedRules,
+    });
   })
 );
 
@@ -2986,7 +3007,12 @@ app.put(
 
     const ruleId = Number(req.params.id);
     const payload = normalizeSalesComboRulePayload(req.body);
-    validateSalesComboRulePayload(payload);
+    validateSalesComboRulePayload(payload, {
+      requireSingleTarget: true,
+    });
+    payload.targetBusinessProductId = Number(
+      payload.targetBusinessProductIds?.[0] || payload.targetBusinessProductId || 0
+    );
 
     if (!Number.isInteger(ruleId) || ruleId <= 0) {
       return res.status(400).json({ error: "Regla de combo invalida." });
@@ -3204,7 +3230,17 @@ function normalizeBusinessProductComponentPayload(body) {
 
 function normalizeSalesComboRulePayload(body) {
   const triggerBusinessProductId = Number(body.triggerBusinessProductId || 0);
-  const targetBusinessProductId = Number(body.targetBusinessProductId || 0);
+  const rawTargetIds = Array.isArray(body.targetBusinessProductIds)
+    ? body.targetBusinessProductIds
+    : [body.targetBusinessProductId];
+  const targetBusinessProductIds = [...new Set(
+    rawTargetIds
+      .map((value) => Number(value || 0))
+      .filter((value) => Number.isInteger(value) && value > 0)
+  )];
+  const targetBusinessProductId = Number(
+    body.targetBusinessProductId || targetBusinessProductIds[0] || 0
+  );
   const maxTargetUnitsPerTrigger = Number(body.maxTargetUnitsPerTrigger || 0);
 
   return {
@@ -3216,6 +3252,7 @@ function normalizeSalesComboRulePayload(body) {
     targetBusinessProductId: Number.isInteger(targetBusinessProductId)
       ? targetBusinessProductId
       : 0,
+    targetBusinessProductIds,
     targetUnitPrice: Math.max(Number(body.targetUnitPrice || 0), 0),
     maxTargetUnitsPerTrigger: Number.isInteger(maxTargetUnitsPerTrigger)
       ? maxTargetUnitsPerTrigger
@@ -3364,7 +3401,14 @@ function validateBusinessProductComponentPayload(payload) {
   }
 }
 
-function validateSalesComboRulePayload(payload) {
+function validateSalesComboRulePayload(payload, options = {}) {
+  const requireSingleTarget = Boolean(options.requireSingleTarget);
+  const targetIds = payload.targetBusinessProductIds?.length
+    ? payload.targetBusinessProductIds
+    : payload.targetBusinessProductId > 0
+      ? [payload.targetBusinessProductId]
+      : [];
+
   if (!payload.name) {
     throw httpError(400, "El nombre de la regla de combo es obligatorio.");
   }
@@ -3380,14 +3424,21 @@ function validateSalesComboRulePayload(payload) {
     );
   }
 
-  if (!(payload.targetBusinessProductId > 0)) {
+  if (!targetIds.length) {
     throw httpError(
       400,
       "Selecciona el producto o servicio al que se aplicara el precio promocional."
     );
   }
 
-  if (payload.triggerBusinessProductId === payload.targetBusinessProductId) {
+  if (requireSingleTarget && targetIds.length !== 1) {
+    throw httpError(
+      400,
+      "Para editar una regla debes seleccionar un solo producto objetivo."
+    );
+  }
+
+  if (targetIds.includes(payload.triggerBusinessProductId)) {
     throw httpError(
       400,
       "El producto que activa el combo debe ser diferente al que recibe el descuento."
@@ -6367,32 +6418,45 @@ async function readSalesComboRuleById(ruleId) {
 }
 
 async function assertSalesComboBusinessProducts(client, payload) {
+  const targetIds = payload.targetBusinessProductIds?.length
+    ? payload.targetBusinessProductIds
+    : payload.targetBusinessProductId > 0
+      ? [payload.targetBusinessProductId]
+      : [];
+  const requestedIds = [
+    Number(payload.triggerBusinessProductId || 0),
+    ...targetIds,
+  ].filter((value) => Number.isInteger(value) && value > 0);
+
   const productsResult = await client.query(
     `
       select id, business_line
       from business_products
       where id = any($1::bigint[])
     `,
-    [[payload.triggerBusinessProductId, payload.targetBusinessProductId]]
+    [requestedIds]
   );
 
   const rowsById = new Map(
     productsResult.rows.map((row) => [Number(row.id || 0), row])
   );
   const triggerProduct = rowsById.get(Number(payload.triggerBusinessProductId || 0));
-  const targetProduct = rowsById.get(Number(payload.targetBusinessProductId || 0));
+  const targetProducts = targetIds.map((targetId) =>
+    rowsById.get(Number(targetId || 0))
+  );
 
-  if (!triggerProduct || !targetProduct) {
+  if (!triggerProduct || targetProducts.some((item) => !item)) {
     throw httpError(
       400,
       "Uno de los productos o servicios seleccionados no existe."
     );
   }
 
-  if (
+  const hasInvalidBusinessLine =
     triggerProduct.business_line !== payload.businessLine ||
-    targetProduct.business_line !== payload.businessLine
-  ) {
+    targetProducts.some((item) => item.business_line !== payload.businessLine);
+
+  if (hasInvalidBusinessLine) {
     throw httpError(
       400,
       "Los productos del combo deben pertenecer a la misma linea de negocio de la regla."
