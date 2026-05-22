@@ -346,9 +346,11 @@ app.post("/api/clients", requireOperationalWriteAccess, asyncHandler(async (req,
         phone,
         email,
         notes,
+        is_client,
+        is_supplier,
         is_active
       )
-      values ($1, $2, $3, $4, $5, $6, true)
+      values ($1, $2, $3, $4, $5, $6, $7, $8, true)
       returning *
     `,
     [
@@ -358,6 +360,8 @@ app.post("/api/clients", requireOperationalWriteAccess, asyncHandler(async (req,
       payload.phone,
       payload.email,
       payload.notes,
+      payload.isClient,
+      payload.isSupplier,
     ]
   );
 
@@ -411,6 +415,8 @@ app.put("/api/clients/:id", requireOperationalWriteAccess, asyncHandler(async (r
             phone = $5,
             email = $6,
             notes = $7,
+            is_client = $8,
+            is_supplier = $9,
             updated_at = now()
           where id = $1
           returning *
@@ -423,6 +429,8 @@ app.put("/api/clients/:id", requireOperationalWriteAccess, asyncHandler(async (r
           payload.phone,
           payload.email,
           payload.notes,
+          payload.isClient,
+          payload.isSupplier,
         ]
       );
 
@@ -3138,6 +3146,27 @@ function normalizeUserPayload(body) {
   };
 }
 
+function normalizeBooleanField(value, defaultValue = false) {
+  if (value === undefined || value === null || value === "") {
+    return defaultValue;
+  }
+
+  if (typeof value === "boolean") {
+    return value;
+  }
+
+  const normalizedValue = String(value).trim().toLowerCase();
+  if (["true", "1", "si", "sÃ­", "yes"].includes(normalizedValue)) {
+    return true;
+  }
+
+  if (["false", "0", "no"].includes(normalizedValue)) {
+    return false;
+  }
+
+  return Boolean(value);
+}
+
 function normalizeClientPayload(body) {
   return {
     fullName: String(body.fullName || "").trim(),
@@ -3146,6 +3175,8 @@ function normalizeClientPayload(body) {
     phone: String(body.phone || "").trim(),
     email: String(body.email || "").trim(),
     notes: String(body.notes || "").trim(),
+    isClient: normalizeBooleanField(body.isClient, true),
+    isSupplier: normalizeBooleanField(body.isSupplier, false),
   };
 }
 
@@ -3281,6 +3312,10 @@ function validateUserCreationPayload(payload) {
 function validateClientPayload(payload) {
   if (!payload.fullName) {
     throw httpError(400, "El nombre del cliente es obligatorio.");
+  }
+
+  if (!payload.isClient && !payload.isSupplier) {
+    throw httpError(400, "Selecciona al menos un perfil: cliente o proveedor.");
   }
 
   if (
@@ -4133,6 +4168,7 @@ async function importUsersWorkbookClients(payload) {
                 phone = $4,
                 email = $5,
                 notes = $6,
+                is_client = true,
                 is_active = true,
                 updated_at = now()
               where id = $1
@@ -4161,9 +4197,11 @@ async function importUsersWorkbookClients(payload) {
               phone,
               email,
               notes,
+              is_client,
+              is_supplier,
               is_active
             )
-            values ($1, $2, $3, $4, $5, true)
+            values ($1, $2, $3, $4, $5, true, false, true)
             returning *
           `,
           [
@@ -4254,7 +4292,16 @@ function parseUsersWorkbookClients(workbook) {
 
 async function loadDetailedClientState(client) {
   const result = await client.query(`
-    select id, full_name, document_number, phone, email, notes, is_active
+    select
+      id,
+      full_name,
+      document_number,
+      phone,
+      email,
+      notes,
+      is_client,
+      is_supplier,
+      is_active
     from clients
     order by id asc
   `);
@@ -4280,6 +4327,8 @@ function syncClientImportStateRow(state, row) {
     phone: row.phone || "",
     email: row.email || "",
     notes: row.notes || "",
+    isClient: row.is_client !== false,
+    isSupplier: Boolean(row.is_supplier),
     isActive: Boolean(row.is_active),
   };
 
@@ -4702,9 +4751,11 @@ async function createMissingClientsFromImport(client, clientState, clientNames) 
           phone,
           email,
           notes,
+          is_client,
+          is_supplier,
           is_active
         )
-        values ($1, '', '', '', $2, true)
+        values ($1, '', '', '', $2, true, false, true)
         returning id, full_name, is_active
       `,
       [cleanName, "Importado desde Excel"]
@@ -6593,6 +6644,8 @@ function mapClientRow(row) {
     phone: row.phone || "",
     email: row.email || "",
     notes: row.notes || "",
+    isClient: row.is_client !== false,
+    isSupplier: Boolean(row.is_supplier),
     isActive: Boolean(row.is_active),
     createdAt: row.created_at || null,
     updatedAt: row.updated_at || null,
@@ -6992,6 +7045,7 @@ app.use((error, _req, res, _next) => {
 
 async function start() {
   await checkConnection();
+  await ensureClientRoleColumns();
   await ensureProgrammingExerciseFamiliesConstraint();
   await ensureBootstrapAdmin();
 
@@ -7005,6 +7059,35 @@ start().catch((error) => {
   console.error(error.message);
   process.exit(1);
 });
+
+async function ensureClientRoleColumns() {
+  await query(`
+    alter table clients
+      add column if not exists is_client boolean not null default true;
+
+    alter table clients
+      add column if not exists is_supplier boolean not null default false;
+
+    update clients
+    set is_client = true
+    where coalesce(is_client, false) = false
+      and coalesce(is_supplier, false) = false;
+
+    do $$
+    begin
+      if not exists (
+        select 1
+        from pg_constraint
+        where conname = 'clients_profile_check'
+      ) then
+        alter table clients
+          add constraint clients_profile_check
+          check (is_client or is_supplier);
+      end if;
+    end
+    $$;
+  `);
+}
 
 async function ensureProgrammingExerciseFamiliesConstraint() {
   await query(`

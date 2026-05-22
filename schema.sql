@@ -78,6 +78,30 @@ create table if not exists clients (
 alter table clients
   add column if not exists alias text;
 
+alter table clients
+  add column if not exists is_client boolean not null default true;
+
+alter table clients
+  add column if not exists is_supplier boolean not null default false;
+
+update clients
+set is_client = true
+where coalesce(is_client, false) = false
+  and coalesce(is_supplier, false) = false;
+
+do $$
+begin
+  if not exists (
+    select 1
+    from pg_constraint
+    where conname = 'clients_profile_check'
+  ) then
+    alter table clients
+      add constraint clients_profile_check
+      check (is_client or is_supplier);
+  end if;
+end $$;
+
 create table if not exists athletes (
   id bigserial primary key,
   full_name text not null,

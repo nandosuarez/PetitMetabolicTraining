@@ -245,6 +245,8 @@ const elements = {
   clientDocument: document.getElementById("client-document"),
   clientPhone: document.getElementById("client-phone"),
   clientEmail: document.getElementById("client-email"),
+  clientIsClient: document.getElementById("client-is-client"),
+  clientIsSupplier: document.getElementById("client-is-supplier"),
   clientNotes: document.getElementById("client-notes"),
   clientFeedback: document.getElementById("client-feedback"),
   cancelClientEdit: document.getElementById("cancel-client-edit"),
@@ -1375,7 +1377,7 @@ async function loadBootstrap() {
       businessProductComponents: normalizeBusinessProductComponents(
         data.businessProductComponents
       ),
-      clients: Array.isArray(data.clients) ? data.clients : [],
+      clients: normalizeClients(data.clients),
       athletes: normalizeProgrammingAthletes(data.athletes),
       users: Array.isArray(usersPayload?.users) ? usersPayload.users : [],
       notes: {
@@ -3232,19 +3234,22 @@ function renderClientsAdmin() {
   const filteredClients = getFilteredClientsAdminList();
   const query = getClientsSearchQuery();
   const activeClients = clients.filter((item) => item.isActive);
+  const activeClientProfiles = activeClients.filter((item) => item.isClient !== false);
+  const activeSupplierProfiles = activeClients.filter((item) => item.isSupplier);
   const clientsWithBalance = getPortfolioMovements().filter((item) => item.cliente).length;
 
   elements.clientsMetrics.innerHTML = `
-    <div class="mini-stat"><span>Total clientes</span><strong>${clients.length}</strong></div>
+    <div class="mini-stat"><span>Total registros</span><strong>${clients.length}</strong></div>
+    <div class="mini-stat"><span>Perfiles cliente</span><strong>${activeClientProfiles.length}</strong></div>
+    <div class="mini-stat"><span>Perfiles proveedor</span><strong>${activeSupplierProfiles.length}</strong></div>
     <div class="mini-stat"><span>Activos</span><strong>${activeClients.length}</strong></div>
-    <div class="mini-stat"><span>Inactivos</span><strong>${Math.max(clients.length - activeClients.length, 0)}</strong></div>
     <div class="mini-stat"><span>${query ? "Coincidencias" : "Con saldo pendiente"}</span><strong>${query ? filteredClients.length : clientsWithBalance}</strong></div>
   `;
 
   if (!clients.length) {
     elements.clientsTable.innerHTML = `
       <tr>
-        <td colspan="9" class="empty-state">
+        <td colspan="10" class="empty-state">
           Aún no hay clientes registrados.
         </td>
       </tr>
@@ -3255,7 +3260,7 @@ function renderClientsAdmin() {
   if (!filteredClients.length) {
     elements.clientsTable.innerHTML = `
       <tr>
-        <td colspan="9" class="empty-state">
+        <td colspan="10" class="empty-state">
           No encontramos clientes que coincidan con esa búsqueda.
         </td>
       </tr>
@@ -3267,11 +3272,15 @@ function renderClientsAdmin() {
     .map((client) => {
       const nextActive = client.isActive ? "false" : "true";
       const statusTitle = client.isActive ? "Inactivar cliente" : "Activar cliente";
+      const profileLabel = client.isClient !== false
+        ? (client.isSupplier ? "Cliente y proveedor" : "Cliente")
+        : "Proveedor";
 
       return `
         <tr>
           <td>${escapeHtml(client.fullName)}</td>
           <td>${client.alias ? escapeHtml(client.alias) : "<span class='muted'>Sin alias</span>"}</td>
+          <td><span class="role-pill">${escapeHtml(profileLabel)}</span></td>
           <td>${client.documentNumber ? escapeHtml(client.documentNumber) : "<span class='muted'>Sin documento</span>"}</td>
           <td>${client.phone ? escapeHtml(client.phone) : "<span class='muted'>Sin teléfono</span>"}</td>
           <td>${client.email ? escapeHtml(client.email) : "<span class='muted'>Sin correo</span>"}</td>
@@ -6169,12 +6178,22 @@ async function handleClientSubmit(event) {
     documentNumber: elements.clientDocument.value.trim(),
     phone: elements.clientPhone.value.trim(),
     email: elements.clientEmail.value.trim(),
+    isClient: elements.clientIsClient
+      ? Boolean(elements.clientIsClient.checked)
+      : true,
+    isSupplier: Boolean(elements.clientIsSupplier?.checked),
     notes: elements.clientNotes.value.trim(),
   };
 
   if (!payload.fullName) {
     elements.clientFeedback.textContent =
       "El nombre del cliente es obligatorio.";
+    return;
+  }
+
+  if (!payload.isClient && !payload.isSupplier) {
+    elements.clientFeedback.textContent =
+      "Debes seleccionar al menos un perfil: cliente o proveedor.";
     return;
   }
 
@@ -6229,6 +6248,12 @@ async function handleClientsTableClick(event) {
     elements.clientDocument.value = client.documentNumber || "";
     elements.clientPhone.value = client.phone || "";
     elements.clientEmail.value = client.email || "";
+    if (elements.clientIsClient) {
+      elements.clientIsClient.checked = client.isClient !== false;
+    }
+    if (elements.clientIsSupplier) {
+      elements.clientIsSupplier.checked = Boolean(client.isSupplier);
+    }
     elements.clientNotes.value = client.notes || "";
     elements.clientFeedback.textContent =
       "Actualiza los datos del cliente y guarda para aplicar el cambio.";
@@ -10681,6 +10706,20 @@ function normalizeProgrammingAthletes(items) {
   }));
 }
 
+function normalizeClients(items) {
+  if (!Array.isArray(items)) {
+    return [];
+  }
+
+  return items.map((item) => ({
+    ...item,
+    id: Number(item.id || 0),
+    isActive: item?.isActive !== false,
+    isClient: item?.isClient !== false,
+    isSupplier: Boolean(item?.isSupplier),
+  }));
+}
+
 function normalizeClassPrograms(items) {
   if (!Array.isArray(items)) {
     return [];
@@ -11623,7 +11662,9 @@ function getMovementClientMatches(query = "", options = {}) {
 
 function getMovementClientRecords(selectedValue = elements.cliente?.value || "") {
   const currentValue = String(selectedValue || "").trim();
-  const activeClients = (state.clients || []).filter((item) => item.isActive);
+  const activeClients = (state.clients || []).filter(
+    (item) => item.isActive && item.isClient !== false
+  );
   const records = activeClients.map((item) => ({
     lookupKey: `client:${String(item.id)}`,
     fullName: String(item.fullName || "").trim(),
@@ -11754,13 +11795,15 @@ function syncMovementClientSelectionFromSearch(options = {}) {
 
 function syncMovementClientSearchFromSelection() {
   const currentValue = String(elements.cliente?.value || "").trim();
-  const activeClients = (state.clients || []).filter((item) => item.isActive);
+  const activeClients = (state.clients || []).filter(
+    (item) => item.isActive && item.isClient !== false
+  );
 
   if (elements.clienteSearch) {
     elements.clienteSearch.value = currentValue;
     elements.clienteSearch.placeholder = activeClients.length
       ? "Escribe para buscar un cliente"
-      : "No hay clientes activos disponibles";
+      : "No hay perfiles cliente activos disponibles";
   }
 }
 
@@ -11777,7 +11820,9 @@ function fillClientOptions(selectedValue = elements.cliente?.value || "") {
     return;
   }
 
-  const activeClients = (state.clients || []).filter((item) => item.isActive);
+  const activeClients = (state.clients || []).filter(
+    (item) => item.isActive && item.isClient !== false
+  );
   const activeNames = [
     ...new Set(
       activeClients
@@ -12374,8 +12419,14 @@ function resetClientForm() {
   elements.clientForm.reset();
   elements.clientId.value = "";
   elements.clientFormTitle.textContent = "Crear cliente";
+  if (elements.clientIsClient) {
+    elements.clientIsClient.checked = true;
+  }
+  if (elements.clientIsSupplier) {
+    elements.clientIsSupplier.checked = false;
+  }
   elements.clientFeedback.textContent =
-    "Aqui puedes registrar y actualizar la base de clientes para luego usarla en movimientos y cartera.";
+    "Aqui puedes registrar y actualizar clientes, proveedores o ambos perfiles.";
 }
 
 function resetCollectionSelection() {
@@ -13012,6 +13063,9 @@ function getFilteredClientsAdminList() {
         client.phone,
         client.email,
         client.notes,
+        client.isClient ? "cliente" : "",
+        client.isSupplier ? "proveedor" : "",
+        client.isClient && client.isSupplier ? "ambos" : "",
         client.isActive ? "activo" : "inactivo",
       ]
         .filter(Boolean)

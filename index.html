@@ -1397,6 +1397,22 @@
                     />
                   </label>
 
+                  <label class="check-card">
+                    <input id="client-is-client" type="checkbox" checked />
+                    <span>
+                      <strong>Cliente</strong>
+                      <small>Puede usarse en ventas, cartera y cobros.</small>
+                    </span>
+                  </label>
+
+                  <label class="check-card">
+                    <input id="client-is-supplier" type="checkbox" />
+                    <span>
+                      <strong>Proveedor</strong>
+                      <small>Disponible para compras o gastos a terceros.</small>
+                    </span>
+                  </label>
+
                   <label class="span-2">
                     Notas
                     <textarea
@@ -1408,7 +1424,7 @@
                   </label>
 
                   <div id="client-feedback" class="form-note span-2">
-                    Aquí puedes registrar la base de clientes para luego usarla en movimientos y cartera.
+                    Aquí puedes registrar clientes, proveedores o ambos perfiles para la operación.
                   </div>
 
                   <div class="form-actions span-2">
@@ -1448,7 +1464,7 @@
                   <input
                     id="clients-query"
                     type="search"
-                    placeholder="Nombre, alias, documento, teléfono o correo"
+                    placeholder="Nombre, alias, documento, correo o perfil"
                     autocomplete="off"
                   />
                 </label>
@@ -1460,6 +1476,7 @@
                     <tr>
                       <th>Nombre</th>
                       <th>Alias</th>
+                      <th>Perfil</th>
                       <th>Documento</th>
                       <th>Teléfono</th>
                       <th>Correo</th>
@@ -2783,7 +2800,7 @@
                 <div id="inventory-products-metrics" class="mini-stats"></div>
 
                 <div class="table-wrap">
-                  <table>
+                  <table class="inventory-products-grid">
                     <thead>
                       <tr>
                         <th>Nombre</th>
