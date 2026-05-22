@@ -2240,14 +2240,9 @@ function getMovementSoldLabel(item) {
 }
 
 function renderMovementSummary(item, isExpanded) {
-  const soldLabel = getMovementSoldLabel(item);
-  const hasSoldLabel = Boolean(soldLabel);
-  const summaryTitle = hasSoldLabel ? soldLabel : item.cliente || "Sin cliente";
-  const normalizedSoldLabel = normalizeSearchValue(soldLabel);
-  const normalizedCategory = normalizeSearchValue(item.categoria || "");
+  const summaryTitle = item.cliente || "Sin cliente";
   const summaryMeta = [
-    hasSoldLabel ? (item.cliente ? `Cliente: ${item.cliente}` : "Sin cliente") : "",
-    item.categoria && normalizedCategory !== normalizedSoldLabel ? item.categoria : "",
+    item.categoria || item.descripcion || "Movimiento registrado",
     item.linea,
     item.tipo,
     item.medioPago,
@@ -2276,7 +2271,6 @@ function renderMovementSummary(item, isExpanded) {
 }
 
 function renderMovementDetail(item) {
-  const soldLabel = getMovementSoldLabel(item);
   const inventoryProduct = getInventoryProductById(item.inventoryProductId);
   const inventoryProductLabel = inventoryProduct
     ? `${inventoryProduct.name} · ${inventoryProduct.area}`
@@ -2289,11 +2283,6 @@ function renderMovementDetail(item) {
       <div class="detail-grid">
         ${createDetailItem("Caja", escapeHtml(item.medioPago))}
         ${createDetailItem("Abono", formatCurrency(item.abono))}
-        ${
-          soldLabel
-            ? createDetailItem("Producto o servicio", escapeHtml(soldLabel))
-            : ""
-        }
         ${createDetailItem(
           "Flujo neto",
           `<span class="${item.flujoNeto >= 0 ? "positive" : "negative"}">${formatCurrency(
@@ -2440,7 +2429,7 @@ function renderMovementsView() {
 
     elements.movementTable.innerHTML = `
       <tr>
-        <td colspan="5" class="empty-state">
+        <td colspan="6" class="empty-state">
           ${emptyMessage}
         </td>
       </tr>
@@ -2453,9 +2442,17 @@ function renderMovementsView() {
     .map(
       (item) => {
         const isExpanded = expandedMovementDetailIds.has(String(item.id));
+        const soldLabel = getMovementSoldLabel(item);
         return `
           <tr class="accordion-summary-row ${isExpanded ? "is-expanded" : ""}">
             ${tableCell("Resumen", renderMovementSummary(item, isExpanded), "summary-cell")}
+            ${tableCell(
+              "Producto / servicio",
+              soldLabel
+                ? `<span class="compact-summary-meta">${escapeHtml(soldLabel)}</span>`
+                : "<span class='muted'>Sin producto/servicio</span>",
+              "product-cell"
+            )}
             ${tableCell(
               "Estado",
               `<span class="status-pill ${statusClass(item.estadoPago)}">${escapeHtml(item.estadoPago)}</span>`,
@@ -2500,7 +2497,7 @@ function renderMovementsView() {
             )}
           </tr>
           <tr class="accordion-detail-row ${isExpanded ? "is-open" : ""}">
-            <td colspan="5" class="accordion-detail-cell">
+            <td colspan="6" class="accordion-detail-cell">
               ${renderMovementDetail(item)}
             </td>
           </tr>
