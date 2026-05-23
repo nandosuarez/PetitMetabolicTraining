@@ -11033,15 +11033,11 @@ function getCollectionTotalsByMovement() {
 
 function getDirectMovementPaymentAmount(movement, collectionTotals) {
   const paidAmount = Number(movement.abono || 0);
+  const registeredCollections = Number(
+    collectionTotals.get(String(movement.id)) || 0
+  );
 
-  if (movement.tipo === "Ingreso") {
-    return Math.max(
-      paidAmount - Number(collectionTotals.get(String(movement.id)) || 0),
-      0
-    );
-  }
-
-  return Math.max(paidAmount, 0);
+  return Math.max(paidAmount - registeredCollections, 0);
 }
 
 function getBoxLedgerEntries() {
@@ -11094,29 +11090,34 @@ function getBoxLedgerEntries() {
 
   (state.collections || []).forEach((collection) => {
     const movement = movementsById.get(String(collection.movementId));
+    const isIncome = movement?.tipo === "Ingreso";
+    const amount = Number(collection.amount || 0);
     entries.push({
       id: `collection-${collection.id}`,
       date: collection.collectionDate,
       createdAt: collection.createdAt || collection.collectionDate,
       boxName: collection.paymentMethod,
-      entryType: "Cobro de cartera",
-      reference: `Cobro #${collection.id}`,
+      entryType: isIncome ? "Cobro de cartera" : "Pago de egreso",
+      reference: isIncome ? `Cobro #${collection.id}` : `Pago #${collection.id}`,
       detail: [
-        movement?.cliente || "Sin cliente",
-        movement?.descripcion || "Cobro aplicado a cartera",
+        movement?.cliente || "Sin tercero",
+        movement?.descripcion ||
+          (isIncome
+            ? "Cobro aplicado a cartera"
+            : "Pago aplicado a egreso"),
       ]
         .filter(Boolean)
-        .join(" · "),
+      .join(" · "),
       registeredBy: collection.registeredBy || "Sistema",
-      inflow: Number(collection.amount || 0),
-      outflow: 0,
-      amount: Number(collection.amount || 0),
+      inflow: isIncome ? amount : 0,
+      outflow: isIncome ? 0 : amount,
+      amount: isIncome ? amount : amount * -1,
       searchText: [
         collection.paymentMethod,
         collection.registeredBy,
         movement?.cliente,
         movement?.descripcion,
-        "cobro cartera",
+        isIncome ? "cobro cartera" : "pago egreso",
       ].join(" "),
     });
   });
@@ -11369,52 +11370,61 @@ function validateMovement(payload, options = {}) {
 }
 
 function validateCollection(payload, movement) {
+  const isIncome = movement?.tipo === "Ingreso";
+  const actionNoun = isIncome ? "cobro" : "pago";
+
   if (!payload.collectionDate) {
     return {
       valid: false,
-      message: "Selecciona la fecha en la que estás registrando el cobro.",
+      message: `Selecciona la fecha en la que estás registrando el ${actionNoun}.`,
     };
   }
 
   if (!(payload.amount > 0)) {
     return {
       valid: false,
-      message: "El valor del cobro debe ser mayor que cero.",
+      message: `El valor del ${actionNoun} debe ser mayor que cero.`,
     };
   }
 
   if (!payload.paymentMethod) {
     return {
       valid: false,
-      message: "Selecciona el medio de pago con el que ingresó el cobro.",
+      message: isIncome
+        ? "Selecciona el medio de pago con el que ingresó el cobro."
+        : "Selecciona el medio de pago con el que realizaste el pago.",
     };
   }
 
   if (!movement) {
     return {
       valid: false,
-      message: "Selecciona un movimiento pendiente antes de registrar el cobro.",
+      message: `Selecciona un movimiento pendiente antes de registrar el ${actionNoun}.`,
     };
   }
 
-  if (movement.tipo !== "Ingreso") {
+  if (!["Ingreso", "Gasto", "Costo"].includes(movement.tipo)) {
     return {
       valid: false,
-      message: "Solo puedes registrar cobros sobre ingresos pendientes.",
+      message: "Este tipo de movimiento no permite pagos parciales.",
     };
   }
 
   if (!(Number(movement.saldoPendiente || 0) > 0)) {
     return {
       valid: false,
-      message: "La cuenta seleccionada ya no tiene saldo pendiente por cobrar.",
+      message: isIncome
+        ? "La cuenta seleccionada ya no tiene saldo pendiente por cobrar."
+        : "La cuenta seleccionada ya no tiene saldo pendiente por pagar.",
     };
   }
 
   if (payload.amount > Number(movement.saldoPendiente || 0)) {
     return {
       valid: false,
-      message: "El cobro no puede superar el saldo pendiente de esa cuenta.",
+      message: isIncome
+        ? "El cobro no puede superar el saldo pendiente de esa cuenta."
+        : "El pago no puede superar el saldo pendiente de esa cuenta.",
     };
   }
 

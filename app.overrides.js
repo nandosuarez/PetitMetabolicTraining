@@ -1252,7 +1252,7 @@
     if (!items.length) {
       purchaseElements.table.innerHTML = `
         <tr>
-          <td colspan="7" class="empty-state">
+          <td colspan="8" class="empty-state">
             No hay compras o gastos para los filtros seleccionados.
           </td>
         </tr>
@@ -1281,12 +1281,84 @@
             <td>${formatCurrency(item.valorTotal)}</td>
             <td>${formatCurrency(item.abono)}</td>
             <td>${formatCurrency(item.saldoPendiente)}</td>
+            <td>
+              ${
+                Number(item.saldoPendiente || 0) > 0
+                  ? `
+                    <button
+                      class="table-button icon-button"
+                      type="button"
+                      data-purchase-register-payment-id="${item.id}"
+                      title="Registrar pago pendiente"
+                      aria-label="Registrar pago pendiente"
+                    >
+                      <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                        <path d="M12 2v20"></path>
+                        <path d="M17 6.5c0-1.9-2.2-3.5-5-3.5s-5 1.6-5 3.5 2.2 3.5 5 3.5 5 1.6 5 3.5-2.2 3.5-5 3.5-5-1.6-5-3.5"></path>
+                      </svg>
+                    </button>
+                  `
+                  : "<span class='muted'>Pagado</span>"
+              }
+            </td>
           </tr>
         `;
       })
       .join("");
 
     applyStackTableLabels(elements.appShell);
+  }
+
+  function focusPurchasePendingPayment(movementId) {
+    const resolvedMovementId = String(movementId || "").trim();
+    const movement = (state.portfolioMovements || []).find(
+      (item) => String(item.id) === resolvedMovementId
+    );
+
+    if (!movement) {
+      purchaseElements.feedback.textContent =
+        "No encontré ese saldo pendiente. Recarga datos e intenta de nuevo.";
+      return;
+    }
+
+    if (!(Number(movement.saldoPendiente || 0) > 0)) {
+      purchaseElements.feedback.textContent =
+        "Ese movimiento ya no tiene saldo pendiente.";
+      return;
+    }
+
+    if (typeof selectCollectionClient !== "function") {
+      purchaseElements.feedback.textContent =
+        "No pude abrir la gestión de pagos en este momento.";
+      return;
+    }
+
+    selectCollectionClient(movement.cliente || "", {
+      movementId: resolvedMovementId,
+    });
+    switchView("cartera", {
+      clientPanel: "cobros",
+    });
+
+    if (elements.collectionAmount) {
+      elements.collectionAmount.focus();
+    }
+
+    const actionLabel = movement.tipo === "Ingreso" ? "cobro" : "pago";
+    purchaseElements.feedback.textContent = `Abrimos la gestión de cartera para registrar el ${actionLabel} pendiente.`;
+  }
+
+  function handlePurchaseTableClick(event) {
+    const paymentButton = event.target.closest(
+      "[data-purchase-register-payment-id]"
+    );
+    const movementId = paymentButton?.dataset.purchaseRegisterPaymentId;
+
+    if (!movementId) {
+      return;
+    }
+
+    focusPurchasePendingPayment(movementId);
   }
 
   function renderPurchasesModule() {
@@ -1870,6 +1942,7 @@
       .forEach((node) =>
         node?.addEventListener("input", renderPurchasesModule)
       );
+    purchaseElements.table?.addEventListener("click", handlePurchaseTableClick);
   }
 
   function bindSalesDraftEvents() {

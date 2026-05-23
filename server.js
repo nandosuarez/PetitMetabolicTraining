@@ -1663,17 +1663,17 @@ app.put("/api/movements/:id", requireOperationalWriteAccess, asyncHandler(async 
     collectionsResult.rows[0]?.collected_amount || 0
   );
 
-  if (collectedAmount > 0 && payload.tipo !== "Ingreso") {
+  if (collectedAmount > 0 && payload.tipo !== previousSnapshot.tipo) {
     return res.status(400).json({
       error:
-        "No puedes cambiar este movimiento a una salida porque ya tiene cobros registrados en cartera.",
+        "No puedes cambiar el tipo del movimiento porque ya tiene pagos o cobros registrados.",
     });
   }
 
   if (payload.abono < collectedAmount) {
     return res.status(400).json({
       error:
-        "El abono no puede ser menor al valor ya registrado en cobros de cartera.",
+        "El abono no puede ser menor al valor ya registrado en pagos/cobros.",
     });
   }
 
@@ -1844,9 +1844,9 @@ app.post("/api/movements/:id/collections", requireOperationalWriteAccess, asyncH
   const movement = mapMovementRow(movementRow);
   const pendingBalance = Number(movement.saldoPendiente || 0);
 
-  if (movement.tipo !== "Ingreso") {
+  if (!["Ingreso", "Gasto", "Costo"].includes(movement.tipo)) {
     return res.status(400).json({
-      error: "Solo puedes registrar cobros sobre ingresos que esten en cartera.",
+      error: "Este tipo de movimiento no permite registrar pagos parciales.",
     });
   }
 
@@ -1858,7 +1858,7 @@ app.post("/api/movements/:id/collections", requireOperationalWriteAccess, asyncH
 
   if (payload.amount > pendingBalance) {
     return res.status(400).json({
-      error: "El cobro no puede ser mayor que el saldo pendiente.",
+      error: "El pago no puede ser mayor que el saldo pendiente.",
     });
   }
 
@@ -1876,7 +1876,7 @@ app.post("/api/movements/:id/collections", requireOperationalWriteAccess, asyncH
 
   if (!paymentMethodResult.rows.length) {
     return res.status(400).json({
-      error: "La caja seleccionada para el cobro no existe o esta inactiva.",
+      error: "La caja seleccionada para el pago no existe o esta inactiva.",
     });
   }
 
@@ -5678,8 +5678,14 @@ async function calculatePaymentBoxBalancesFromClient(client) {
     ),
     client.query(
       `
-        select movement_id, amount, payment_method
-        from movement_collections
+        select
+          mc.movement_id,
+          mc.amount,
+          mc.payment_method,
+          m.movement_type
+        from movement_collections mc
+        join movements m
+          on m.id = mc.movement_id
       `
     ),
     client.query(
@@ -5697,6 +5703,7 @@ async function calculatePaymentBoxBalancesFromClient(client) {
     const movementId = String(row.movement_id);
     const amount = Number(row.amount || 0);
     const paymentMethod = String(row.payment_method || "").trim();
+    const movementType = String(row.movement_type || "");
 
     collectionTotalsByMovement.set(
       movementId,
@@ -5704,7 +5711,9 @@ async function calculatePaymentBoxBalancesFromClient(client) {
     );
 
     if (paymentMethod) {
-      balances[paymentMethod] = Number(balances[paymentMethod] || 0) + amount;
+      const signedAmount = movementType === "Ingreso" ? amount : amount * -1;
+      balances[paymentMethod] =
+        Number(balances[paymentMethod] || 0) + signedAmount;
     }
   });
 
@@ -5719,10 +5728,7 @@ async function calculatePaymentBoxBalancesFromClient(client) {
     const collectedAmount = Number(
       collectionTotalsByMovement.get(String(row.id)) || 0
     );
-    const directAmount =
-      row.movement_type === "Ingreso"
-        ? Math.max(paidAmount - collectedAmount, 0)
-        : paidAmount;
+    const directAmount = Math.max(paidAmount - collectedAmount, 0);
 
     if (!(directAmount > 0)) {
       return;
