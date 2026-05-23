@@ -1591,6 +1591,60 @@ table {
   min-width: 980px;
 }
 
+.inventory-products-grid {
+  min-width: 0;
+  table-layout: fixed;
+}
+
+.inventory-products-grid th,
+.inventory-products-grid td {
+  padding: 12px 10px;
+  word-break: break-word;
+}
+
+.inventory-products-grid th:nth-child(1),
+.inventory-products-grid td:nth-child(1) {
+  width: 22%;
+}
+
+.inventory-products-grid th:nth-child(2),
+.inventory-products-grid td:nth-child(2) {
+  width: 10%;
+}
+
+.inventory-products-grid th:nth-child(3),
+.inventory-products-grid td:nth-child(3) {
+  width: 23%;
+}
+
+.inventory-products-grid th:nth-child(4),
+.inventory-products-grid td:nth-child(4),
+.inventory-products-grid th:nth-child(5),
+.inventory-products-grid td:nth-child(5) {
+  width: 9%;
+}
+
+.inventory-products-grid th:nth-child(6),
+.inventory-products-grid td:nth-child(6) {
+  width: 8%;
+}
+
+.inventory-products-grid th:nth-child(7),
+.inventory-products-grid td:nth-child(7) {
+  width: 19%;
+}
+
+.inventory-products-grid td:nth-child(7) .row-actions {
+  flex-wrap: nowrap;
+  justify-content: flex-start;
+  gap: 6px;
+}
+
+.inventory-products-grid td:nth-child(7) .table-button.icon-button {
+  inline-size: 34px;
+  block-size: 34px;
+}
+
 th,
 td {
   padding: 14px 12px;

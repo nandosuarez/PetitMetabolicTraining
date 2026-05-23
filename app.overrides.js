@@ -1124,6 +1124,82 @@
     });
   }
 
+  function getActivePurchaseProviders() {
+    return (state.clients || [])
+      .filter((item) => item.isActive && item.isSupplier)
+      .sort((a, b) =>
+        String(a.fullName || "").localeCompare(String(b.fullName || ""), APP_LOCALE)
+      );
+  }
+
+  function buildPurchaseProviderLabel(provider) {
+    const fullName = String(provider?.fullName || "").trim();
+    const alias = String(provider?.alias || "").trim();
+    const documentNumber = String(provider?.documentNumber || "").trim();
+    const labelParts = [fullName];
+
+    if (alias && normalizeSearchValue(alias) !== normalizeSearchValue(fullName)) {
+      labelParts.push(`Alias: ${alias}`);
+    }
+
+    if (documentNumber) {
+      labelParts.push(`Doc: ${documentNumber}`);
+    }
+
+    return labelParts.join(" · ");
+  }
+
+  function fillPurchaseBeneficiaryOptions(selectedValue = "") {
+    if (!purchaseElements.beneficiary) {
+      return;
+    }
+
+    const providers = getActivePurchaseProviders();
+    const selected = String(
+      selectedValue || purchaseElements.beneficiary.value || ""
+    ).trim();
+    const hasSelectedProvider = providers.some(
+      (item) => String(item.fullName || "").trim() === selected
+    );
+    const includeHistorical = selected && !hasSelectedProvider;
+    const placeholderLabel = providers.length
+      ? "Selecciona un proveedor"
+      : "No hay proveedores activos";
+    const options = [
+      `<option value="">${escapeHtml(placeholderLabel)}</option>`,
+      ...providers.map(
+        (provider) =>
+          `<option value="${escapeHtml(
+            String(provider.fullName || "").trim()
+          )}">${escapeHtml(buildPurchaseProviderLabel(provider))}</option>`
+      ),
+    ];
+
+    if (includeHistorical) {
+      options.push(
+        `<option value="${escapeHtml(selected)}">${escapeHtml(
+          `${selected} (inactivo)`
+        )}</option>`
+      );
+    }
+
+    purchaseElements.beneficiary.innerHTML = options.join("");
+
+    if (
+      selected &&
+      [...purchaseElements.beneficiary.options].some(
+        (option) => option.value === selected
+      )
+    ) {
+      purchaseElements.beneficiary.value = selected;
+    } else {
+      purchaseElements.beneficiary.value = "";
+    }
+
+    purchaseElements.beneficiary.disabled =
+      !providers.length && !includeHistorical;
+  }
+
   function syncPurchaseTotalFromCost() {
     if (!isPurchaseKindCost()) {
       return;
@@ -1172,6 +1248,7 @@
     fillPurchaseCategoryOptions("");
     fillPurchaseInventoryOptions("");
     fillPurchasePaymentMethods("");
+    fillPurchaseBeneficiaryOptions("");
     purchaseElements.feedback.textContent =
       "Registra aquí costos y gastos. Si es compra de inventario, además actualiza stock.";
     syncPurchaseKindUi();
@@ -1369,6 +1446,7 @@
     fillPurchaseCategoryOptions();
     fillPurchaseInventoryOptions();
     fillPurchasePaymentMethods();
+    fillPurchaseBeneficiaryOptions();
     syncPurchaseKindUi();
 
     const filtered = getPurchaseFilteredMovements();
@@ -1449,6 +1527,19 @@
       purchaseElements.feedback.textContent =
         "Selecciona la categoría del gasto operativo.";
       purchaseElements.categoria.focus();
+      return;
+    }
+
+    if (purchaseElements.beneficiary.disabled) {
+      purchaseElements.feedback.textContent =
+        "No hay proveedores activos. Crea o activa uno en Clientes antes de registrar este movimiento.";
+      return;
+    }
+
+    if (!payload.cliente) {
+      purchaseElements.feedback.textContent =
+        "Selecciona un proveedor de la lista antes de guardar.";
+      purchaseElements.beneficiary.focus();
       return;
     }
 
