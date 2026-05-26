@@ -36,6 +36,9 @@
     paid: document.getElementById("purchase-paid"),
     notes: document.getElementById("purchase-notes"),
     feedback: document.getElementById("purchase-feedback"),
+    addItemButton: document.getElementById("purchase-add-item"),
+    itemsList: document.getElementById("purchase-items-list"),
+    itemsSummary: document.getElementById("purchase-items-summary"),
     filterLine: document.getElementById("purchase-filter-line"),
     filterKind: document.getElementById("purchase-filter-kind"),
     filterQuery: document.getElementById("purchase-filter-query"),
@@ -67,6 +70,8 @@
 
   let salesDraftItems = [];
   let lastAutoSalesDescription = "";
+  let salesDraftEditingMovementId = "";
+  let purchaseDraftItems = [];
 
   function normalizeMovementPanel(panel) {
     return ["ventas", "compras"].includes(panel) ? panel : "ventas";
@@ -103,6 +108,71 @@
 
   function computeSalesItemSubtotal(quantity, unitPrice) {
     return normalizeMoney(normalizeSalesQuantity(quantity) * normalizeMoney(unitPrice));
+  }
+
+  function escapeRegExp(value) {
+    return String(value || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  }
+
+  function parseSalesEditQuantity(movement, selectedProduct) {
+    const fallbackQuantity = 1;
+    const productName = String(selectedProduct?.name || "").trim();
+    const description = String(movement?.descripcion || "").trim();
+
+    if (productName && description) {
+      const byNameRegex = new RegExp(
+        `${escapeRegExp(productName)}\\s*x\\s*(\\d+)`,
+        "i"
+      );
+      const byNameMatch = description.match(byNameRegex);
+      if (byNameMatch?.[1]) {
+        const parsed = normalizeSalesQuantity(byNameMatch[1]);
+        if (parsed > 0) {
+          return parsed;
+        }
+      }
+
+      const genericMatch = description.match(/\bx\s*(\d+)\b/i);
+      if (genericMatch?.[1]) {
+        const parsed = normalizeSalesQuantity(genericMatch[1]);
+        if (parsed > 0) {
+          return parsed;
+        }
+      }
+    }
+
+    return fallbackQuantity;
+  }
+
+  function buildSalesEditDraftItem(movement) {
+    if (!movement || movement.tipo !== "Ingreso") {
+      return null;
+    }
+
+    const selectedProduct = getBusinessProductById(
+      String(movement.businessProductId || elements.movementBusinessProductId?.value || "")
+    );
+
+    if (!selectedProduct) {
+      return null;
+    }
+
+    const quantity = parseSalesEditQuantity(movement, selectedProduct);
+    const totalAmount = normalizeMoney(movement.valorTotal || 0);
+    const baseUnitPrice =
+      quantity > 0
+        ? normalizeMoney(totalAmount / quantity)
+        : normalizeMoney(selectedProduct.defaultAmount || 0);
+
+    return {
+      id: `edit-${movement.id}`,
+      productId: Number(selectedProduct.id),
+      name: selectedProduct.name,
+      categoryLabel:
+        selectedProduct.category || getBusinessProductCategoryLabel(selectedProduct),
+      baseUnitPrice: baseUnitPrice > 0 ? baseUnitPrice : normalizeMoney(selectedProduct.defaultAmount || 0),
+      quantity: quantity > 0 ? quantity : 1,
+    };
   }
 
   function normalizeSalesComboRuleRecord(item) {
@@ -305,6 +375,7 @@
   function clearSalesDraft(options = {}) {
     salesDraftItems = [];
     lastAutoSalesDescription = "";
+    salesDraftEditingMovementId = "";
     if (salesElements.quantity) {
       salesElements.quantity.value = "1";
     }
@@ -397,30 +468,58 @@
 
   function syncSalesDraftEditState() {
     const isEditing = Boolean(elements.movementId?.value);
+    const movementId = String(elements.movementId?.value || "");
     if (elements.valorTotal) {
       elements.valorTotal.readOnly = !isEditing;
     }
     if (salesElements.quantity) {
-      salesElements.quantity.disabled = isEditing;
+      salesElements.quantity.disabled = true;
     }
     if (salesElements.addItemButton) {
       salesElements.addItemButton.disabled = isEditing;
     }
 
     if (isEditing) {
-      updateSalesDraftSummary(
-        "En edición se actualiza un solo movimiento. Para venta múltiple, crea una venta nueva."
-      );
-      if (salesElements.itemsList) {
-        salesElements.itemsList.innerHTML = `
-          <article class="list-item">
-            <small>La edición se hace por movimiento individual.</small>
-          </article>
-        `;
+      if (movementId && movementId !== salesDraftEditingMovementId) {
+        const currentMovement = state.movements.find(
+          (item) => String(item.id) === movementId
+        );
+        const editDraftItem = buildSalesEditDraftItem(currentMovement);
+        salesDraftItems = editDraftItem ? [editDraftItem] : [];
+        salesDraftEditingMovementId = movementId;
       }
+
+      if (!salesDraftItems.length) {
+        updateSalesDraftSummary(
+          "No se pudo reconstruir el detalle de la venta para esta edicion."
+        );
+        if (salesElements.itemsList) {
+          salesElements.itemsList.innerHTML = `
+            <article class="list-item">
+              <small>Este movimiento no tiene un producto valido para editar en el detalle.</small>
+            </article>
+          `;
+        }
+        return;
+      }
+
+      const currentDraftItem = salesDraftItems[0];
+      if (
+        currentDraftItem &&
+        Number(currentDraftItem.productId || 0) > 0 &&
+        elements.movementBusinessProductId
+      ) {
+        elements.movementBusinessProductId.value = String(currentDraftItem.productId);
+      }
+
+      renderSalesDraftItems();
+      updateSalesDraftSummary(
+        "Editando movimiento: ajusta cantidad, total o abono antes de guardar."
+      );
       return;
     }
 
+    salesDraftEditingMovementId = "";
     renderSalesDraftItems();
   }
 
@@ -790,6 +889,12 @@
       return;
     }
 
+    if (elements.movementId?.value) {
+      elements.movementFeedback.textContent =
+        "En edicion no se puede quitar la linea del producto. Ajusta solo cantidad, total o abono.";
+      return;
+    }
+
     const itemId = String(removeButton.dataset.salesItemRemoveId || "");
     if (!itemId) {
       return;
@@ -926,10 +1031,47 @@
 
     try {
       if (isEditing) {
+        const editingDraftValidation = getValidatedSalesDraftItems();
+        if (!editingDraftValidation.valid) {
+          elements.movementFeedback.textContent = editingDraftValidation.message;
+          editingDraftValidation.focusNode?.focus();
+          return;
+        }
+
+        const editingItem = editingDraftValidation.items?.[0] || null;
+        const editingProduct =
+          getBusinessProductById(
+            String(
+              editingItem?.productId ||
+                elements.movementBusinessProductId.value ||
+                ""
+            )
+          ) || selectedProduct;
+
+        if (!editingProduct) {
+          elements.movementFeedback.textContent =
+            "No encontramos el producto de esta venta. Seleccionalo e intenta de nuevo.";
+          elements.movementBusinessProductId?.focus();
+          return;
+        }
+
+        const editingQuantity =
+          normalizeSalesQuantity(editingItem?.quantity || 1) || 1;
+        const currentDescription = String(elements.descripcion.value || "").trim();
+        const autoDescriptionPattern = new RegExp(
+          `^${escapeRegExp(String(editingProduct.name || "").trim())}(\\s*x\\s*\\d+)?$`,
+          "i"
+        );
+        const useAutoDescription =
+          !currentDescription || autoDescriptionPattern.test(currentDescription);
+
         const payload = buildSalesPayload({
-          selectedProduct,
+          selectedProduct: editingProduct,
+          businessProductId: editingProduct.id,
+          quantity: editingQuantity,
           valorTotal: elements.valorTotal.value,
           abono: elements.abono.value,
+          descripcion: useAutoDescription ? "" : currentDescription,
         });
         payload.estadoPago = derivePaymentStatus(payload.valorTotal, payload.abono);
 
@@ -1213,18 +1355,25 @@
 
   function syncPurchaseKindUi() {
     const isCost = isPurchaseKindCost();
+    const hasDraftItems =
+      !purchaseElements.movementId?.value && purchaseDraftItems.length > 0;
 
     setNodeVisibility(purchaseElements.inventoryProductShell, isCost);
     setNodeVisibility(purchaseElements.inventoryQuantityShell, isCost);
     setNodeVisibility(purchaseElements.unitCostShell, isCost);
     setNodeVisibility(purchaseElements.categoriaShell, !isCost);
 
-    purchaseElements.inventoryProductId.required = isCost;
-    purchaseElements.inventoryQuantity.required = isCost;
-    purchaseElements.unitCost.required = isCost;
-    purchaseElements.categoria.required = !isCost;
+    purchaseElements.inventoryProductId.required = isCost && !hasDraftItems;
+    purchaseElements.inventoryQuantity.required = isCost && !hasDraftItems;
+    purchaseElements.unitCost.required = isCost && !hasDraftItems;
+    purchaseElements.categoria.required = !isCost && !hasDraftItems;
     purchaseElements.total.readOnly = isCost;
-    purchaseElements.total.required = !isCost;
+    purchaseElements.total.required = !isCost && !hasDraftItems;
+    if (purchaseElements.addItemButton) {
+      purchaseElements.addItemButton.disabled = Boolean(
+        purchaseElements.movementId?.value
+      );
+    }
 
     if (isCost) {
       syncPurchaseTotalFromCost();
@@ -1233,6 +1382,326 @@
       purchaseElements.inventoryQuantity.value = "";
       purchaseElements.unitCost.value = "";
     }
+  }
+
+  function normalizePurchaseQuantity(value) {
+    const numericValue = Number(value || 0);
+    if (!Number.isFinite(numericValue) || numericValue <= 0) {
+      return 0;
+    }
+    return Number(numericValue.toFixed(4));
+  }
+
+  function computePurchaseLineTotal(quantity, unitCost) {
+    return normalizeMoney(
+      normalizePurchaseQuantity(quantity) * normalizeMoney(unitCost)
+    );
+  }
+
+  function getPurchaseDraftTotal(items = purchaseDraftItems) {
+    return normalizeMoney(
+      (Array.isArray(items) ? items : []).reduce(
+        (sum, item) => sum + Number(item.total || 0),
+        0
+      )
+    );
+  }
+
+  function updatePurchaseDraftSummary(message = "") {
+    if (!purchaseElements.itemsSummary) {
+      return;
+    }
+
+    if (message) {
+      purchaseElements.itemsSummary.textContent = message;
+      return;
+    }
+
+    if (!purchaseDraftItems.length) {
+      purchaseElements.itemsSummary.textContent =
+        "Agrega uno o más items para registrar la compra o gasto.";
+      return;
+    }
+
+    const total = getPurchaseDraftTotal();
+    const costItems = purchaseDraftItems.filter(
+      (item) => item.kind === "Costo"
+    ).length;
+    const expenseItems = purchaseDraftItems.filter(
+      (item) => item.kind === "Gasto"
+    ).length;
+
+    purchaseElements.itemsSummary.textContent = `${purchaseDraftItems.length} item(s) - Costos ${costItems}, Gastos ${expenseItems}. Total ${formatCurrency(total)}.`;
+  }
+
+  function clearPurchaseLineFields() {
+    purchaseElements.description.value = "";
+    purchaseElements.total.value = "";
+
+    if (isPurchaseKindCost()) {
+      purchaseElements.inventoryProductId.value = "";
+      purchaseElements.inventoryQuantity.value = "";
+      purchaseElements.unitCost.value = "";
+    } else {
+      purchaseElements.categoria.value = "";
+    }
+  }
+
+  function clearPurchaseDraft() {
+    purchaseDraftItems = [];
+    syncPurchaseKindUi();
+    renderPurchaseDraftItems();
+  }
+
+  function buildPurchaseDraftItemFromForm() {
+    const isCost = isPurchaseKindCost();
+    const beneficiary = String(purchaseElements.beneficiary.value || "").trim();
+    const description = String(purchaseElements.description.value || "").trim();
+    const line = String(purchaseElements.linea.value || "Gimnasio");
+
+    if (purchaseElements.beneficiary.disabled) {
+      return {
+        valid: false,
+        message:
+          "No hay proveedores activos. Crea o activa uno en Clientes antes de registrar este movimiento.",
+      };
+    }
+
+    if (!beneficiary) {
+      return {
+        valid: false,
+        message: "Selecciona un proveedor de la lista antes de agregar el item.",
+        focusNode: purchaseElements.beneficiary,
+      };
+    }
+
+    if (isCost) {
+      const inventoryProductId = Number(purchaseElements.inventoryProductId.value || 0);
+      const inventoryProduct = getInventoryProductById(inventoryProductId);
+      if (!inventoryProduct) {
+        return {
+          valid: false,
+          message:
+            "Selecciona el producto o insumo comprado para actualizar inventario.",
+          focusNode: purchaseElements.inventoryProductId,
+        };
+      }
+
+      const quantity = normalizePurchaseQuantity(
+        purchaseElements.inventoryQuantity.value
+      );
+      if (!(quantity > 0)) {
+        return {
+          valid: false,
+          message: "La cantidad comprada debe ser mayor que cero.",
+          focusNode: purchaseElements.inventoryQuantity,
+        };
+      }
+
+      const unitCost = normalizeMoney(purchaseElements.unitCost.value);
+      if (!(unitCost > 0)) {
+        return {
+          valid: false,
+          message: "El costo unitario debe ser mayor que cero.",
+          focusNode: purchaseElements.unitCost,
+        };
+      }
+
+      const total = computePurchaseLineTotal(quantity, unitCost);
+      if (!(total > 0)) {
+        return {
+          valid: false,
+          message: "No se pudo calcular el valor total del item.",
+          focusNode: purchaseElements.total,
+        };
+      }
+
+      return {
+        valid: true,
+        item: {
+          id: `${Date.now()}-${Math.round(Math.random() * 100000)}`,
+          kind: "Costo",
+          line,
+          category:
+            String(inventoryProduct.category || "").trim() || "Compras inventario",
+          beneficiary,
+          description: description || `Compra de ${inventoryProduct.name}`,
+          inventoryProductId: Number(inventoryProduct.id || 0),
+          inventoryProductName: String(inventoryProduct.name || "Insumo"),
+          inventoryProductUnit: String(inventoryProduct.unitName || "Unidad"),
+          quantity,
+          unitCost,
+          total,
+        },
+      };
+    }
+
+    const category = String(purchaseElements.categoria.value || "").trim();
+    if (!category) {
+      return {
+        valid: false,
+        message: "Selecciona la categoría del gasto operativo.",
+        focusNode: purchaseElements.categoria,
+      };
+    }
+
+    const total = normalizeMoney(purchaseElements.total.value);
+    if (!(total > 0)) {
+      return {
+        valid: false,
+        message: "El valor total del gasto debe ser mayor que cero.",
+        focusNode: purchaseElements.total,
+      };
+    }
+
+    return {
+      valid: true,
+      item: {
+        id: `${Date.now()}-${Math.round(Math.random() * 100000)}`,
+        kind: "Gasto",
+        line,
+        category,
+        beneficiary,
+        description: description || category || "Gasto operativo",
+        inventoryProductId: 0,
+        inventoryProductName: "",
+        inventoryProductUnit: "",
+        quantity: 1,
+        unitCost: total,
+        total,
+      },
+    };
+  }
+
+  function renderPurchaseDraftItems() {
+    if (!purchaseElements.itemsList) {
+      return;
+    }
+
+    if (!purchaseDraftItems.length) {
+      purchaseElements.itemsList.innerHTML = `
+        <article class="list-item">
+          <small>No hay items agregados en esta compra o gasto.</small>
+        </article>
+      `;
+      updatePurchaseDraftSummary();
+      return;
+    }
+
+    purchaseElements.itemsList.innerHTML = purchaseDraftItems
+      .map((item) => {
+        const quantityCopy =
+          item.kind === "Costo"
+            ? formatInventoryQuantity(item.quantity, item.inventoryProductUnit)
+            : "1";
+        const headerTitle =
+          item.kind === "Costo"
+            ? item.inventoryProductName || "Insumo"
+            : item.category || "Gasto";
+        const detailCopy =
+          item.kind === "Costo"
+            ? `${item.kind} · ${quantityCopy} · ${formatCurrency(item.unitCost)} c/u`
+            : `${item.kind} · ${item.category || "Sin categoría"}`;
+
+        return `
+          <article class="list-item sales-item-row">
+            <div class="sales-item-main">
+              <strong>${escapeHtml(headerTitle)}</strong>
+              <small>${escapeHtml(detailCopy)}</small>
+              <small>${escapeHtml(item.description || "Sin descripción")}</small>
+            </div>
+            <div class="sales-item-controls">
+              <strong>${formatCurrency(item.total)}</strong>
+              <button
+                type="button"
+                class="table-button icon-button danger"
+                data-purchase-item-remove-id="${escapeHtml(String(item.id || ""))}"
+                aria-label="Quitar item de la compra"
+                title="Quitar item"
+              >
+                <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                  <path d="M3 6h18" />
+                  <path d="M8 6V4h8v2" />
+                  <path d="M19 6l-1 14H6L5 6" />
+                  <path d="M10 11v6" />
+                  <path d="M14 11v6" />
+                </svg>
+              </button>
+            </div>
+          </article>
+        `;
+      })
+      .join("");
+
+    updatePurchaseDraftSummary();
+  }
+
+  function addPurchaseDraftItem() {
+    if (purchaseElements.movementId.value) {
+      purchaseElements.feedback.textContent =
+        "En edición se actualiza un solo movimiento. Para múltiples items crea un registro nuevo.";
+      return;
+    }
+
+    const result = buildPurchaseDraftItemFromForm();
+    if (!result.valid || !result.item) {
+      purchaseElements.feedback.textContent =
+        result.message || "No se pudo agregar el item.";
+      result.focusNode?.focus();
+      return;
+    }
+
+    if (purchaseDraftItems.length) {
+      const firstItem = purchaseDraftItems[0];
+      const sameKind = String(firstItem.kind || "") === String(result.item.kind || "");
+      const sameLine = String(firstItem.line || "") === String(result.item.line || "");
+      const sameBeneficiary =
+        String(firstItem.beneficiary || "") ===
+        String(result.item.beneficiary || "");
+
+      if (!sameKind) {
+        purchaseElements.feedback.textContent =
+          "No puedes mezclar costos y gastos en el mismo registro. Guarda este detalle y luego crea otro.";
+        return;
+      }
+
+      if (!sameLine) {
+        purchaseElements.feedback.textContent =
+          "No puedes mezclar líneas de negocio en el mismo registro.";
+        return;
+      }
+
+      if (!sameBeneficiary) {
+        purchaseElements.feedback.textContent =
+          "No puedes mezclar proveedores en el mismo registro.";
+        return;
+      }
+    }
+
+    purchaseDraftItems.push(result.item);
+    clearPurchaseLineFields();
+    syncPurchaseKindUi();
+    renderPurchaseDraftItems();
+    purchaseElements.feedback.textContent = "Item agregado correctamente.";
+  }
+
+  function handlePurchaseDraftListClick(event) {
+    const removeButton = event.target.closest("[data-purchase-item-remove-id]");
+    if (!removeButton) {
+      return;
+    }
+
+    const itemId = String(removeButton.dataset.purchaseItemRemoveId || "").trim();
+    if (!itemId) {
+      return;
+    }
+
+    purchaseDraftItems = purchaseDraftItems.filter(
+      (item) => String(item.id || "") !== itemId
+    );
+    syncPurchaseKindUi();
+    renderPurchaseDraftItems();
+    purchaseElements.feedback.textContent = "Item retirado del detalle.";
   }
 
   function resetPurchaseForm() {
@@ -1249,9 +1718,11 @@
     fillPurchaseInventoryOptions("");
     fillPurchasePaymentMethods("");
     fillPurchaseBeneficiaryOptions("");
+    clearPurchaseDraft();
     purchaseElements.feedback.textContent =
       "Registra aquí costos y gastos. Si es compra de inventario, además actualiza stock.";
     syncPurchaseKindUi();
+    updatePurchaseDraftSummary();
   }
 
   function getPurchaseFilteredMovements() {
@@ -1448,6 +1919,7 @@
     fillPurchasePaymentMethods();
     fillPurchaseBeneficiaryOptions();
     syncPurchaseKindUi();
+    renderPurchaseDraftItems();
 
     const filtered = getPurchaseFilteredMovements();
     renderPurchaseMetrics(filtered);
@@ -1456,10 +1928,10 @@
 
   function buildPurchasePayload() {
     const isCost = isPurchaseKindCost();
-    const total = Number(purchaseElements.total.value || 0);
-    const paid = Number(purchaseElements.paid.value || 0);
+    const total = normalizeMoney(purchaseElements.total.value || 0);
+    const paid = normalizeMoney(purchaseElements.paid.value || 0);
     const inventoryProductId = Number(purchaseElements.inventoryProductId.value || 0);
-    const inventoryQuantity = Number(
+    const inventoryQuantity = normalizePurchaseQuantity(
       purchaseElements.inventoryQuantity.value || 0
     );
     const selectedInventoryProduct = getInventoryProductById(inventoryProductId);
@@ -1499,8 +1971,11 @@
   async function handlePurchaseSubmit(event) {
     event.preventDefault();
 
-    const isCost = isPurchaseKindCost();
-    const payload = buildPurchasePayload();
+    const isEditing = Boolean(purchaseElements.movementId.value);
+
+    if (isEditing) {
+      const isCost = isPurchaseKindCost();
+      const payload = buildPurchasePayload();
 
     if (isCost) {
       if (!(payload.inventoryProductId > 0)) {
@@ -1545,9 +2020,9 @@
 
     payload.estadoPago = derivePaymentStatus(payload.valorTotal, payload.abono);
 
-    const validation = validateMovement(payload, {
-      isEditing: Boolean(purchaseElements.movementId.value),
-    });
+      const validation = validateMovement(payload, {
+        isEditing: true,
+      });
     if (!validation.valid) {
       purchaseElements.feedback.textContent = validation.message;
       return;
@@ -1571,7 +2046,107 @@
       switchView("movimientos");
       setMovementPanel("compras");
       purchaseElements.feedback.textContent =
-        "Compra o gasto registrado correctamente.";
+        "Compra o gasto actualizado correctamente.";
+    } catch (error) {
+      purchaseElements.feedback.textContent = error.message;
+    }
+
+      return;
+    }
+
+    if (!purchaseDraftItems.length) {
+      purchaseElements.feedback.textContent =
+        "Agrega al menos un item al detalle antes de guardar.";
+      purchaseElements.addItemButton?.focus();
+      return;
+    }
+
+    const totalAmount = getPurchaseDraftTotal();
+    const paidAmount = normalizeMoney(purchaseElements.paid.value);
+    if (!(totalAmount > 0)) {
+      purchaseElements.feedback.textContent =
+        "El total del detalle debe ser mayor que cero.";
+      return;
+    }
+
+    if (paidAmount < 0 || paidAmount > totalAmount) {
+      purchaseElements.feedback.textContent =
+        "El abono total no puede ser negativo ni mayor al total de la compra o gasto.";
+      purchaseElements.paid.focus();
+      return;
+    }
+
+    const movementDate = String(purchaseElements.fecha.value || "").trim();
+    const paymentMethod = String(purchaseElements.medioPago.value || "").trim();
+    const sharedNotes = String(purchaseElements.notes.value || "").trim();
+
+    if (!movementDate) {
+      purchaseElements.feedback.textContent = "Selecciona la fecha del movimiento.";
+      purchaseElements.fecha.focus();
+      return;
+    }
+
+    if (!paymentMethod) {
+      purchaseElements.feedback.textContent =
+        "Selecciona la caja o medio de pago.";
+      purchaseElements.medioPago.focus();
+      return;
+    }
+
+    let remainingPaid = paidAmount;
+    try {
+      for (const item of purchaseDraftItems) {
+        const lineTotal = normalizeMoney(item.total || 0);
+        const linePaid = normalizeMoney(Math.min(remainingPaid, lineTotal));
+        remainingPaid = normalizeMoney(Math.max(0, remainingPaid - linePaid));
+        const isCostItem = String(item.kind || "") === "Costo";
+        const inventoryQuantity = isCostItem
+          ? normalizePurchaseQuantity(item.quantity || 0)
+          : 0;
+
+        const payload = {
+          linea: String(item.line || purchaseElements.linea.value || "Gimnasio"),
+          fecha: movementDate,
+          tipo: isCostItem ? "Costo" : "Gasto",
+          categoria: String(item.category || "").trim(),
+          businessProductId: 0,
+          cliente: String(item.beneficiary || "").trim(),
+          descripcion:
+            String(item.description || "").trim() ||
+            (isCostItem
+              ? `Compra de ${String(item.inventoryProductName || "insumo")}`
+              : "Gasto operativo"),
+          medioPago: paymentMethod,
+          valorTotal: lineTotal,
+          abono: linePaid,
+          inventoryProductId: isCostItem ? Number(item.inventoryProductId || 0) : 0,
+          inventoryQuantity,
+          inventoryEffect: isCostItem ? "entrada" : "ninguno",
+          observaciones: sharedNotes,
+          justificacionEdicion: "",
+        };
+        payload.estadoPago = derivePaymentStatus(payload.valorTotal, payload.abono);
+
+        const validation = validateMovement(payload, {
+          isEditing: false,
+        });
+        if (!validation.valid) {
+          purchaseElements.feedback.textContent = validation.message;
+          return;
+        }
+
+        await apiRequest("/api/movements", {
+          method: "POST",
+          body: JSON.stringify(payload),
+        });
+      }
+
+      resetPurchaseForm();
+      await loadBootstrap();
+      switchView("movimientos");
+      setMovementPanel("compras");
+      purchaseElements.feedback.textContent =
+        "Compra o gasto con multiples items registrado correctamente.";
     } catch (error) {
       purchaseElements.feedback.textContent = error.message;
     }
@@ -2017,10 +2592,20 @@
 
     purchaseElements.form.addEventListener("submit", handlePurchaseSubmit);
     purchaseElements.linea.addEventListener("change", () => {
+      if (!purchaseElements.movementId.value && purchaseDraftItems.length) {
+        clearPurchaseDraft();
+        purchaseElements.feedback.textContent =
+          "Cambiaste la linea de negocio, por eso limpiamos el detalle para evitar cruces.";
+      }
       fillPurchaseCategoryOptions("");
       renderPurchasesModule();
     });
     purchaseElements.kind.addEventListener("change", () => {
+      if (!purchaseElements.movementId.value && purchaseDraftItems.length) {
+        clearPurchaseDraft();
+        purchaseElements.feedback.textContent =
+          "Cambiaste el tipo de egreso, por eso limpiamos el detalle actual.";
+      }
       syncPurchaseKindUi();
       renderPurchasesModule();
     });
@@ -2034,6 +2619,8 @@
         node?.addEventListener("input", renderPurchasesModule)
       );
     purchaseElements.table?.addEventListener("click", handlePurchaseTableClick);
+    purchaseElements.addItemButton?.addEventListener("click", addPurchaseDraftItem);
+    purchaseElements.itemsList?.addEventListener("click", handlePurchaseDraftListClick);
   }
 
   function bindSalesDraftEvents() {
