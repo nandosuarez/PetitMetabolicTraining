@@ -1343,6 +1343,10 @@
   }
 
   function syncPurchaseTotalFromCost() {
+    if (!purchaseElements.movementId?.value && purchaseDraftItems.length) {
+      return;
+    }
+
     if (!isPurchaseKindCost()) {
       return;
     }
@@ -1351,6 +1355,24 @@
     const unitCost = Number(purchaseElements.unitCost.value || 0);
     const total = Number((quantity * unitCost).toFixed(2));
     purchaseElements.total.value = total > 0 ? String(total) : "";
+  }
+
+  function syncPurchaseDraftTotalField() {
+    if (!purchaseElements.total || purchaseElements.movementId?.value) {
+      return;
+    }
+
+    if (!purchaseDraftItems.length) {
+      return;
+    }
+
+    const total = getPurchaseDraftTotal();
+    purchaseElements.total.value = total > 0 ? String(total) : "";
+
+    const paidAmount = normalizeMoney(purchaseElements.paid?.value || 0);
+    if (paidAmount > total && purchaseElements.paid) {
+      purchaseElements.paid.value = String(total);
+    }
   }
 
   function syncPurchaseKindUi() {
@@ -1367,7 +1389,7 @@
     purchaseElements.inventoryQuantity.required = isCost && !hasDraftItems;
     purchaseElements.unitCost.required = isCost && !hasDraftItems;
     purchaseElements.categoria.required = !isCost && !hasDraftItems;
-    purchaseElements.total.readOnly = isCost;
+    purchaseElements.total.readOnly = isCost || hasDraftItems;
     purchaseElements.total.required = !isCost && !hasDraftItems;
     if (purchaseElements.addItemButton) {
       purchaseElements.addItemButton.disabled = Boolean(
@@ -1585,6 +1607,9 @@
         </article>
       `;
       updatePurchaseDraftSummary();
+      if (!purchaseElements.movementId?.value && !isPurchaseKindCost()) {
+        purchaseElements.total.value = "";
+      }
       return;
     }
 
@@ -1633,6 +1658,7 @@
       })
       .join("");
 
+    syncPurchaseDraftTotalField();
     updatePurchaseDraftSummary();
   }
 
