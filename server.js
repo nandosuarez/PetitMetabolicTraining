@@ -6104,7 +6104,7 @@ async function applyMovementInventoryLink(client, movementId, payload, authUserI
       set
         current_stock = $2,
         cost_price = case
-          when $3 > 0 and $4 = 'entrada' then $3
+          when $4 = 'entrada' and $3::numeric > 0 then $3::numeric
           else cost_price
         end,
         updated_at = now()
@@ -6367,7 +6367,7 @@ async function applyMovementInventoryLink(client, movementId, payload, authUserI
         set
           current_stock = $2,
           cost_price = case
-            when $3 > 0 and $4 = 'entrada' then $3
+            when $4 = 'entrada' and $3::numeric > 0 then $3::numeric
             else cost_price
           end,
           updated_at = now()
@@ -7052,6 +7052,7 @@ app.use((error, _req, res, _next) => {
 async function start() {
   await checkConnection();
   await ensureClientRoleColumns();
+  await ensureInventoryDecimalColumns();
   await ensureProgrammingExerciseFamiliesConstraint();
   await ensureBootstrapAdmin();
 
@@ -7089,6 +7090,180 @@ async function ensureClientRoleColumns() {
         alter table clients
           add constraint clients_profile_check
           check (is_client or is_supplier);
+      end if;
+    end
+    $$;
+  `);
+}
+
+async function ensureInventoryDecimalColumns() {
+  await query(`
+    do $$
+    begin
+      if to_regclass('public.inventory_products') is not null then
+        if exists (
+          select 1
+          from information_schema.columns
+          where table_schema = 'public'
+            and table_name = 'inventory_products'
+            and column_name = 'current_stock'
+            and (data_type <> 'numeric' or coalesce(numeric_scale, -1) <> 2)
+        ) then
+          alter table public.inventory_products
+            alter column current_stock type numeric(14, 2)
+            using round(current_stock::numeric, 2);
+        end if;
+
+        if exists (
+          select 1
+          from information_schema.columns
+          where table_schema = 'public'
+            and table_name = 'inventory_products'
+            and column_name = 'minimum_stock'
+            and (data_type <> 'numeric' or coalesce(numeric_scale, -1) <> 2)
+        ) then
+          alter table public.inventory_products
+            alter column minimum_stock type numeric(14, 2)
+            using round(minimum_stock::numeric, 2);
+        end if;
+
+        if exists (
+          select 1
+          from information_schema.columns
+          where table_schema = 'public'
+            and table_name = 'inventory_products'
+            and column_name = 'cost_price'
+            and (data_type <> 'numeric' or coalesce(numeric_scale, -1) <> 2)
+        ) then
+          alter table public.inventory_products
+            alter column cost_price type numeric(14, 2)
+            using round(cost_price::numeric, 2);
+        end if;
+
+        if exists (
+          select 1
+          from information_schema.columns
+          where table_schema = 'public'
+            and table_name = 'inventory_products'
+            and column_name = 'sale_price'
+            and (data_type <> 'numeric' or coalesce(numeric_scale, -1) <> 2)
+        ) then
+          alter table public.inventory_products
+            alter column sale_price type numeric(14, 2)
+            using round(sale_price::numeric, 2);
+        end if;
+      end if;
+
+      if to_regclass('public.movements') is not null then
+        if exists (
+          select 1
+          from information_schema.columns
+          where table_schema = 'public'
+            and table_name = 'movements'
+            and column_name = 'inventory_quantity'
+            and (data_type <> 'numeric' or coalesce(numeric_scale, -1) <> 2)
+        ) then
+          alter table public.movements
+            alter column inventory_quantity type numeric(14, 2)
+            using round(inventory_quantity::numeric, 2);
+        end if;
+      end if;
+
+      if to_regclass('public.inventory_stock_movements') is not null then
+        if exists (
+          select 1
+          from information_schema.columns
+          where table_schema = 'public'
+            and table_name = 'inventory_stock_movements'
+            and column_name = 'quantity'
+            and (data_type <> 'numeric' or coalesce(numeric_scale, -1) <> 2)
+        ) then
+          alter table public.inventory_stock_movements
+            alter column quantity type numeric(14, 2)
+            using round(quantity::numeric, 2);
+        end if;
+
+        if exists (
+          select 1
+          from information_schema.columns
+          where table_schema = 'public'
+            and table_name = 'inventory_stock_movements'
+            and column_name = 'unit_cost'
+            and (data_type <> 'numeric' or coalesce(numeric_scale, -1) <> 2)
+        ) then
+          alter table public.inventory_stock_movements
+            alter column unit_cost type numeric(14, 2)
+            using round(unit_cost::numeric, 2);
+        end if;
+
+        if exists (
+          select 1
+          from information_schema.columns
+          where table_schema = 'public'
+            and table_name = 'inventory_stock_movements'
+            and column_name = 'stock_before'
+            and (data_type <> 'numeric' or coalesce(numeric_scale, -1) <> 2)
+        ) then
+          alter table public.inventory_stock_movements
+            alter column stock_before type numeric(14, 2)
+            using round(stock_before::numeric, 2);
+        end if;
+
+        if exists (
+          select 1
+          from information_schema.columns
+          where table_schema = 'public'
+            and table_name = 'inventory_stock_movements'
+            and column_name = 'stock_after'
+            and (data_type <> 'numeric' or coalesce(numeric_scale, -1) <> 2)
+        ) then
+          alter table public.inventory_stock_movements
+            alter column stock_after type numeric(14, 2)
+            using round(stock_after::numeric, 2);
+        end if;
+      end if;
+
+      if to_regclass('public.business_products') is not null then
+        if exists (
+          select 1
+          from information_schema.columns
+          where table_schema = 'public'
+            and table_name = 'business_products'
+            and column_name = 'default_amount'
+            and (data_type <> 'numeric' or coalesce(numeric_scale, -1) <> 2)
+        ) then
+          alter table public.business_products
+            alter column default_amount type numeric(14, 2)
+            using round(default_amount::numeric, 2);
+        end if;
+
+        if exists (
+          select 1
+          from information_schema.columns
+          where table_schema = 'public'
+            and table_name = 'business_products'
+            and column_name = 'direct_inventory_quantity'
+            and (data_type <> 'numeric' or coalesce(numeric_scale, -1) <> 2)
+        ) then
+          alter table public.business_products
+            alter column direct_inventory_quantity type numeric(14, 2)
+            using round(direct_inventory_quantity::numeric, 2);
+        end if;
+      end if;
+
+      if to_regclass('public.business_product_components') is not null then
+        if exists (
+          select 1
+          from information_schema.columns
+          where table_schema = 'public'
+            and table_name = 'business_product_components'
+            and column_name = 'quantity'
+            and (data_type <> 'numeric' or coalesce(numeric_scale, -1) <> 2)
+        ) then
+          alter table public.business_product_components
+            alter column quantity type numeric(14, 2)
+            using round(quantity::numeric, 2);
+        end if;
       end if;
     end
     $$;
