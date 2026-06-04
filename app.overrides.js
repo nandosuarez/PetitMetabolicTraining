@@ -35,6 +35,10 @@
     total: document.getElementById("purchase-total"),
     paid: document.getElementById("purchase-paid"),
     notes: document.getElementById("purchase-notes"),
+    editJustificationShell: document.getElementById(
+      "purchase-edit-justification-shell"
+    ),
+    editJustification: document.getElementById("purchase-edit-justification"),
     feedback: document.getElementById("purchase-feedback"),
     addItemButton: document.getElementById("purchase-add-item"),
     itemsList: document.getElementById("purchase-items-list"),
@@ -1255,15 +1259,37 @@
     }
 
     const line = purchaseElements.linea?.value || "Gimnasio";
+    const resolvedValue = String(
+      selectedValue || purchaseElements.categoria.value || ""
+    );
     fillSelect(purchaseElements.categoria, getActiveCategoryValuesForLine(line), {
-      includeValue: selectedValue || purchaseElements.categoria.value || "",
+      includeValue: resolvedValue,
     });
+    if (
+      resolvedValue &&
+      [...purchaseElements.categoria.options].some(
+        (option) => option.value === resolvedValue
+      )
+    ) {
+      purchaseElements.categoria.value = resolvedValue;
+    }
   }
 
   function fillPurchasePaymentMethods(selectedValue = "") {
+    const resolvedValue = String(
+      selectedValue || purchaseElements.medioPago?.value || ""
+    );
     fillSelect(purchaseElements.medioPago, state.lists.mediosPago, {
-      includeValue: selectedValue || purchaseElements.medioPago.value || "",
+      includeValue: resolvedValue,
     });
+    if (
+      resolvedValue &&
+      [...purchaseElements.medioPago.options].some(
+        (option) => option.value === resolvedValue
+      )
+    ) {
+      purchaseElements.medioPago.value = resolvedValue;
+    }
   }
 
   function getActivePurchaseProviders() {
@@ -1353,6 +1379,14 @@
 
     const quantity = Number(purchaseElements.inventoryQuantity.value || 0);
     const unitCost = Number(purchaseElements.unitCost.value || 0);
+    if (
+      purchaseElements.movementId?.value &&
+      !(quantity > 0) &&
+      !(unitCost > 0)
+    ) {
+      return;
+    }
+
     const total = Number((quantity * unitCost).toFixed(2));
     purchaseElements.total.value = total > 0 ? String(total) : "";
   }
@@ -1379,6 +1413,7 @@
     const isCost = isPurchaseKindCost();
     const hasDraftItems =
       !purchaseElements.movementId?.value && purchaseDraftItems.length > 0;
+    const isEditing = Boolean(purchaseElements.movementId?.value);
 
     setNodeVisibility(purchaseElements.inventoryProductShell, isCost);
     setNodeVisibility(purchaseElements.inventoryQuantityShell, isCost);
@@ -1396,6 +1431,10 @@
         purchaseElements.movementId?.value
       );
     }
+    setNodeVisibility(
+      purchaseElements.editJustificationShell,
+      isEditing && isAssistantUser()
+    );
 
     if (isCost) {
       syncPurchaseTotalFromCost();
@@ -1737,6 +1776,10 @@
 
     purchaseElements.form.reset();
     purchaseElements.movementId.value = "";
+    if (purchaseElements.editJustification) {
+      purchaseElements.editJustification.value = "";
+    }
+    setNodeVisibility(purchaseElements.editJustificationShell, false);
     purchaseElements.fecha.value = getCurrentIsoDate();
     purchaseElements.linea.value = "Gimnasio";
     purchaseElements.kind.value = "Costo";
@@ -1856,9 +1899,22 @@
             <td>${formatCurrency(item.abono)}</td>
             <td>${formatCurrency(item.saldoPendiente)}</td>
             <td>
-              ${
-                Number(item.saldoPendiente || 0) > 0
-                  ? `
+              <div class="row-actions row-actions--compact">
+                <button
+                  class="table-button icon-button"
+                  type="button"
+                  data-purchase-edit-id="${item.id}"
+                  title="Editar compra o gasto"
+                  aria-label="Editar compra o gasto"
+                >
+                  <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                    <path d="M4 20h4l10-10-4-4L4 16v4Z"></path>
+                    <path d="m12 6 4 4"></path>
+                  </svg>
+                </button>
+                ${
+                  Number(item.saldoPendiente || 0) > 0
+                    ? `
                     <button
                       class="table-button icon-button"
                       type="button"
@@ -1872,8 +1928,9 @@
                       </svg>
                     </button>
                   `
-                  : "<span class='muted'>Pagado</span>"
-              }
+                    : "<span class='muted'>Pagado</span>"
+                }
+              </div>
             </td>
           </tr>
         `;
@@ -1923,16 +1980,87 @@
   }
 
   function handlePurchaseTableClick(event) {
+    const editButton = event.target.closest("[data-purchase-edit-id]");
     const paymentButton = event.target.closest(
       "[data-purchase-register-payment-id]"
     );
+    const editId = editButton?.dataset.purchaseEditId;
     const movementId = paymentButton?.dataset.purchaseRegisterPaymentId;
+
+    if (editId) {
+      startEditingPurchaseMovement(editId);
+      return;
+    }
 
     if (!movementId) {
       return;
     }
 
     focusPurchasePendingPayment(movementId);
+  }
+
+  function getPurchaseUnitCostForEdit(movement) {
+    const quantity = normalizePurchaseQuantity(movement?.inventoryQuantity || 0);
+    const total = normalizeMoney(movement?.valorTotal || 0);
+
+    if (!(quantity > 0) || !(total > 0)) {
+      return "";
+    }
+
+    return String(normalizeMoney(total / quantity));
+  }
+
+  function startEditingPurchaseMovement(movementId) {
+    const movement = state.movements.find(
+      (item) => String(item.id) === String(movementId)
+    );
+
+    if (!movement || !["Costo", "Gasto"].includes(movement.tipo)) {
+      purchaseElements.feedback.textContent =
+        "No encontré la compra o gasto que quieres editar.";
+      return;
+    }
+
+    switchView("movimientos");
+    setMovementPanel("compras");
+
+    purchaseDraftItems = [];
+    purchaseElements.movementId.value = String(movement.id);
+    purchaseElements.linea.value = movement.linea || "Gimnasio";
+    purchaseElements.fecha.value = movement.fecha;
+    purchaseElements.kind.value = movement.tipo === "Gasto" ? "Gasto" : "Costo";
+
+    fillPurchaseCategoryOptions(movement.categoria || "");
+    fillPurchaseInventoryOptions(String(movement.inventoryProductId || ""));
+    fillPurchasePaymentMethods(movement.medioPago || "");
+    fillPurchaseBeneficiaryOptions(movement.cliente || "");
+
+    purchaseElements.categoria.value = movement.categoria || "";
+    purchaseElements.inventoryProductId.value = movement.inventoryProductId
+      ? String(movement.inventoryProductId)
+      : "";
+    purchaseElements.inventoryQuantity.value = movement.inventoryQuantity
+      ? String(movement.inventoryQuantity)
+      : "";
+    purchaseElements.unitCost.value =
+      movement.tipo === "Costo" ? getPurchaseUnitCostForEdit(movement) : "";
+    purchaseElements.medioPago.value = movement.medioPago || "";
+    purchaseElements.beneficiary.value = movement.cliente || "";
+    purchaseElements.description.value = movement.descripcion || "";
+    purchaseElements.total.value = String(movement.valorTotal || "");
+    purchaseElements.paid.value = String(movement.abono || "");
+    purchaseElements.notes.value = movement.observaciones || "";
+    if (purchaseElements.editJustification) {
+      purchaseElements.editJustification.value = "";
+    }
+
+    syncPurchaseKindUi();
+    renderPurchaseDraftItems();
+    purchaseElements.feedback.textContent =
+      isAssistantUser()
+        ? "Estás editando una compra o gasto reciente. Escribe la justificación antes de guardar."
+        : "Estás editando una compra o gasto. Puedes corregir la caja y guardar.";
+    purchaseElements.medioPago.focus();
   }
 
   function renderPurchasesModule() {
@@ -1954,6 +2082,11 @@
 
   function buildPurchasePayload() {
     const isCost = isPurchaseKindCost();
+    const existingMovement = purchaseElements.movementId.value
+      ? state.movements.find(
+          (item) => String(item.id) === String(purchaseElements.movementId.value)
+        ) || null
+      : null;
     const total = normalizeMoney(purchaseElements.total.value || 0);
     const paid = normalizeMoney(purchaseElements.paid.value || 0);
     const inventoryProductId = Number(purchaseElements.inventoryProductId.value || 0);
@@ -1968,8 +2101,12 @@
     if (isCost) {
       category =
         String(selectedInventoryProduct?.category || "").trim() ||
+        String(existingMovement?.categoria || "").trim() ||
         "Compras inventario";
     }
+
+    const shouldLinkInventory =
+      isCost && inventoryProductId > 0 && inventoryQuantity > 0;
 
     return {
       linea: purchaseElements.linea.value,
@@ -1986,11 +2123,13 @@
       medioPago: purchaseElements.medioPago.value,
       valorTotal: total,
       abono: paid,
-      inventoryProductId: isCost ? inventoryProductId : 0,
-      inventoryQuantity: isCost ? inventoryQuantity : 0,
-      inventoryEffect: isCost ? "entrada" : "ninguno",
+      inventoryProductId: shouldLinkInventory ? inventoryProductId : 0,
+      inventoryQuantity: shouldLinkInventory ? inventoryQuantity : 0,
+      inventoryEffect: shouldLinkInventory ? "entrada" : "ninguno",
       observaciones: purchaseElements.notes.value.trim(),
-      justificacionEdicion: "",
+      justificacionEdicion: String(
+        purchaseElements.editJustification?.value || ""
+      ).trim(),
     };
   }
 
@@ -2002,8 +2141,17 @@
     if (isEditing) {
       const isCost = isPurchaseKindCost();
       const payload = buildPurchasePayload();
+      const existingMovement =
+        state.movements.find(
+          (item) => String(item.id) === String(purchaseElements.movementId.value)
+        ) || null;
+      const hasInventoryLink =
+        Number(existingMovement?.inventoryProductId || 0) > 0 ||
+        Number(existingMovement?.inventoryQuantity || 0) > 0 ||
+        Number(purchaseElements.inventoryProductId.value || 0) > 0 ||
+        Number(purchaseElements.inventoryQuantity.value || 0) > 0;
 
-    if (isCost) {
+    if (isCost && hasInventoryLink) {
       if (!(payload.inventoryProductId > 0)) {
         purchaseElements.feedback.textContent =
           "Selecciona el producto o insumo comprado para actualizar inventario.";
@@ -2041,6 +2189,16 @@
       purchaseElements.feedback.textContent =
         "Selecciona un proveedor de la lista antes de guardar.";
       purchaseElements.beneficiary.focus();
+      return;
+    }
+
+    if (
+      isAssistantUser() &&
+      String(payload.justificacionEdicion || "").length < 10
+    ) {
+      purchaseElements.feedback.textContent =
+        "Debes escribir una justificacion de al menos 10 caracteres para editar esta compra o gasto.";
+      purchaseElements.editJustification?.focus();
       return;
     }
 
