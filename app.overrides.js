@@ -1913,6 +1913,27 @@
                   </svg>
                 </button>
                 ${
+                  isAdminUser() && item.tipo === "Costo"
+                    ? `
+                    <button
+                      class="table-button danger icon-button"
+                      type="button"
+                      data-purchase-delete-id="${item.id}"
+                      title="Eliminar costo"
+                      aria-label="Eliminar costo"
+                    >
+                      <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                        <path d="M4 7h16"></path>
+                        <path d="M10 11v6"></path>
+                        <path d="M14 11v6"></path>
+                        <path d="M6 7l1 12h10l1-12"></path>
+                        <path d="M9 7V4h6v3"></path>
+                      </svg>
+                    </button>
+                  `
+                    : ""
+                }
+                ${
                   Number(item.saldoPendiente || 0) > 0
                     ? `
                     <button
@@ -1981,14 +2002,21 @@
 
   function handlePurchaseTableClick(event) {
     const editButton = event.target.closest("[data-purchase-edit-id]");
+    const deleteButton = event.target.closest("[data-purchase-delete-id]");
     const paymentButton = event.target.closest(
       "[data-purchase-register-payment-id]"
     );
     const editId = editButton?.dataset.purchaseEditId;
+    const deleteId = deleteButton?.dataset.purchaseDeleteId;
     const movementId = paymentButton?.dataset.purchaseRegisterPaymentId;
 
     if (editId) {
       startEditingPurchaseMovement(editId);
+      return;
+    }
+
+    if (deleteId) {
+      deletePurchaseCost(deleteId);
       return;
     }
 
@@ -1997,6 +2025,38 @@
     }
 
     focusPurchasePendingPayment(movementId);
+  }
+
+  async function deletePurchaseCost(movementId) {
+    const movement = state.movements.find(
+      (item) => String(item.id) === String(movementId)
+    );
+
+    if (!isAdminUser() || movement?.tipo !== "Costo") {
+      purchaseElements.feedback.textContent =
+        "Solo el administrador puede eliminar movimientos de costos.";
+      return;
+    }
+
+    const confirmed = window.confirm(
+      "¿Deseas eliminar este costo? También se reversará la entrada de inventario relacionada. Esta acción no se puede deshacer."
+    );
+    if (!confirmed) {
+      return;
+    }
+
+    try {
+      await apiRequest(`/api/movements/${movement.id}`, {
+        method: "DELETE",
+      });
+      await loadBootstrap();
+      switchView("movimientos");
+      setMovementPanel("compras");
+      purchaseElements.feedback.textContent =
+        "Costo eliminado y movimiento de inventario reversado correctamente.";
+    } catch (error) {
+      purchaseElements.feedback.textContent = error.message;
+    }
   }
 
   function getPurchaseUnitCostForEdit(movement) {
