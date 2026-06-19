@@ -2025,6 +2025,25 @@ app.post("/api/box-transfers", requireOperationalWriteAccess, asyncHandler(async
   );
 }));
 
+app.delete("/api/box-transfers/:id", requireAdmin, asyncHandler(async (req, res) => {
+  const transferId = Number(req.params.id);
+
+  if (!Number.isInteger(transferId) || transferId <= 0) {
+    return res.status(400).json({ error: "Traslado invalido." });
+  }
+
+  const result = await query(
+    "delete from box_transfers where id = $1 returning id",
+    [transferId]
+  );
+
+  if (!result.rows.length) {
+    return res.status(404).json({ error: "Traslado no encontrado." });
+  }
+
+  res.status(204).send();
+}));
+
 app.post("/api/notes", requireAdmin, asyncHandler(async (req, res) => {
   const noteType = String(req.body.noteType || "").trim();
   const noteKey = String(req.body.noteKey || "").trim();

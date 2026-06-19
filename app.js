@@ -225,6 +225,7 @@ const elements = {
   boxTransferAmount: document.getElementById("box-transfer-amount"),
   boxTransferNotes: document.getElementById("box-transfer-notes"),
   boxTransferFeedback: document.getElementById("box-transfer-feedback"),
+  boxTransfersTable: document.getElementById("box-transfers-table"),
   boxInsights: document.getElementById("box-insights"),
   boxPendingBreakdown: document.getElementById("box-pending-breakdown"),
   boxFilter: document.getElementById("box-filter"),
@@ -772,6 +773,7 @@ function bindEvents() {
   addListener(elements.valorTotal, "input", syncComputedPaymentStatus);
   addListener(elements.abono, "input", syncComputedPaymentStatus);
   addListener(elements.boxTransferForm, "submit", handleBoxTransferSubmit);
+  addListener(elements.boxTransfersTable, "click", handleBoxTransfersTableClick);
 
   [
     elements.filterLine,
@@ -6159,10 +6161,133 @@ async function handleBoxTransferSubmit(event) {
     await loadBootstrap();
     resetBoxTransferForm();
     switchView("cajas", {
-      boxPanel: "movimientos",
+      boxPanel: "traslados",
     });
     elements.boxTransferFeedback.textContent =
       "Traslado entre cajas registrado correctamente.";
+  } catch (error) {
+    elements.boxTransferFeedback.textContent = error.message;
+  }
+}
+
+function renderBoxTransfersHistory() {
+  if (!elements.boxTransfersTable) {
+    return;
+  }
+
+  const transfers = [...(state.boxTransfers || [])].sort((a, b) => {
+    const dateComparison = String(b.transferDate || "").localeCompare(
+      String(a.transferDate || "")
+    );
+    if (dateComparison !== 0) {
+      return dateComparison;
+    }
+
+    const createdComparison = String(b.createdAt || "").localeCompare(
+      String(a.createdAt || "")
+    );
+    if (createdComparison !== 0) {
+      return createdComparison;
+    }
+
+    return Number(b.id || 0) - Number(a.id || 0);
+  });
+
+  elements.boxTransfersTable.innerHTML = transfers.length
+    ? transfers
+        .map(
+          (transfer) => `
+            <tr>
+              ${tableCell("Fecha", escapeHtml(formatDate(transfer.transferDate)))}
+              ${tableCell("Origen", escapeHtml(transfer.sourcePaymentMethod))}
+              ${tableCell("Destino", escapeHtml(transfer.targetPaymentMethod))}
+              ${tableCell("Valor", formatCurrency(transfer.amount), "numeric-cell")}
+              ${tableCell(
+                "Detalle",
+                transfer.notes
+                  ? escapeHtml(transfer.notes)
+                  : "<span class='muted'>Sin detalle</span>"
+              )}
+              ${tableCell(
+                "Registrado por",
+                escapeHtml(transfer.registeredBy || "Sistema")
+              )}
+              ${tableCell(
+                "Acciones",
+                isAdminUser()
+                  ? `
+                    <button
+                      class="table-button danger icon-button"
+                      type="button"
+                      data-box-transfer-delete-id="${transfer.id}"
+                      title="Eliminar traslado"
+                      aria-label="Eliminar traslado"
+                    >
+                      <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                        <path d="M4 7h16"></path>
+                        <path d="M10 11v6"></path>
+                        <path d="M14 11v6"></path>
+                        <path d="M6 7l1 12h10l1-12"></path>
+                        <path d="M9 7V4h6v3"></path>
+                      </svg>
+                    </button>
+                  `
+                  : "<span class='muted'>-</span>",
+                "actions-cell"
+              )}
+            </tr>
+          `
+        )
+        .join("")
+    : `
+      <tr>
+        <td colspan="7" class="empty-state">
+          Aún no hay traslados registrados.
+        </td>
+      </tr>
+    `;
+}
+
+async function handleBoxTransfersTableClick(event) {
+  const deleteButton = event.target.closest("[data-box-transfer-delete-id]");
+  const transferId = Number(deleteButton?.dataset.boxTransferDeleteId || 0);
+
+  if (!(transferId > 0)) {
+    return;
+  }
+
+  if (!isAdminUser()) {
+    elements.boxTransferFeedback.textContent =
+      "Solo el administrador puede eliminar traslados entre cajas.";
+    return;
+  }
+
+  const transfer = (state.boxTransfers || []).find(
+    (item) => Number(item.id) === transferId
+  );
+  if (!transfer) {
+    elements.boxTransferFeedback.textContent =
+      "No encontramos el traslado que quieres eliminar.";
+    return;
+  }
+
+  const confirmed = window.confirm(
+    `¿Deseas eliminar el traslado de ${formatCurrency(transfer.amount)} desde ${transfer.sourcePaymentMethod} hacia ${transfer.targetPaymentMethod}? Esta acción ajustará los saldos de ambas cajas.`
+  );
+  if (!confirmed) {
+    return;
+  }
+
+  try {
+    await apiRequest(`/api/box-transfers/${transfer.id}`, {
+      method: "DELETE",
+    });
+    await loadBootstrap();
+    switchView("cajas", {
+      boxPanel: "traslados",
+    });
+    elements.boxTransferFeedback.textContent =
+      "Traslado eliminado y saldos de cajas actualizados correctamente.";
   } catch (error) {
     elements.boxTransferFeedback.textContent = error.message;
   }
@@ -12140,6 +12265,7 @@ function handleBoxSummaryClick(event) {
 
 function renderBoxesView() {
   renderBoxPanels();
+  renderBoxTransfersHistory();
 
   const pendingGroups = getPendingPayablesByBox();
   const pendingByBox = new Map(
