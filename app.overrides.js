@@ -1201,6 +1201,14 @@
   function getFilteredSalesMovements() {
     const line = elements.filterLine.value;
     const status = elements.filterStatus.value;
+    const rawDateFrom = normalizeDateOnly(elements.filterDateFrom?.value);
+    const rawDateTo = normalizeDateOnly(elements.filterDateTo?.value);
+    const dateFrom = rawDateFrom && rawDateTo && rawDateFrom > rawDateTo
+      ? rawDateTo
+      : rawDateFrom;
+    const dateTo = rawDateFrom && rawDateTo && rawDateFrom > rawDateTo
+      ? rawDateFrom
+      : rawDateTo;
     const query = normalizeSearchValue(elements.filterQuery.value || "");
     const recordsQuery = normalizeSearchValue(
       elements.movementRecordsQuery?.value || ""
@@ -1213,6 +1221,10 @@
 
       const lineMatches = line === "Todas" || item.linea === line;
       const statusMatches = status === "Todos" || item.estadoPago === status;
+      const movementDate = normalizeDateOnly(item.fecha);
+      const dateMatches =
+        (!dateFrom || movementDate >= dateFrom) &&
+        (!dateTo || movementDate <= dateTo);
       const linkedClient = getLinkedClientRecord(item.cliente);
       const searchText = normalizeSearchValue(
         [
@@ -1232,7 +1244,13 @@
       );
       const queryMatches = !query || searchText.includes(query);
       const recordsQueryMatches = !recordsQuery || searchText.includes(recordsQuery);
-      return lineMatches && statusMatches && queryMatches && recordsQueryMatches;
+      return (
+        lineMatches &&
+        statusMatches &&
+        dateMatches &&
+        queryMatches &&
+        recordsQueryMatches
+      );
     });
   }
 

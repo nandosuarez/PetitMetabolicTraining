@@ -201,6 +201,8 @@ const elements = {
   editJustification: document.getElementById("edit-justification"),
   filterLine: document.getElementById("filter-line"),
   filterStatus: document.getElementById("filter-status"),
+  filterDateFrom: document.getElementById("filter-date-from"),
+  filterDateTo: document.getElementById("filter-date-to"),
   filterQuery: document.getElementById("filter-query"),
   movementRecordsQuery: document.getElementById("movement-records-query"),
   movementMetrics: document.getElementById("movement-metrics"),
@@ -230,6 +232,9 @@ const elements = {
   boxPendingBreakdown: document.getElementById("box-pending-breakdown"),
   boxFilter: document.getElementById("box-filter"),
   boxQuery: document.getElementById("box-query"),
+  boxDateFrom: document.getElementById("box-date-from"),
+  boxDateTo: document.getElementById("box-date-to"),
+  boxTypeFilter: document.getElementById("box-type-filter"),
   boxFilterSummary: document.getElementById("box-filter-summary"),
   boxLedgerTable: document.getElementById("box-ledger-table"),
   boxMenuButtons: [...document.querySelectorAll("[data-box-panel]")],
@@ -778,12 +783,20 @@ function bindEvents() {
   [
     elements.filterLine,
     elements.filterStatus,
+    elements.filterDateFrom,
+    elements.filterDateTo,
     elements.filterQuery,
     elements.movementRecordsQuery,
   ].forEach(
     (input) => input.addEventListener("input", renderMovementsView)
   );
-  [elements.boxFilter, elements.boxQuery].forEach((input) =>
+  [
+    elements.boxFilter,
+    elements.boxQuery,
+    elements.boxDateFrom,
+    elements.boxDateTo,
+    elements.boxTypeFilter,
+  ].forEach((input) =>
     addListener(input, "input", renderBoxesView)
   );
   addListener(elements.boxesSummary, "click", handleBoxSummaryClick);
@@ -7545,14 +7558,26 @@ async function saveWeeklyNote() {
 function getFilteredMovements() {
   const line = elements.filterLine.value;
   const status = elements.filterStatus.value;
+  const rawDateFrom = normalizeDateOnly(elements.filterDateFrom?.value);
+  const rawDateTo = normalizeDateOnly(elements.filterDateTo?.value);
+  const dateFrom = rawDateFrom && rawDateTo && rawDateFrom > rawDateTo
+    ? rawDateTo
+    : rawDateFrom;
+  const dateTo = rawDateFrom && rawDateTo && rawDateFrom > rawDateTo
+    ? rawDateFrom
+    : rawDateTo;
   const query = normalizeSearchValue(elements.filterQuery.value || "");
   const recordsQuery = normalizeSearchValue(
     elements.movementRecordsQuery?.value || ""
   );
 
   return state.movements.filter((item) => {
-    const lineMatches = line === "Todas" || item.linea === line;
-    const statusMatches = status === "Todos" || item.estadoPago === status;
+      const lineMatches = line === "Todas" || item.linea === line;
+      const statusMatches = status === "Todos" || item.estadoPago === status;
+      const movementDate = normalizeDateOnly(item.fecha);
+      const dateMatches =
+        (!dateFrom || movementDate >= dateFrom) &&
+        (!dateTo || movementDate <= dateTo);
     const linkedClient = getLinkedClientRecord(item.cliente);
     const searchText = normalizeSearchValue(
       [
@@ -7576,7 +7601,13 @@ function getFilteredMovements() {
     const recordsQueryMatches =
       !recordsQuery || searchText.includes(recordsQuery);
 
-    return lineMatches && statusMatches && queryMatches && recordsQueryMatches;
+      return (
+        lineMatches &&
+        statusMatches &&
+        dateMatches &&
+        queryMatches &&
+        recordsQueryMatches
+      );
   });
 }
 
@@ -11400,9 +11431,34 @@ function getPaymentBoxSummaries() {
 function getFilteredBoxLedgerEntries() {
   const boxFilter = elements.boxFilter?.value || "Todas";
   const query = normalizeSearchValue(elements.boxQuery?.value || "");
+  const selectedTypes = new Set(
+    [...(elements.boxTypeFilter?.selectedOptions || [])].map(
+      (option) => option.value
+    )
+  );
+  const rawDateFrom = normalizeDateOnly(elements.boxDateFrom?.value);
+  const rawDateTo = normalizeDateOnly(elements.boxDateTo?.value);
+  const dateFrom = rawDateFrom && rawDateTo && rawDateFrom > rawDateTo
+    ? rawDateTo
+    : rawDateFrom;
+  const dateTo = rawDateFrom && rawDateTo && rawDateFrom > rawDateTo
+    ? rawDateFrom
+    : rawDateTo;
 
   return getBoxLedgerEntries().filter((entry) => {
     if (boxFilter !== "Todas" && entry.boxName !== boxFilter) {
+      return false;
+    }
+
+    if (selectedTypes.size && !selectedTypes.has(entry.entryType)) {
+      return false;
+    }
+
+    const entryDate = normalizeDateOnly(entry.date);
+    if (
+      (dateFrom && entryDate < dateFrom) ||
+      (dateTo && entryDate > dateTo)
+    ) {
       return false;
     }
 
@@ -11653,6 +11709,35 @@ function fillBoxFilterOptions(selectedValue = "Todas") {
   if ([...new Set(options)].includes(selectedValue)) {
     elements.boxFilter.value = selectedValue;
   }
+}
+
+function fillBoxTypeFilterOptions() {
+  if (!elements.boxTypeFilter) {
+    return;
+  }
+
+  const selectedValues = new Set(
+    [...elements.boxTypeFilter.selectedOptions].map((option) => option.value)
+  );
+  const options = [
+    ...new Set(
+      getBoxLedgerEntries()
+        .map((entry) => String(entry.entryType || "").trim())
+        .filter(Boolean)
+    ),
+  ].sort((a, b) => a.localeCompare(b, APP_LOCALE));
+
+  elements.boxTypeFilter.innerHTML = options.length
+    ? options
+        .map(
+          (item) => `
+            <option value="${escapeHtml(item)}"${
+              selectedValues.has(item) ? " selected" : ""
+            }>${escapeHtml(item)}</option>
+          `
+        )
+        .join("")
+    : '<option value="" disabled>No hay tipos disponibles</option>';
 }
 
 function getAvailableSelectValues(select) {
@@ -12266,6 +12351,7 @@ function handleBoxSummaryClick(event) {
 function renderBoxesView() {
   renderBoxPanels();
   renderBoxTransfersHistory();
+  fillBoxTypeFilterOptions();
 
   const pendingGroups = getPendingPayablesByBox();
   const pendingByBox = new Map(

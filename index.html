@@ -533,6 +533,16 @@
                   </select>
                 </label>
 
+                <label>
+                  Desde
+                  <input id="filter-date-from" type="date" />
+                </label>
+
+                <label>
+                  Hasta
+                  <input id="filter-date-to" type="date" />
+                </label>
+
                 <label class="span-2">
                   Buscar
                   <input
@@ -1322,7 +1332,7 @@
                   </select>
                 </label>
 
-                <label class="span-2">
+                <label>
                   Buscar
                   <input
                     id="box-query"
@@ -1330,6 +1340,24 @@
                     placeholder="Caja, detalle, cliente, categoría o referencia"
                     autocomplete="off"
                   />
+                </label>
+
+                <label>
+                  Desde
+                  <input id="box-date-from" type="date" />
+                </label>
+
+                <label>
+                  Hasta
+                  <input id="box-date-to" type="date" />
+                </label>
+
+                <label class="span-2">
+                  Tipos de movimiento
+                  <select id="box-type-filter" multiple size="4"></select>
+                  <small class="inline-hint">
+                    Sin selección se muestran todos. Puedes seleccionar uno o varios tipos.
+                  </small>
                 </label>
               </div>
 
