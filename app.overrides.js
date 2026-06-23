@@ -1931,14 +1931,14 @@
                   </svg>
                 </button>
                 ${
-                  isAdminUser() && item.tipo === "Costo"
+                  isAdminUser() && ["Costo", "Gasto"].includes(item.tipo)
                     ? `
                     <button
                       class="table-button danger icon-button"
                       type="button"
                       data-purchase-delete-id="${item.id}"
-                      title="Eliminar costo"
-                      aria-label="Eliminar costo"
+                      title="Eliminar ${escapeHtml(item.tipo.toLowerCase())}"
+                      aria-label="Eliminar ${escapeHtml(item.tipo.toLowerCase())}"
                     >
                       <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
                         <path d="M4 7h16"></path>
@@ -2050,14 +2050,14 @@
       (item) => String(item.id) === String(movementId)
     );
 
-    if (!isAdminUser() || movement?.tipo !== "Costo") {
+    if (!isAdminUser() || !["Costo", "Gasto"].includes(movement?.tipo)) {
       purchaseElements.feedback.textContent =
-        "Solo el administrador puede eliminar movimientos de costos.";
+        "Solo el administrador puede eliminar movimientos de costos o gastos.";
       return;
     }
 
     const confirmed = window.confirm(
-      "¿Deseas eliminar este costo? También se reversará la entrada de inventario relacionada. Esta acción no se puede deshacer."
+      `Deseas eliminar este ${String(movement.tipo || "movimiento").toLowerCase()}? Tambien se reversara cualquier movimiento de inventario relacionado. Esta accion no se puede deshacer.`
     );
     if (!confirmed) {
       return;
@@ -2071,7 +2071,7 @@
       switchView("movimientos");
       setMovementPanel("compras");
       purchaseElements.feedback.textContent =
-        "Costo eliminado y movimiento de inventario reversado correctamente.";
+        `${movement.tipo} eliminado y movimiento de inventario reversado correctamente.`;
     } catch (error) {
       purchaseElements.feedback.textContent = error.message;
     }

@@ -1801,11 +1801,11 @@ app.delete("/api/movements/:id", requireOperationalWriteAccess, asyncHandler(asy
   }
 
   if (
-    movementResult.rows[0].movement_type === "Costo" &&
+    ["Costo", "Gasto"].includes(movementResult.rows[0].movement_type) &&
     req.authUser?.role !== "administrador"
   ) {
     return res.status(403).json({
-      error: "Solo el perfil administrador puede eliminar movimientos de costos.",
+      error: "Solo el perfil administrador puede eliminar movimientos de costos o gastos.",
     });
   }
 
