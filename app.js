@@ -26,6 +26,7 @@ const emptyState = {
   inventoryStockMovements: [],
   businessProducts: [],
   businessProductComponents: [],
+  merchandiseOrders: [],
   accountingDocuments: [],
   programmingMethods: [],
   programmingExercises: [],
@@ -117,6 +118,7 @@ const elements = {
     mensual: document.getElementById("mensual-view"),
     contabilidad: document.getElementById("contabilidad-view"),
     cartera: document.getElementById("cartera-view"),
+    pedidos: document.getElementById("pedidos-view"),
     programacion: document.getElementById("programacion-view"),
     inventario: document.getElementById("inventario-view"),
     listas: document.getElementById("listas-view"),
@@ -1565,6 +1567,7 @@ function getAllowedViews() {
       "mensual",
       "contabilidad",
       "cartera",
+      "pedidos",
       "programacion",
       "inventario",
       "listas",
@@ -1574,7 +1577,7 @@ function getAllowedViews() {
   }
 
   if (isAssistantUser()) {
-    return ["movimientos", "cajas", "cartera"];
+    return ["movimientos", "cajas", "cartera", "pedidos"];
   }
 
   if (isAccountantUser()) {
@@ -1879,6 +1882,7 @@ function switchView(view, options = {}) {
     mensual: "Resumen mensual",
     contabilidad: "Contabilidad",
     cartera: "Clientes",
+    pedidos: "Pedidos",
     programacion: "Programación",
     listas: "Listas maestras",
     usuarios: "Usuarios",

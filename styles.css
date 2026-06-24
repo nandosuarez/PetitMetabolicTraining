@@ -1540,6 +1540,201 @@ textarea {
   }
 }
 
+.order-item-builder {
+  display: grid;
+  gap: 14px;
+  padding: 16px;
+  border: 1px solid rgba(159, 239, 1, 0.35);
+  border-radius: 20px;
+  background:
+    linear-gradient(135deg, rgba(159, 239, 1, 0.08), transparent 46%),
+    rgba(255, 255, 255, 0.72);
+}
+
+.order-item-fields {
+  padding-top: 4px;
+}
+
+.order-draft-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 14px;
+}
+
+.order-draft-row small,
+.order-draft-price small {
+  display: block;
+  margin-top: 3px;
+  color: var(--muted);
+}
+
+.order-draft-price {
+  text-align: right;
+}
+
+.order-board {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 16px;
+}
+
+.order-card {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid rgba(16, 16, 16, 0.1);
+  border-radius: 24px;
+  background: #fff;
+  box-shadow: 0 18px 42px rgba(15, 24, 8, 0.08);
+}
+
+.order-card-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 18px 20px;
+  color: #fff;
+  background:
+    radial-gradient(circle at 92% 0, rgba(159, 239, 1, 0.23), transparent 38%),
+    #111;
+}
+
+.order-card-head h4 {
+  margin: 3px 0 5px;
+  font-size: 1.15rem;
+}
+
+.order-card-head small {
+  color: rgba(255, 255, 255, 0.68);
+}
+
+.order-status-stack {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 7px;
+}
+
+.order-card .status-badge {
+  white-space: nowrap;
+}
+
+.order-status-pedido {
+  color: #152000;
+  background: #dfffa0;
+}
+
+.order-status-produccion {
+  color: #402a00;
+  background: #ffe59a;
+}
+
+.order-status-recibido {
+  color: #003f33;
+  background: #b8f4e6;
+}
+
+.order-status-entregado {
+  color: #1c5c00;
+  background: #d9f5d0;
+}
+
+.order-status-cancelado {
+  color: #8f241c;
+  background: #f8deda;
+}
+
+.order-card-body {
+  display: grid;
+  gap: 15px;
+  padding: 18px 20px;
+}
+
+.order-items-list {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.order-items-list li {
+  display: grid;
+  gap: 3px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid rgba(16, 16, 16, 0.08);
+}
+
+.order-items-list span,
+.order-notes {
+  color: var(--muted);
+  font-size: 0.88rem;
+}
+
+.order-money {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+
+.order-money span {
+  display: grid;
+  gap: 4px;
+  padding: 10px;
+  border-radius: 14px;
+  color: var(--muted);
+  background: rgba(159, 239, 1, 0.09);
+}
+
+.order-money strong {
+  color: var(--ink);
+}
+
+.order-payment-form {
+  display: grid;
+  grid-template-columns: minmax(120px, 1fr) minmax(130px, 1fr) auto;
+  gap: 8px;
+  padding: 0 20px 18px;
+}
+
+.order-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: auto;
+  padding: 16px 20px 20px;
+  border-top: 1px solid rgba(16, 16, 16, 0.08);
+}
+
+@media (max-width: 700px) {
+  .order-board {
+    grid-template-columns: 1fr;
+  }
+
+  .order-card-head,
+  .order-draft-row {
+    grid-template-columns: 1fr;
+  }
+
+  .order-card-head {
+    display: grid;
+  }
+
+  .order-status-stack {
+    align-items: flex-start;
+  }
+
+  .order-money {
+    grid-template-columns: 1fr;
+  }
+
+  .order-payment-form {
+    grid-template-columns: 1fr;
+  }
+}
+
 .report-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));

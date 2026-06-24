@@ -61,9 +61,14 @@
     name: document.getElementById("sales-combo-name"),
     businessLine: document.getElementById("sales-combo-line"),
     maxUnits: document.getElementById("sales-combo-max-units"),
+    maxUnitsLabel: document.getElementById("sales-combo-max-units-label"),
     triggerProductId: document.getElementById("sales-combo-trigger-product"),
     targetProductId: document.getElementById("sales-combo-target-product"),
     targetUnitPrice: document.getElementById("sales-combo-target-price"),
+    targetUnitPriceLabel: document.getElementById(
+      "sales-combo-target-price-label"
+    ),
+    targetUnitPriceHint: document.getElementById("sales-combo-price-hint"),
     notes: document.getElementById("sales-combo-notes"),
     feedback: document.getElementById("sales-combo-feedback"),
     cancelEdit: document.getElementById("sales-combo-cancel-edit"),
@@ -194,6 +199,9 @@
       targetBusinessProductId: Number.isInteger(targetBusinessProductId)
         ? targetBusinessProductId
         : 0,
+      isSameProductBundle:
+        triggerBusinessProductId > 0 &&
+        triggerBusinessProductId === targetBusinessProductId,
       targetUnitPrice: normalizeMoney(item?.targetUnitPrice || 0),
       maxTargetUnitsPerTrigger: Number.isInteger(maxTargetUnitsPerTrigger)
         ? maxTargetUnitsPerTrigger
@@ -244,6 +252,9 @@
         promoUnits: 0,
         promoUnitPrice: 0,
         promoName: "",
+        promoBundleCount: 0,
+        promoBundleQuantity: 0,
+        promoBundleTotal: 0,
         discountAmount: 0,
       };
     });
@@ -251,6 +262,65 @@
     const activeRules = getActiveSalesComboRules();
     activeRules.forEach((rule) => {
       if (rule.businessLine && rule.businessLine !== currentLine) {
+        return;
+      }
+
+      if (rule.isSameProductBundle) {
+        const bundleQuantity = normalizeSalesQuantity(
+          rule.maxTargetUnitsPerTrigger
+        );
+        const bundleTotal = normalizeMoney(rule.targetUnitPrice || 0);
+
+        if (!(bundleQuantity > 1) || !(bundleTotal > 0)) {
+          return;
+        }
+
+        pricedItems.forEach((item) => {
+          if (
+            Number(item.productId || 0) !==
+            Number(rule.triggerBusinessProductId || 0)
+          ) {
+            return;
+          }
+
+          const bundleCount = Math.floor(item.quantity / bundleQuantity);
+          if (!(bundleCount > 0)) {
+            return;
+          }
+
+          const bundledUnits = bundleCount * bundleQuantity;
+          const regularUnits = item.quantity - bundledUnits;
+          const regularBundleValue = computeSalesItemSubtotal(
+            bundledUnits,
+            item.baseUnitPrice
+          );
+          const promotionalBundleValue = normalizeMoney(
+            bundleCount * bundleTotal
+          );
+
+          if (!(regularBundleValue > promotionalBundleValue)) {
+            return;
+          }
+
+          item.promoUnits = bundledUnits;
+          item.promoUnitPrice = normalizeMoney(
+            bundleTotal / bundleQuantity
+          );
+          item.promoName = rule.name;
+          item.promoBundleCount = bundleCount;
+          item.promoBundleQuantity = bundleQuantity;
+          item.promoBundleTotal = bundleTotal;
+          item.discountAmount = normalizeMoney(
+            regularBundleValue - promotionalBundleValue
+          );
+          item.appliedTotal = normalizeMoney(
+            promotionalBundleValue +
+              computeSalesItemSubtotal(regularUnits, item.baseUnitPrice)
+          );
+          item.appliedUnitPrice = normalizeMoney(
+            item.appliedTotal / item.quantity
+          );
+        });
         return;
       }
 
@@ -415,13 +485,25 @@
             : `${formatCurrency(baseUnitPrice)} c/u`;
         const promoCopy =
           item.promoUnits > 0
-            ? `<small class="inline-hint">${escapeHtml(
-                item.promoName || "Promoción"
-              )}: ${escapeHtml(
-                String(item.promoUnits)
-              )} unidad(es) a ${escapeHtml(
-                formatCurrency(item.promoUnitPrice)
-              )}. Ahorro ${escapeHtml(formatCurrency(item.discountAmount))}.</small>`
+            ? item.promoBundleCount > 0
+              ? `<small class="inline-hint">${escapeHtml(
+                  item.promoName || "Promoción"
+                )}: ${escapeHtml(
+                  String(item.promoBundleCount)
+                )} paquete(s) de ${escapeHtml(
+                  String(item.promoBundleQuantity)
+                )} por ${escapeHtml(
+                  formatCurrency(item.promoBundleTotal)
+                )}. Ahorro ${escapeHtml(
+                  formatCurrency(item.discountAmount)
+                )}.</small>`
+              : `<small class="inline-hint">${escapeHtml(
+                  item.promoName || "Promoción"
+                )}: ${escapeHtml(
+                  String(item.promoUnits)
+                )} unidad(es) a ${escapeHtml(
+                  formatCurrency(item.promoUnitPrice)
+                )}. Ahorro ${escapeHtml(formatCurrency(item.discountAmount))}.</small>`
             : "";
         return `
           <article class="list-item sales-item-row" data-sales-item-id="${escapeHtml(
@@ -1141,9 +1223,13 @@
           remainingPaid = normalizeMoney(Math.max(0, remainingPaid - linePaid));
           const promoDetail =
             item.promoUnits > 0
-              ? `Promo ${item.promoName}: ${item.promoUnits} x ${formatCurrency(
-                  item.promoUnitPrice
-                )}`
+              ? item.promoBundleCount > 0
+                ? `Promo ${item.promoName}: ${item.promoBundleCount} paquete(s) de ${item.promoBundleQuantity} por ${formatCurrency(
+                    item.promoBundleTotal
+                  )}`
+                : `Promo ${item.promoName}: ${item.promoUnits} x ${formatCurrency(
+                    item.promoUnitPrice
+                  )}`
               : "";
           const autoLineDescription = buildSalesLineDescription(
             currentProduct,
@@ -2437,6 +2523,36 @@
     return [...uniqueIds];
   }
 
+  function isSameProductBundleSelection() {
+    const triggerId = Number(comboElements.triggerProductId?.value || 0);
+    const targetIds = getSelectedSalesComboTargetProductIds();
+    return (
+      triggerId > 0 &&
+      targetIds.length === 1 &&
+      targetIds[0] === triggerId
+    );
+  }
+
+  function syncSalesComboFieldMode() {
+    const isBundle = isSameProductBundleSelection();
+
+    if (comboElements.maxUnitsLabel) {
+      comboElements.maxUnitsLabel.textContent = isBundle
+        ? "Cantidad del paquete"
+        : "Unidades con descuento por activador";
+    }
+    if (comboElements.targetUnitPriceLabel) {
+      comboElements.targetUnitPriceLabel.textContent = isBundle
+        ? "Precio total del paquete"
+        : "Precio promocional por unidad";
+    }
+    if (comboElements.targetUnitPriceHint) {
+      comboElements.targetUnitPriceHint.textContent = isBundle
+        ? "Ejemplo: cantidad 3 y precio $10.000 para vender 3 unidades por $10.000."
+        : "Valor que pagará cada unidad del producto objetivo.";
+    }
+  }
+
   function fillSalesComboTargetProductsSelect(products, selectedValues = []) {
     if (!comboElements.targetProductId) {
       return;
@@ -2463,6 +2579,7 @@
     [...comboElements.targetProductId.options].forEach((option) => {
       option.selected = selectedSet.has(option.value);
     });
+    syncSalesComboFieldMode();
   }
 
   function fillSalesComboProductSelects(options = {}) {
@@ -2492,6 +2609,7 @@
         ? [options.targetValue]
         : getSelectedSalesComboTargetProductIds();
     fillSalesComboTargetProductsSelect(products, targetValues);
+    syncSalesComboFieldMode();
   }
 
   function resetSalesComboForm(options = {}) {
@@ -2512,6 +2630,7 @@
       triggerValue: "",
       targetValues: [],
     });
+    syncSalesComboFieldMode();
     comboElements.cancelEdit?.classList.add("is-hidden");
 
     const submitButton = comboElements.form.querySelector('button[type="submit"]');
@@ -2521,7 +2640,7 @@
 
     if (!options.preserveFeedback && comboElements.feedback) {
       comboElements.feedback.textContent =
-        "Crea reglas para aplicar descuentos automáticos en ventas cuando un producto active otro.";
+        "Crea descuentos entre productos o paquetes del mismo producto, por ejemplo 3 tortillas por $10.000.";
     }
   }
 
@@ -2583,6 +2702,7 @@
     comboElements.table.innerHTML = rules
       .map((item) => {
         const nextActive = item.isActive ? "false" : "true";
+        const sameProductBundle = item.isSameProductBundle;
         return `
           <tr>
             <td>
@@ -2592,11 +2712,25 @@
             <td>${escapeHtml(item.businessLine || "-")}</td>
             <td>
               <strong>${escapeHtml(item.triggerBusinessProductName || "Sin activador")}</strong>
-              <div class="inline-hint">Activa ${escapeHtml(
-                item.targetBusinessProductName || "Sin objetivo"
-              )} · ${escapeHtml(String(item.maxTargetUnitsPerTrigger || 1))} por activador</div>
+              <div class="inline-hint">${
+                sameProductBundle
+                  ? `Paquete del mismo producto · ${escapeHtml(
+                      String(item.maxTargetUnitsPerTrigger || 1)
+                    )} unidades`
+                  : `Activa ${escapeHtml(
+                      item.targetBusinessProductName || "Sin objetivo"
+                    )} · ${escapeHtml(
+                      String(item.maxTargetUnitsPerTrigger || 1)
+                    )} por activador`
+              }</div>
             </td>
-            <td>${formatCurrency(item.targetUnitPrice)}</td>
+            <td>${
+              sameProductBundle
+                ? `${escapeHtml(
+                    String(item.maxTargetUnitsPerTrigger || 1)
+                  )} por ${formatCurrency(item.targetUnitPrice)}`
+                : `${formatCurrency(item.targetUnitPrice)} c/u`
+            }</td>
             <td>
               <span class="status-pill ${item.isActive ? "status-pagado" : "status-pendiente"}">
                 ${item.isActive ? "Activo" : "Inactivo"}
@@ -2659,6 +2793,7 @@
     comboElements.maxUnits.value = String(comboRule.maxTargetUnitsPerTrigger || 1);
     comboElements.targetUnitPrice.value = String(comboRule.targetUnitPrice || 0);
     comboElements.notes.value = comboRule.notes || "";
+    syncSalesComboFieldMode();
     comboElements.cancelEdit?.classList.remove("is-hidden");
     comboElements.feedback.textContent =
       "Edita la regla y, si quieres, agrega varios productos objetivo para aplicar el mismo combo en bloque.";
@@ -2702,11 +2837,18 @@
       return;
     }
 
-    if (selectedTargetIds.includes(payload.triggerBusinessProductId)) {
+    if (
+      selectedTargetIds.includes(payload.triggerBusinessProductId) &&
+      selectedTargetIds.length > 1
+    ) {
       comboElements.feedback.textContent =
-        "El producto activador no puede estar dentro de los productos objetivo.";
+        "Para un paquete del mismo producto, selecciona únicamente ese producto como objetivo.";
       return;
     }
+
+    const isSameProductBundle =
+      selectedTargetIds.length === 1 &&
+      selectedTargetIds[0] === payload.triggerBusinessProductId;
 
     if (!(payload.targetUnitPrice > 0)) {
       comboElements.feedback.textContent =
@@ -2721,6 +2863,13 @@
     ) {
       comboElements.feedback.textContent =
         "Las unidades con descuento por activador deben ser un entero mayor que cero.";
+      comboElements.maxUnits?.focus();
+      return;
+    }
+
+    if (isSameProductBundle && payload.maxTargetUnitsPerTrigger < 2) {
+      comboElements.feedback.textContent =
+        "Un paquete del mismo producto debe tener al menos 2 unidades.";
       comboElements.maxUnits?.focus();
       return;
     }
@@ -2830,7 +2979,16 @@
         triggerValue: "",
         targetValues: [],
       });
+      syncSalesComboFieldMode();
     });
+    comboElements.triggerProductId?.addEventListener(
+      "change",
+      syncSalesComboFieldMode
+    );
+    comboElements.targetProductId?.addEventListener(
+      "change",
+      syncSalesComboFieldMode
+    );
     comboElements.cancelEdit?.addEventListener("click", () => {
       resetSalesComboForm();
       renderSalesComboRulesAdmin();

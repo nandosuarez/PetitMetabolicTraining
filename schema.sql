@@ -596,6 +596,52 @@ create table if not exists business_product_components (
   unique (business_product_id, inventory_product_id)
 );
 
+create table if not exists merchandise_orders (
+  id bigserial primary key,
+  client_id bigint not null references clients(id) on delete restrict,
+  movement_id bigint unique references movements(id) on delete set null,
+  order_date date not null,
+  expected_date date,
+  status text not null default 'pedido' check (
+    status in ('pedido', 'produccion', 'recibido', 'entregado', 'cancelado')
+  ),
+  total_amount numeric(14, 2) not null check (total_amount > 0),
+  notes text not null default '',
+  created_by_user_id bigint not null references app_users(id),
+  received_at timestamptz,
+  delivered_at timestamptz,
+  cancelled_at timestamptz,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create table if not exists merchandise_order_items (
+  id bigserial primary key,
+  order_id bigint not null references merchandise_orders(id) on delete cascade,
+  business_product_id bigint not null references business_products(id) on delete restrict,
+  inventory_product_id bigint references inventory_products(id) on delete set null,
+  product_name text not null,
+  size_label text not null default '',
+  color_label text not null default '',
+  quantity integer not null check (quantity > 0),
+  extra_stock_quantity integer not null default 0 check (extra_stock_quantity >= 0),
+  unit_price numeric(14, 2) not null check (unit_price > 0),
+  created_at timestamptz not null default now()
+);
+
+create table if not exists merchandise_product_variants (
+  id bigserial primary key,
+  business_product_id bigint not null references business_products(id) on delete cascade,
+  inventory_product_id bigint not null unique references inventory_products(id) on delete cascade,
+  sales_business_product_id bigint unique references business_products(id) on delete set null,
+  size_key text not null default '',
+  color_key text not null default '',
+  size_label text not null default '',
+  color_label text not null default '',
+  created_at timestamptz not null default now(),
+  unique (business_product_id, size_key, color_key)
+);
+
 create table if not exists sales_combo_rules (
   id bigserial primary key,
   name text not null,
@@ -629,8 +675,18 @@ create table if not exists inventory_stock_movements (
   created_at timestamptz not null default now()
 );
 
+alter table inventory_stock_movements
+  add column if not exists source_merchandise_order_id bigint
+  references merchandise_orders(id) on delete set null;
+
 create index if not exists inventory_stock_movements_product_idx
   on inventory_stock_movements(inventory_product_id, movement_date desc, created_at desc);
+
+create index if not exists merchandise_orders_status_idx
+  on merchandise_orders(status, order_date desc, id desc);
+
+create index if not exists merchandise_order_items_order_idx
+  on merchandise_order_items(order_id, id);
 
 create index if not exists business_products_line_idx
   on business_products(business_line, is_active, name);

@@ -1964,6 +1964,436 @@ app.post("/api/movements/:id/collections", requireOperationalWriteAccess, asyncH
   });
 }));
 
+app.get(
+  "/api/merchandise-orders",
+  requireOperationalWriteAccess,
+  asyncHandler(async (_req, res) => {
+    res.json({
+      orders: await listMerchandiseOrders(),
+    });
+  })
+);
+
+app.post(
+  "/api/merchandise-orders",
+  requireOperationalWriteAccess,
+  asyncHandler(async (req, res) => {
+    const payload = normalizeMerchandiseOrderPayload(req.body);
+    validateMerchandiseOrderPayload(payload);
+
+    const orderId = await withClient(async (client) => {
+      await client.query("begin");
+
+      try {
+        const clientResult = await client.query(
+          `
+            select *
+            from clients
+            where id = $1
+              and is_active = true
+              and is_client = true
+            limit 1
+          `,
+          [payload.clientId]
+        );
+
+        if (!clientResult.rows.length) {
+          throw httpError(400, "Selecciona un cliente activo para el pedido.");
+        }
+
+        for (const item of payload.items) {
+          if (item.businessProductId > 0) {
+            continue;
+          }
+
+          const inventoryResult = await client.query(
+            `
+              select *
+              from inventory_products
+              where id = $1
+                and is_active = true
+              limit 1
+            `,
+            [item.inventoryProductId]
+          );
+          if (!inventoryResult.rows.length) {
+            throw httpError(
+              400,
+              "Uno de los productos de inventario no existe o esta inactivo."
+            );
+          }
+
+          const inventoryProduct = inventoryResult.rows[0];
+          const existingBusinessResult = await client.query(
+            `
+              select id
+              from business_products
+              where inventory_product_id = $1
+              order by is_active desc, id asc
+              limit 1
+            `,
+            [inventoryProduct.id]
+          );
+          if (existingBusinessResult.rows.length) {
+            item.businessProductId = Number(
+              existingBusinessResult.rows[0].id
+            );
+            continue;
+          }
+
+          const createdBusinessResult = await client.query(
+            `
+              insert into business_products (
+                name,
+                business_line,
+                inventory_product_id,
+                item_type,
+                category,
+                default_amount,
+                direct_inventory_product_id,
+                direct_inventory_quantity,
+                notes,
+                is_active
+              )
+              values ($1, $2, $3, 'Producto', $4, $5, $6, $7, $8, true)
+              returning id
+            `,
+            [
+              inventoryProduct.name,
+              inventoryProduct.area === "Restaurante"
+                ? "Restaurante"
+                : "Gimnasio",
+              inventoryProduct.id,
+              inventoryProduct.category || "Mercancia Petit",
+              Number(inventoryProduct.sale_price || item.unitPrice || 0),
+              inventoryProduct.tracks_stock ? inventoryProduct.id : null,
+              inventoryProduct.tracks_stock ? 1 : 0,
+              "Ficha comercial creada automaticamente desde pedidos.",
+            ]
+          );
+          item.businessProductId = Number(createdBusinessResult.rows[0].id);
+        }
+
+        const requestedProductIds = [
+          ...new Set(payload.items.map((item) => item.businessProductId)),
+        ];
+        const productsResult = await client.query(
+          `
+            select *
+            from business_products
+            where id = any($1::bigint[])
+              and is_active = true
+          `,
+          [requestedProductIds]
+        );
+        const productsById = new Map(
+          productsResult.rows.map((row) => [Number(row.id), row])
+        );
+
+        if (productsById.size !== requestedProductIds.length) {
+          throw httpError(
+            400,
+            "Uno de los productos del pedido no existe o esta inactivo."
+          );
+        }
+        if (
+          [...productsById.values()].some(
+            (product) =>
+              String(product.item_type || "").trim().toLowerCase() ===
+              "servicio"
+          )
+        ) {
+          throw httpError(
+            400,
+            "Los pedidos de prendas solo permiten productos inventariables, no servicios."
+          );
+        }
+
+        const businessLines = new Set(
+          payload.items.map(
+            (item) => productsById.get(item.businessProductId).business_line
+          )
+        );
+        if (businessLines.size !== 1) {
+          throw httpError(
+            400,
+            "Todos los productos del pedido deben pertenecer a la misma linea de negocio."
+          );
+        }
+
+        const paymentMethodResult = await client.query(
+          `
+            select 1
+            from catalog_items
+            where group_name = 'mediosPago'
+              and value = $1
+              and is_active = true
+            limit 1
+          `,
+          [payload.paymentMethod]
+        );
+        if (!paymentMethodResult.rows.length) {
+          throw httpError(
+            400,
+            "La caja seleccionada no existe o esta inactiva."
+          );
+        }
+
+        const orderResult = await client.query(
+          `
+            insert into merchandise_orders (
+              client_id,
+              order_date,
+              expected_date,
+              status,
+              total_amount,
+              notes,
+              created_by_user_id
+            )
+            values ($1, $2, $3, 'pedido', $4, $5, $6)
+            returning id
+          `,
+          [
+            payload.clientId,
+            payload.orderDate,
+            payload.expectedDate || null,
+            payload.totalAmount,
+            payload.notes,
+            Number(req.authUser.id),
+          ]
+        );
+        const createdOrderId = Number(orderResult.rows[0].id);
+        const clientRow = clientResult.rows[0];
+        const firstProduct = productsById.get(payload.items[0].businessProductId);
+        const singleProductId =
+          requestedProductIds.length === 1 ? requestedProductIds[0] : null;
+        const description = buildMerchandiseOrderDescription(
+          createdOrderId,
+          payload.items,
+          productsById
+        );
+        const paymentStatus = derivePaymentStatus(
+          payload.totalAmount,
+          payload.initialPayment
+        );
+        const [year, monthNumber] = payload.orderDate.split("-").map(Number);
+        const movementResult = await client.query(
+          `
+            insert into movements (
+              business_line,
+              movement_date,
+              movement_type,
+              category,
+              business_product_id,
+              client_name,
+              description,
+              payment_status,
+              payment_method,
+              total_amount,
+              paid_amount,
+              balance_due,
+              cash_flow,
+              inventory_product_id,
+              inventory_quantity,
+              inventory_effect,
+              year,
+              month_number,
+              month_name,
+              notes
+            )
+            values (
+              $1, $2, 'Ingreso', $3, $4, $5, $6, $7, $8, $9,
+              $10, $11, $10, null, 0, 'ninguno', $12, $13, $14, $15
+            )
+            returning id
+          `,
+          [
+            firstProduct.business_line,
+            payload.orderDate,
+            firstProduct.category || "Sueteres Petit",
+            singleProductId,
+            clientRow.full_name,
+            description,
+            paymentStatus,
+            payload.paymentMethod,
+            payload.totalAmount,
+            payload.initialPayment,
+            Number((payload.totalAmount - payload.initialPayment).toFixed(2)),
+            year,
+            monthNumber,
+            monthNames[(monthNumber || 1) - 1] || "",
+            [payload.notes, `Pedido de prendas #${createdOrderId}`]
+              .filter(Boolean)
+              .join(" | "),
+          ]
+        );
+        const movementId = Number(movementResult.rows[0].id);
+
+        await client.query(
+          `
+            update merchandise_orders
+            set movement_id = $2
+            where id = $1
+          `,
+          [createdOrderId, movementId]
+        );
+
+        for (const item of payload.items) {
+          const product = productsById.get(item.businessProductId);
+          await client.query(
+            `
+              insert into merchandise_order_items (
+                order_id,
+                business_product_id,
+                product_name,
+                size_label,
+                color_label,
+                quantity,
+                extra_stock_quantity,
+                unit_price
+              )
+              values ($1, $2, $3, $4, $5, $6, $7, $8)
+            `,
+            [
+              createdOrderId,
+              item.businessProductId,
+              product.name,
+              item.size,
+              item.color,
+              item.quantity,
+              item.extraStockQuantity,
+              item.unitPrice,
+            ]
+          );
+        }
+
+        await client.query("commit");
+        return createdOrderId;
+      } catch (error) {
+        await client.query("rollback");
+        throw error;
+      }
+    });
+
+    res.status(201).json({
+      order: await getMerchandiseOrderById(orderId),
+    });
+  })
+);
+
+app.patch(
+  "/api/merchandise-orders/:id/status",
+  requireOperationalWriteAccess,
+  asyncHandler(async (req, res) => {
+    const orderId = Number(req.params.id);
+    const nextStatus = String(req.body.status || "").trim().toLowerCase();
+
+    if (!Number.isInteger(orderId) || orderId <= 0) {
+      throw httpError(400, "Pedido invalido.");
+    }
+    if (
+      !["produccion", "recibido", "entregado", "cancelado"].includes(
+        nextStatus
+      )
+    ) {
+      throw httpError(400, "El estado solicitado no es valido.");
+    }
+    if (
+      nextStatus === "cancelado" &&
+      req.authUser?.role !== "administrador"
+    ) {
+      throw httpError(403, "Solo el administrador puede cancelar pedidos.");
+    }
+
+    await withClient(async (client) => {
+      await client.query("begin");
+
+      try {
+        const orderResult = await client.query(
+          `
+            select
+              mo.*,
+              m.paid_amount,
+              m.balance_due
+            from merchandise_orders mo
+            left join movements m
+              on m.id = mo.movement_id
+            where mo.id = $1
+            for update of mo
+          `,
+          [orderId]
+        );
+
+        if (!orderResult.rows.length) {
+          throw httpError(404, "Pedido no encontrado.");
+        }
+
+        const orderRow = orderResult.rows[0];
+        validateMerchandiseStatusTransition(orderRow, nextStatus);
+
+        if (nextStatus === "recibido") {
+          await receiveMerchandiseOrder(
+            client,
+            orderRow,
+            Number(req.authUser.id)
+          );
+        } else if (nextStatus === "entregado") {
+          await deliverMerchandiseOrder(
+            client,
+            orderRow,
+            Number(req.authUser.id)
+          );
+        } else if (nextStatus === "cancelado") {
+          if (Number(orderRow.paid_amount || 0) > 0) {
+            throw httpError(
+              400,
+              "El pedido tiene abonos. Registra primero la devolucion antes de cancelarlo."
+            );
+          }
+
+          if (orderRow.movement_id) {
+            await client.query("delete from movements where id = $1", [
+              orderRow.movement_id,
+            ]);
+          }
+        }
+
+        await client.query(
+          `
+            update merchandise_orders
+            set
+              status = $2,
+              received_at = case
+                when $2 = 'recibido' then now()
+                else received_at
+              end,
+              delivered_at = case
+                when $2 = 'entregado' then now()
+                else delivered_at
+              end,
+              cancelled_at = case
+                when $2 = 'cancelado' then now()
+                else cancelled_at
+              end,
+              updated_at = now()
+            where id = $1
+          `,
+          [orderId, nextStatus]
+        );
+
+        await client.query("commit");
+      } catch (error) {
+        await client.query("rollback");
+        throw error;
+      }
+    });
+
+    res.json({
+      order: await getMerchandiseOrderById(orderId),
+    });
+  })
+);
+
 app.post("/api/box-transfers", requireOperationalWriteAccess, asyncHandler(async (req, res) => {
   const payload = normalizeBoxTransferPayload(req.body);
   validateBoxTransferPayload(payload);
@@ -3515,10 +3945,24 @@ function validateSalesComboRulePayload(payload, options = {}) {
     );
   }
 
-  if (targetIds.includes(payload.triggerBusinessProductId)) {
+  if (
+    targetIds.includes(payload.triggerBusinessProductId) &&
+    targetIds.length > 1
+  ) {
     throw httpError(
       400,
-      "El producto que activa el combo debe ser diferente al que recibe el descuento."
+      "Para un paquete del mismo producto, selecciona unicamente ese producto como objetivo."
+    );
+  }
+
+  const isSameProductBundle =
+    targetIds.length === 1 &&
+    targetIds[0] === payload.triggerBusinessProductId;
+
+  if (isSameProductBundle && payload.maxTargetUnitsPerTrigger < 2) {
+    throw httpError(
+      400,
+      "Un paquete del mismo producto debe tener al menos 2 unidades."
     );
   }
 
@@ -3578,6 +4022,100 @@ function normalizeMovementPayload(body) {
     inventoryQuantity,
     inventoryEffect,
   };
+}
+
+function normalizeMerchandiseOrderPayload(body) {
+  const rawItems = Array.isArray(body.items) ? body.items : [];
+  const items = rawItems.map((item) => ({
+    businessProductId: Number(item.businessProductId || 0),
+    inventoryProductId: Number(item.inventoryProductId || 0),
+    size: String(item.size || "").trim(),
+    color: String(item.color || "").trim(),
+    quantity: Number(item.quantity || 0),
+    extraStockQuantity: Number(item.extraStockQuantity || 0),
+    unitPrice: Number(item.unitPrice || 0),
+  }));
+  const totalAmount = Number(
+    items
+      .reduce(
+        (sum, item) => sum + item.quantity * item.unitPrice,
+        0
+      )
+      .toFixed(2)
+  );
+
+  return {
+    clientId: Number(body.clientId || 0),
+    orderDate: normalizeDateOnly(body.orderDate),
+    expectedDate: normalizeDateOnly(body.expectedDate),
+    paymentMethod: String(body.paymentMethod || "").trim(),
+    initialPayment: Number(body.initialPayment || 0),
+    notes: String(body.notes || "").trim(),
+    totalAmount,
+    items,
+  };
+}
+
+function validateMerchandiseOrderPayload(payload) {
+  if (!Number.isInteger(payload.clientId) || payload.clientId <= 0) {
+    throw httpError(400, "Selecciona el cliente que realizo el pedido.");
+  }
+  if (!payload.orderDate) {
+    throw httpError(400, "La fecha del pedido es obligatoria.");
+  }
+  if (!payload.paymentMethod) {
+    throw httpError(400, "Selecciona la caja para registrar el abono.");
+  }
+  if (!payload.items.length) {
+    throw httpError(400, "Agrega al menos una prenda al pedido.");
+  }
+  payload.items.forEach((item, index) => {
+    if (
+      (!Number.isInteger(item.businessProductId) ||
+        item.businessProductId <= 0) &&
+      (!Number.isInteger(item.inventoryProductId) ||
+        item.inventoryProductId <= 0)
+    ) {
+      throw httpError(
+        400,
+        `Selecciona un producto valido en la prenda ${index + 1}.`
+      );
+    }
+    if (!Number.isInteger(item.quantity) || item.quantity <= 0) {
+      throw httpError(
+        400,
+        `La cantidad del cliente en la prenda ${index + 1} debe ser un entero mayor que cero.`
+      );
+    }
+    if (
+      !Number.isInteger(item.extraStockQuantity) ||
+      item.extraStockQuantity < 0
+    ) {
+      throw httpError(
+        400,
+        `La cantidad adicional de inventario en la prenda ${index + 1} no es valida.`
+      );
+    }
+    if (!Number.isFinite(item.unitPrice) || item.unitPrice <= 0) {
+      throw httpError(
+        400,
+        `El precio unitario de la prenda ${index + 1} debe ser mayor que cero.`
+      );
+    }
+  });
+  if (!(payload.totalAmount > 0)) {
+    throw httpError(400, "El valor total del pedido debe ser mayor que cero.");
+  }
+  if (
+    !Number.isFinite(payload.initialPayment) ||
+    payload.initialPayment < 0 ||
+    payload.initialPayment > payload.totalAmount
+  ) {
+    throw httpError(
+      400,
+      "El abono inicial no puede ser negativo ni superar el total del pedido."
+    );
+  }
 }
 
 function derivePaymentStatus(valorTotal, abono) {
@@ -6529,7 +7067,7 @@ async function assertSalesComboBusinessProducts(client, payload) {
 
   const productsResult = await client.query(
     `
-      select id, business_line
+      select id, business_line, default_amount
       from business_products
       where id = any($1::bigint[])
     `,
@@ -6560,6 +7098,24 @@ async function assertSalesComboBusinessProducts(client, payload) {
       400,
       "Los productos del combo deben pertenecer a la misma linea de negocio de la regla."
     );
+  }
+
+  if (
+    targetIds.length === 1 &&
+    targetIds[0] === Number(payload.triggerBusinessProductId || 0)
+  ) {
+    const regularPackageValue =
+      Number(triggerProduct.default_amount || 0) *
+      Number(payload.maxTargetUnitsPerTrigger || 0);
+    if (
+      regularPackageValue > 0 &&
+      Number(payload.targetUnitPrice || 0) >= regularPackageValue
+    ) {
+      throw httpError(
+        400,
+        `El precio total del paquete debe ser menor que ${regularPackageValue}.`
+      );
+    }
   }
 }
 
@@ -6927,6 +7483,23 @@ async function assertMovementMutationAllowed(user, movementId) {
     throw httpError(400, "Movimiento invalido.");
   }
 
+  const linkedOrderResult = await query(
+    `
+      select id
+      from merchandise_orders
+      where movement_id = $1
+        and status <> 'cancelado'
+      limit 1
+    `,
+    [movementId]
+  );
+  if (linkedOrderResult.rows.length) {
+    throw httpError(
+      400,
+      "Este movimiento pertenece a un pedido de prendas. Gestiona sus cambios desde el modulo Pedidos."
+    );
+  }
+
   if (user?.role !== "asistente_operativo") {
     return;
   }
@@ -6963,6 +7536,520 @@ async function assertMovementMutationAllowed(user, movementId) {
   throw httpError(
     403,
     "El asistente operativo solo puede modificar movimientos registrados en las ultimas 24 horas."
+  );
+}
+
+async function listMerchandiseOrders(options = {}) {
+  const orderId = Number(options.orderId || 0);
+  const ordersResult = await query(
+    `
+      select
+        mo.*,
+        c.full_name as client_name,
+        c.alias as client_alias,
+        m.payment_status,
+        m.payment_method,
+        m.paid_amount,
+        m.balance_due,
+        coalesce(nullif(u.full_name, ''), u.username) as created_by_name
+      from merchandise_orders mo
+      join clients c
+        on c.id = mo.client_id
+      left join movements m
+        on m.id = mo.movement_id
+      join app_users u
+        on u.id = mo.created_by_user_id
+      where ($1::bigint <= 0 or mo.id = $1)
+      order by mo.order_date desc, mo.created_at desc, mo.id desc
+    `,
+    [orderId]
+  );
+
+  if (!ordersResult.rows.length) {
+    return [];
+  }
+
+  const orderIds = ordersResult.rows.map((row) => Number(row.id));
+  const itemsResult = await query(
+    `
+      select
+        moi.*,
+        ip.name as inventory_product_name,
+        ip.current_stock
+      from merchandise_order_items moi
+      left join inventory_products ip
+        on ip.id = moi.inventory_product_id
+      where moi.order_id = any($1::bigint[])
+      order by moi.order_id asc, moi.id asc
+    `,
+    [orderIds]
+  );
+  const itemsByOrder = new Map();
+  itemsResult.rows.forEach((row) => {
+    const key = Number(row.order_id);
+    const current = itemsByOrder.get(key) || [];
+    current.push({
+      id: Number(row.id),
+      businessProductId: Number(row.business_product_id),
+      inventoryProductId: Number(row.inventory_product_id || 0),
+      inventoryProductName: row.inventory_product_name || "",
+      productName: row.product_name || "",
+      size: row.size_label || "",
+      color: row.color_label || "",
+      quantity: Number(row.quantity || 0),
+      extraStockQuantity: Number(row.extra_stock_quantity || 0),
+      unitPrice: Number(row.unit_price || 0),
+      lineTotal: Number(
+        (Number(row.quantity || 0) * Number(row.unit_price || 0)).toFixed(2)
+      ),
+      currentStock: Number(row.current_stock || 0),
+    });
+    itemsByOrder.set(key, current);
+  });
+
+  return ordersResult.rows.map((row) => ({
+    id: Number(row.id),
+    clientId: Number(row.client_id),
+    clientName: row.client_name || "",
+    clientAlias: row.client_alias || "",
+    movementId: Number(row.movement_id || 0),
+    orderDate: normalizeDateOnly(row.order_date),
+    expectedDate: normalizeDateOnly(row.expected_date),
+    status: row.status || "pedido",
+    totalAmount: Number(row.total_amount || 0),
+    paidAmount: Number(row.paid_amount || 0),
+    balanceDue: Number(row.balance_due || 0),
+    paymentStatus:
+      row.status === "cancelado"
+        ? "Cancelado"
+        : row.payment_status ||
+          derivePaymentStatus(row.total_amount, row.paid_amount || 0),
+    paymentMethod: row.payment_method || "",
+    notes: row.notes || "",
+    createdBy: row.created_by_name || "Sistema",
+    receivedAt: row.received_at || null,
+    deliveredAt: row.delivered_at || null,
+    cancelledAt: row.cancelled_at || null,
+    createdAt: row.created_at || null,
+    updatedAt: row.updated_at || null,
+    items: itemsByOrder.get(Number(row.id)) || [],
+  }));
+}
+
+async function getMerchandiseOrderById(orderId) {
+  const orders = await listMerchandiseOrders({ orderId });
+  if (!orders.length) {
+    throw httpError(404, "Pedido no encontrado.");
+  }
+  return orders[0];
+}
+
+function buildMerchandiseOrderDescription(orderId, items, productsById) {
+  const detail = items
+    .map((item) => {
+      const product = productsById.get(item.businessProductId);
+      const variant = [
+        item.size ? `Talla ${item.size}` : "",
+        item.color,
+      ]
+        .filter(Boolean)
+        .join(" ");
+      return `${product?.name || "Prenda"}${variant ? ` ${variant}` : ""} x${item.quantity}`;
+    })
+    .join(", ");
+
+  return `Pedido de prendas #${orderId}: ${detail}`.slice(0, 500);
+}
+
+function validateMerchandiseStatusTransition(orderRow, nextStatus) {
+  const currentStatus = String(orderRow.status || "pedido");
+  const allowedTransitions = {
+    pedido: ["produccion", "recibido", "cancelado"],
+    produccion: ["recibido", "cancelado"],
+    recibido: ["entregado"],
+    entregado: [],
+    cancelado: [],
+  };
+
+  if (!(allowedTransitions[currentStatus] || []).includes(nextStatus)) {
+    throw httpError(
+      400,
+      `El pedido no puede pasar de ${currentStatus} a ${nextStatus}.`
+    );
+  }
+}
+
+async function receiveMerchandiseOrder(client, orderRow, authUserId) {
+  const itemsResult = await client.query(
+    `
+      select *
+      from merchandise_order_items
+      where order_id = $1
+      order by id asc
+      for update
+    `,
+    [orderRow.id]
+  );
+
+  for (const item of itemsResult.rows) {
+    const inventoryProduct = await resolveMerchandiseInventoryProduct(
+      client,
+      item
+    );
+    const receivedQuantity =
+      Number(item.quantity || 0) + Number(item.extra_stock_quantity || 0);
+
+    await registerMerchandiseStockChange(client, {
+      orderId: Number(orderRow.id),
+      inventoryProduct,
+      movementDate: normalizeDateOnly(new Date()),
+      movementType: "entrada",
+      quantity: receivedQuantity,
+      reference: `Recepcion pedido de prendas #${orderRow.id}`,
+      notes: [
+        item.size_label ? `Talla ${item.size_label}` : "",
+        item.color_label || "",
+        Number(item.extra_stock_quantity || 0) > 0
+          ? `${item.extra_stock_quantity} unidad(es) adicionales para inventario`
+          : "",
+      ]
+        .filter(Boolean)
+        .join(" | "),
+      authUserId,
+    });
+
+    await client.query(
+      `
+        update merchandise_order_items
+        set inventory_product_id = $2
+        where id = $1
+      `,
+      [item.id, inventoryProduct.id]
+    );
+  }
+}
+
+async function deliverMerchandiseOrder(client, orderRow, authUserId) {
+  const itemsResult = await client.query(
+    `
+      select
+        moi.*,
+        ip.*
+      from merchandise_order_items moi
+      join inventory_products ip
+        on ip.id = moi.inventory_product_id
+      where moi.order_id = $1
+      order by moi.id asc
+      for update of moi, ip
+    `,
+    [orderRow.id]
+  );
+
+  if (!itemsResult.rows.length) {
+    throw httpError(
+      400,
+      "El pedido no tiene prendas recibidas para entregar."
+    );
+  }
+
+  for (const item of itemsResult.rows) {
+    await registerMerchandiseStockChange(client, {
+      orderId: Number(orderRow.id),
+      inventoryProduct: item,
+      movementDate: normalizeDateOnly(new Date()),
+      movementType: "salida",
+      quantity: Number(item.quantity || 0),
+      reference: `Entrega pedido de prendas #${orderRow.id}`,
+      notes: [
+        item.size_label ? `Talla ${item.size_label}` : "",
+        item.color_label || "",
+      ]
+        .filter(Boolean)
+        .join(" | "),
+      authUserId,
+    });
+  }
+}
+
+async function resolveMerchandiseInventoryProduct(client, orderItem) {
+  const productResult = await client.query(
+    `
+      select
+        bp.*,
+        ip.id as base_inventory_product_id,
+        ip.area as base_area,
+        ip.category as base_category,
+        ip.unit_name as base_unit_name,
+        ip.cost_price as base_cost_price
+      from business_products bp
+      left join inventory_products ip
+        on ip.id = bp.inventory_product_id
+      where bp.id = $1
+      limit 1
+    `,
+    [orderItem.business_product_id]
+  );
+  if (!productResult.rows.length) {
+    throw httpError(400, "No se encontro el producto relacionado con el pedido.");
+  }
+
+  const product = productResult.rows[0];
+  const sizeLabel = String(orderItem.size_label || "").trim();
+  const colorLabel = String(orderItem.color_label || "").trim();
+  const sizeKey = normalizeMerchandiseVariantKey(sizeLabel);
+  const colorKey = normalizeMerchandiseVariantKey(colorLabel);
+
+  if (!sizeKey && !colorKey) {
+    let inventoryProductId = Number(product.base_inventory_product_id || 0);
+    if (!inventoryProductId) {
+      const createdResult = await client.query(
+        `
+          insert into inventory_products (
+            name,
+            area,
+            item_kind,
+            tracks_stock,
+            category,
+            unit_name,
+            current_stock,
+            minimum_stock,
+            cost_price,
+            sale_price,
+            notes,
+            is_active
+          )
+          values ($1, $2, 'Producto de venta', true, $3, 'Unidad', 0, 0, 0, $4, $5, true)
+          returning *
+        `,
+        [
+          product.name,
+          product.business_line === "Restaurante" ? "Restaurante" : "Gimnasio",
+          product.category || "Mercancia Petit",
+          Number(orderItem.unit_price || product.default_amount || 0),
+          "Creado automaticamente desde pedidos de prendas.",
+        ]
+      );
+      inventoryProductId = Number(createdResult.rows[0].id);
+    }
+
+    await client.query(
+      `
+        update inventory_products
+        set
+          tracks_stock = true,
+          sale_price = case when sale_price > 0 then sale_price else $2 end,
+          updated_at = now()
+        where id = $1
+      `,
+      [inventoryProductId, Number(orderItem.unit_price || 0)]
+    );
+    await client.query(
+      `
+        update business_products
+        set
+          inventory_product_id = coalesce(inventory_product_id, $2),
+          direct_inventory_product_id = coalesce(direct_inventory_product_id, $2),
+          direct_inventory_quantity = case
+            when direct_inventory_quantity > 0 then direct_inventory_quantity
+            else 1
+          end,
+          updated_at = now()
+        where id = $1
+      `,
+      [orderItem.business_product_id, inventoryProductId]
+    );
+
+    const inventoryResult = await client.query(
+      `
+        select *
+        from inventory_products
+        where id = $1
+        for update
+      `,
+      [inventoryProductId]
+    );
+    return inventoryResult.rows[0];
+  }
+
+  const existingVariantResult = await client.query(
+    `
+      select ip.*
+      from merchandise_product_variants mpv
+      join inventory_products ip
+        on ip.id = mpv.inventory_product_id
+      where mpv.business_product_id = $1
+        and mpv.size_key = $2
+        and mpv.color_key = $3
+      limit 1
+      for update of ip
+    `,
+    [orderItem.business_product_id, sizeKey, colorKey]
+  );
+  if (existingVariantResult.rows.length) {
+    return existingVariantResult.rows[0];
+  }
+
+  const variantParts = [
+    product.name,
+    sizeLabel ? `Talla ${sizeLabel}` : "",
+    colorLabel,
+  ].filter(Boolean);
+  const variantName = variantParts.join(" - ");
+  const inventoryResult = await client.query(
+    `
+      insert into inventory_products (
+        name,
+        area,
+        item_kind,
+        tracks_stock,
+        category,
+        unit_name,
+        current_stock,
+        minimum_stock,
+        cost_price,
+        sale_price,
+        notes,
+        is_active
+      )
+      values ($1, $2, 'Producto de venta', true, $3, 'Unidad', 0, 0, $4, $5, $6, true)
+      returning *
+    `,
+    [
+      variantName,
+      product.base_area ||
+        (product.business_line === "Restaurante" ? "Restaurante" : "Gimnasio"),
+      product.base_category || product.category || "Mercancia Petit",
+      Number(product.base_cost_price || 0),
+      Number(orderItem.unit_price || product.default_amount || 0),
+      `Variante generada desde pedidos: ${variantName}`,
+    ]
+  );
+  const inventoryProduct = inventoryResult.rows[0];
+  const salesProductResult = await client.query(
+    `
+      insert into business_products (
+        name,
+        business_line,
+        inventory_product_id,
+        item_type,
+        category,
+        default_amount,
+        direct_inventory_product_id,
+        direct_inventory_quantity,
+        notes,
+        is_active
+      )
+      values ($1, $2, $3, 'Producto', $4, $5, $3, 1, $6, true)
+      returning id
+    `,
+    [
+      variantName,
+      product.business_line,
+      inventoryProduct.id,
+      product.category || "Mercancia Petit",
+      Number(orderItem.unit_price || product.default_amount || 0),
+      `Variante generada automaticamente desde pedidos del producto #${product.id}.`,
+    ]
+  );
+
+  await client.query(
+    `
+      insert into merchandise_product_variants (
+        business_product_id,
+        inventory_product_id,
+        sales_business_product_id,
+        size_key,
+        color_key,
+        size_label,
+        color_label
+      )
+      values ($1, $2, $3, $4, $5, $6, $7)
+    `,
+    [
+      orderItem.business_product_id,
+      inventoryProduct.id,
+      salesProductResult.rows[0].id,
+      sizeKey,
+      colorKey,
+      sizeLabel,
+      colorLabel,
+    ]
+  );
+
+  return inventoryProduct;
+}
+
+function normalizeMerchandiseVariantKey(value) {
+  return String(value || "").trim().toLocaleLowerCase("es-CO");
+}
+
+async function registerMerchandiseStockChange(client, options) {
+  const productResult = await client.query(
+    `
+      select *
+      from inventory_products
+      where id = $1
+      for update
+    `,
+    [options.inventoryProduct.id]
+  );
+  if (!productResult.rows.length) {
+    throw httpError(404, "Producto de inventario no encontrado.");
+  }
+
+  const product = productResult.rows[0];
+  const stockBefore = Number(product.current_stock || 0);
+  const direction = options.movementType === "entrada" ? 1 : -1;
+  const stockAfter = Number(
+    (stockBefore + direction * Number(options.quantity || 0)).toFixed(2)
+  );
+  if (stockAfter < 0) {
+    throw httpError(
+      400,
+      `No hay existencias suficientes de ${product.name} para entregar el pedido.`
+    );
+  }
+
+  await client.query(
+    `
+      insert into inventory_stock_movements (
+        inventory_product_id,
+        source_merchandise_order_id,
+        movement_date,
+        movement_type,
+        quantity,
+        unit_cost,
+        stock_before,
+        stock_after,
+        reference,
+        notes,
+        registered_by_user_id
+      )
+      values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+    `,
+    [
+      product.id,
+      options.orderId,
+      options.movementDate,
+      options.movementType,
+      Number(options.quantity || 0),
+      Number(product.cost_price || 0),
+      stockBefore,
+      stockAfter,
+      options.reference || "",
+      options.notes || "",
+      options.authUserId,
+    ]
+  );
+  await client.query(
+    `
+      update inventory_products
+      set
+        current_stock = $2,
+        updated_at = now()
+      where id = $1
+    `,
+    [product.id, stockAfter]
   );
 }
 
@@ -7095,6 +8182,7 @@ async function start() {
   await checkConnection();
   await ensureClientRoleColumns();
   await ensureInventoryDecimalColumns();
+  await ensureMerchandiseOrdersSchema();
   await ensureProgrammingExerciseFamiliesConstraint();
   await ensureBootstrapAdmin();
 
@@ -7309,6 +8397,66 @@ async function ensureInventoryDecimalColumns() {
       end if;
     end
     $$;
+  `);
+}
+
+async function ensureMerchandiseOrdersSchema() {
+  await query(`
+    create table if not exists merchandise_orders (
+      id bigserial primary key,
+      client_id bigint not null references clients(id) on delete restrict,
+      movement_id bigint unique references movements(id) on delete set null,
+      order_date date not null,
+      expected_date date,
+      status text not null default 'pedido' check (
+        status in ('pedido', 'produccion', 'recibido', 'entregado', 'cancelado')
+      ),
+      total_amount numeric(14, 2) not null check (total_amount > 0),
+      notes text not null default '',
+      created_by_user_id bigint not null references app_users(id),
+      received_at timestamptz,
+      delivered_at timestamptz,
+      cancelled_at timestamptz,
+      created_at timestamptz not null default now(),
+      updated_at timestamptz not null default now()
+    );
+
+    create table if not exists merchandise_order_items (
+      id bigserial primary key,
+      order_id bigint not null references merchandise_orders(id) on delete cascade,
+      business_product_id bigint not null references business_products(id) on delete restrict,
+      inventory_product_id bigint references inventory_products(id) on delete set null,
+      product_name text not null,
+      size_label text not null default '',
+      color_label text not null default '',
+      quantity integer not null check (quantity > 0),
+      extra_stock_quantity integer not null default 0 check (extra_stock_quantity >= 0),
+      unit_price numeric(14, 2) not null check (unit_price > 0),
+      created_at timestamptz not null default now()
+    );
+
+    create table if not exists merchandise_product_variants (
+      id bigserial primary key,
+      business_product_id bigint not null references business_products(id) on delete cascade,
+      inventory_product_id bigint not null unique references inventory_products(id) on delete cascade,
+      sales_business_product_id bigint unique references business_products(id) on delete set null,
+      size_key text not null default '',
+      color_key text not null default '',
+      size_label text not null default '',
+      color_label text not null default '',
+      created_at timestamptz not null default now(),
+      unique (business_product_id, size_key, color_key)
+    );
+
+    alter table inventory_stock_movements
+      add column if not exists source_merchandise_order_id bigint
+      references merchandise_orders(id) on delete set null;
+
+    create index if not exists merchandise_orders_status_idx
+      on merchandise_orders(status, order_date desc, id desc);
+
+    create index if not exists merchandise_order_items_order_idx
+      on merchandise_order_items(order_id, id);
   `);
 }
 
