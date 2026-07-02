@@ -4419,6 +4419,15 @@ function validateMovementPayload(payload, options = {}) {
     throw httpError(400, "El abono no puede ser mayor que el valor total.");
   }
 
+  if (payload.saldoPendiente > 0 && !payload.cliente) {
+    throw httpError(
+      400,
+      payload.tipo === "Ingreso"
+        ? "Selecciona el cliente antes de guardar una venta con saldo pendiente."
+        : "Selecciona el beneficiario o proveedor antes de guardar un saldo pendiente por pagar."
+    );
+  }
+
   if (!["ninguno", "entrada", "salida"].includes(payload.inventoryEffect)) {
     throw httpError(400, "El impacto de inventario no es valido.");
   }

@@ -11663,6 +11663,20 @@ function validateMovement(payload, options = {}) {
     };
   }
 
+  const pendingBalance = Math.max(
+    Number(payload.valorTotal || 0) - Number(payload.abono || 0),
+    0
+  );
+  if (pendingBalance > 0 && !String(payload.cliente || "").trim()) {
+    return {
+      valid: false,
+      message:
+        payload.tipo === "Ingreso"
+          ? "Selecciona el cliente antes de guardar una venta con saldo pendiente."
+          : "Selecciona el beneficiario o proveedor antes de guardar un saldo pendiente por pagar.",
+    };
+  }
+
   if (!["ninguno", "entrada", "salida"].includes(payload.inventoryEffect)) {
     return {
       valid: false,
