@@ -2934,21 +2934,28 @@
     }
 
     try {
-      await apiRequest(`/api/sales-combo-rules/${comboRuleId}/active`, {
-        method: "PATCH",
-        body: JSON.stringify({
-          isActive: activate,
-        }),
-      });
+      const updatedCombo = await apiRequest(
+        `/api/sales-combo-rules/${comboRuleId}/active`,
+        {
+          method: "PATCH",
+          body: JSON.stringify({
+            isActive: activate,
+          }),
+        }
+      );
 
       await loadBootstrap();
       switchView("inventario", {
         inventoryPanel: "productos",
       });
       renderSalesComboRulesAdmin();
-      comboElements.feedback.textContent = activate
-        ? "Combo activado correctamente."
-        : "Combo inactivado correctamente.";
+      const updatedCount = Number(updatedCombo?.updatedCount || 1);
+      comboElements.feedback.textContent =
+        updatedCount > 1
+          ? `${activate ? "Combo activado" : "Combo inactivado"} correctamente en sus ${updatedCount} productos objetivo.`
+          : activate
+            ? "Combo activado correctamente."
+            : "Combo inactivado correctamente.";
     } catch (error) {
       comboElements.feedback.textContent = error.message;
     }

@@ -78,6 +78,7 @@ let selectedCollectionMovementIds = [];
 const expandedMovementDetailIds = new Set();
 const expandedPortfolioDetailIds = new Set();
 const expandedCollectionAccountIds = new Set();
+const expandedClientHistoryIds = new Set();
 let isSidebarOpen = false;
 const COMPACT_SIDEBAR_BREAKPOINT = 1180;
 let lastImportReport = null;
@@ -2698,35 +2699,52 @@ function renderMonthlyView() {
   const rows = buildMonthlyRows(year);
   const totals = rows.reduce(
     (acc, row) => {
+      acc.ventasGimnasio += row.ventasGimnasio;
+      acc.pendienteGimnasio += row.pendienteGimnasio;
       acc.ingresosGimnasio += row.ingresosGimnasio;
       acc.gastosGimnasio += row.gastosGimnasio;
+      acc.ventasRestaurante += row.ventasRestaurante;
+      acc.pendienteRestaurante += row.pendienteRestaurante;
       acc.ingresosRestaurante += row.ingresosRestaurante;
       acc.gastosRestaurante += row.gastosRestaurante;
+      acc.ventasTotales += row.ventasTotales;
+      acc.pendienteTotal += row.pendienteTotal;
       acc.utilidadTotal += row.utilidadTotal;
       return acc;
     },
     {
+      ventasGimnasio: 0,
+      pendienteGimnasio: 0,
       ingresosGimnasio: 0,
       gastosGimnasio: 0,
+      ventasRestaurante: 0,
+      pendienteRestaurante: 0,
       ingresosRestaurante: 0,
       gastosRestaurante: 0,
+      ventasTotales: 0,
+      pendienteTotal: 0,
       utilidadTotal: 0,
     }
   );
 
   elements.monthlyAnnualCards.innerHTML = [
     createStatCard(
-      "Ingresos anuales gimnasio",
-      formatCurrency(totals.ingresosGimnasio),
-      `Salidas ${formatCurrency(totals.gastosGimnasio)}`
+      "Ventas anuales gimnasio",
+      formatCurrency(totals.ventasGimnasio),
+      `Cobrado ${formatCurrency(totals.ingresosGimnasio)} &middot; Pendiente ${formatCurrency(totals.pendienteGimnasio)}`
     ),
     createStatCard(
-      "Ingresos anuales restaurante",
-      formatCurrency(totals.ingresosRestaurante),
-      `Salidas ${formatCurrency(totals.gastosRestaurante)}`
+      "Ventas anuales restaurante",
+      formatCurrency(totals.ventasRestaurante),
+      `Cobrado ${formatCurrency(totals.ingresosRestaurante)} &middot; Pendiente ${formatCurrency(totals.pendienteRestaurante)}`
     ),
     createStatCard(
-      "Utilidad anual total",
+      "Ventas anuales totales",
+      formatCurrency(totals.ventasTotales),
+      `Pendiente por cobrar ${formatCurrency(totals.pendienteTotal)}`
+    ),
+    createStatCard(
+      "Flujo neto anual",
       formatCurrency(totals.utilidadTotal),
       `Ano analizado ${year}`
     ),
@@ -2746,13 +2764,13 @@ function renderMonthlyView() {
       (row) => `
         <tr>
           <td>${row.mes}</td>
-          <td>${formatCurrency(row.ingresosGimnasio)}</td>
+          <td>${renderMonthlySalesCell(row.ventasGimnasio, row.ingresosGimnasio, row.pendienteGimnasio)}</td>
           <td>${formatCurrency(row.gastosGimnasio)}</td>
           <td class="${row.utilidadGimnasio >= 0 ? "positive" : "negative"}">${formatCurrency(row.utilidadGimnasio)}</td>
-          <td>${formatCurrency(row.ingresosRestaurante)}</td>
+          <td>${renderMonthlySalesCell(row.ventasRestaurante, row.ingresosRestaurante, row.pendienteRestaurante)}</td>
           <td>${formatCurrency(row.gastosRestaurante)}</td>
           <td class="${row.utilidadRestaurante >= 0 ? "positive" : "negative"}">${formatCurrency(row.utilidadRestaurante)}</td>
-          <td>${formatCurrency(row.ingresosTotales)}</td>
+          <td>${renderMonthlySalesCell(row.ventasTotales, row.ingresosTotales, row.pendienteTotal)}</td>
           <td>${formatCurrency(row.gastosTotales)}</td>
           <td class="${row.utilidadTotal >= 0 ? "positive" : "negative"}">${formatCurrency(row.utilidadTotal)}</td>
         </tr>
@@ -3255,7 +3273,11 @@ function renderClientsAdmin() {
   const activeClients = clients.filter((item) => item.isActive);
   const activeClientProfiles = activeClients.filter((item) => item.isClient !== false);
   const activeSupplierProfiles = activeClients.filter((item) => item.isSupplier);
-  const clientsWithBalance = getPortfolioMovements().filter((item) => item.cliente).length;
+  const clientsWithBalance = new Set(
+    getPortfolioMovements()
+      .filter((item) => item.cliente)
+      .map((item) => getCollectionClientKey(item.cliente))
+  ).size;
 
   elements.clientsMetrics.innerHTML = `
     <div class="mini-stat"><span>Total registros</span><strong>${clients.length}</strong></div>
@@ -3294,10 +3316,24 @@ function renderClientsAdmin() {
       const profileLabel = client.isClient !== false
         ? (client.isSupplier ? "Cliente y proveedor" : "Cliente")
         : "Proveedor";
+      const isHistoryOpen = expandedClientHistoryIds.has(String(client.id));
 
       return `
-        <tr>
-          <td>${escapeHtml(client.fullName)}</td>
+        <tr
+          class="client-summary-row ${isHistoryOpen ? "is-expanded" : ""}"
+          data-client-row-id="${client.id}"
+        >
+          <td>
+            <button
+              class="table-link-button client-history-trigger"
+              type="button"
+              data-client-history-id="${client.id}"
+              title="Ver historial de los ultimos 30 dias"
+              aria-label="Ver historial de los ultimos 30 dias de ${escapeHtml(client.fullName)}"
+            >
+              ${escapeHtml(client.fullName)}
+            </button>
+          </td>
           <td>${client.alias ? escapeHtml(client.alias) : "<span class='muted'>Sin alias</span>"}</td>
           <td><span class="role-pill">${escapeHtml(profileLabel)}</span></td>
           <td>${client.documentNumber ? escapeHtml(client.documentNumber) : "<span class='muted'>Sin documento</span>"}</td>
@@ -3342,10 +3378,128 @@ function renderClientsAdmin() {
             </div>
           </td>
         </tr>
+        <tr class="client-history-row accordion-detail-row ${isHistoryOpen ? "is-open" : ""}">
+          <td colspan="10" class="accordion-detail-cell">
+            ${isHistoryOpen ? renderClientRecentMovementHistory(client) : ""}
+          </td>
+        </tr>
       `;
     })
     .join("");
   applyStackTableLabels(elements.appShell);
+}
+
+function isMovementLinkedToClientRecord(movement, client) {
+  if (!movement || !client) {
+    return false;
+  }
+
+  const movementClientName = normalizeSearchValue(movement.cliente);
+  if (!movementClientName) {
+    return false;
+  }
+
+  const linkedClient = getLinkedClientRecord(movement.cliente);
+  if (linkedClient && String(linkedClient.id) === String(client.id)) {
+    return true;
+  }
+
+  return [client.fullName, client.alias]
+    .map((value) => normalizeSearchValue(value))
+    .filter(Boolean)
+    .includes(movementClientName);
+}
+
+function getClientRecentMovements(client, days = 30) {
+  if (!client) {
+    return [];
+  }
+
+  const safeDays = Math.max(Number(days || 30), 1);
+  const endDate = getCurrentIsoDate();
+  const startDate = toIsoDate(addDays(getCurrentTimeZoneDate(), safeDays * -1));
+
+  return getSortedMovements(
+    (state.movements || []).filter((movement) => {
+      const movementDate = normalizeDateOnly(movement.fecha);
+      return (
+        movementDate >= startDate &&
+        movementDate <= endDate &&
+        isMovementLinkedToClientRecord(movement, client)
+      );
+    })
+  );
+}
+
+function renderClientRecentMovementHistory(client) {
+  const movements = getClientRecentMovements(client);
+  const metrics = getMetrics(movements);
+
+  if (!movements.length) {
+    return `
+      <div class="client-history-panel">
+        <div class="empty-state">
+          No hay movimientos registrados para este cliente en los ultimos 30 dias.
+        </div>
+      </div>
+    `;
+  }
+
+  return `
+    <div class="client-history-panel">
+      <div class="mini-stats compact-mini-stats">
+        <div class="mini-stat"><span>Movimientos</span><strong>${movements.length}</strong></div>
+        <div class="mini-stat"><span>Ingresos cobrados</span><strong>${formatCurrency(metrics.ingresosCobrados)}</strong></div>
+        <div class="mini-stat"><span>Salidas pagadas</span><strong>${formatCurrency(metrics.gastosPagados)}</strong></div>
+        <div class="mini-stat"><span>Saldo pendiente</span><strong>${formatCurrency(metrics.saldoPendiente)}</strong></div>
+      </div>
+      <div class="client-history-list">
+        ${movements
+          .map((movement) => {
+            const soldLabel = getMovementSoldLabel(movement);
+            const title =
+              soldLabel ||
+              movement.descripcion ||
+              movement.categoria ||
+              "Movimiento registrado";
+            const meta = [
+              formatDate(movement.fecha),
+              movement.linea,
+              movement.tipo,
+              movement.categoria,
+              movement.medioPago,
+            ]
+              .filter(Boolean)
+              .map((value) => escapeHtml(String(value)))
+              .join(" &middot; ");
+
+            return `
+              <article class="client-history-item">
+                <div class="client-history-copy">
+                  <strong>${escapeHtml(title)}</strong>
+                  <small>${meta}</small>
+                  <small>${
+                    movement.descripcion && movement.descripcion !== title
+                      ? escapeHtml(movement.descripcion)
+                      : "<span class='muted'>Solo lectura</span>"
+                  }</small>
+                </div>
+                <div class="client-history-metrics">
+                  <span class="status-pill ${statusClass(movement.estadoPago)}">${escapeHtml(
+                    movement.estadoPago
+                  )}</span>
+                  <strong>${formatCurrency(movement.valorTotal)}</strong>
+                  <small>Abono ${formatCurrency(movement.abono)} &middot; Saldo ${formatCurrency(
+                    movement.saldoPendiente
+                  )}</small>
+                </div>
+              </article>
+            `;
+          })
+          .join("")}
+      </div>
+    </div>
+  `;
 }
 
 function renderListsView() {
@@ -6368,9 +6522,14 @@ async function handleClientSubmit(event) {
 async function handleClientsTableClick(event) {
   const editButton = event.target.closest("[data-client-edit-id]");
   const statusButton = event.target.closest("[data-client-status-id]");
+  const historyButton = event.target.closest("[data-client-history-id]");
+  const rowTrigger = event.target.closest("[data-client-row-id]");
   const editClientId = editButton?.dataset.clientEditId;
   const clientId = statusButton?.dataset.clientStatusId;
   const nextActive = statusButton?.dataset.clientNextActive;
+  const historyClientId =
+    historyButton?.dataset.clientHistoryId ||
+    (!event.target.closest(".row-actions") ? rowTrigger?.dataset.clientRowId : "");
 
   if (editClientId) {
     const client = (state.clients || []).find(
@@ -6403,6 +6562,16 @@ async function handleClientsTableClick(event) {
       clientPanel: "base",
     });
     elements.clientName.focus();
+    return;
+  }
+
+  if (!clientId && !nextActive && historyClientId) {
+    if (expandedClientHistoryIds.has(String(historyClientId))) {
+      expandedClientHistoryIds.delete(String(historyClientId));
+    } else {
+      expandedClientHistoryIds.add(String(historyClientId));
+    }
+    renderClientsAdmin();
     return;
   }
 
@@ -12315,22 +12484,54 @@ function buildMonthlyRows(year) {
     );
     const gymMetrics = getMetrics(gym);
     const restaurantMetrics = getMetrics(restaurant);
+    const gymSales = getSalesTotals(gym);
+    const restaurantSales = getSalesTotals(restaurant);
 
     return {
       mes,
+      ventasGimnasio: gymSales.total,
+      pendienteGimnasio: gymSales.pending,
       ingresosGimnasio: gymMetrics.ingresosCobrados,
       gastosGimnasio: gymMetrics.gastosPagados,
       utilidadGimnasio: gymMetrics.flujoNeto,
+      ventasRestaurante: restaurantSales.total,
+      pendienteRestaurante: restaurantSales.pending,
       ingresosRestaurante: restaurantMetrics.ingresosCobrados,
       gastosRestaurante: restaurantMetrics.gastosPagados,
       utilidadRestaurante: restaurantMetrics.flujoNeto,
+      ventasTotales: gymSales.total + restaurantSales.total,
       ingresosTotales:
         gymMetrics.ingresosCobrados + restaurantMetrics.ingresosCobrados,
+      pendienteTotal: gymSales.pending + restaurantSales.pending,
       gastosTotales:
         gymMetrics.gastosPagados + restaurantMetrics.gastosPagados,
       utilidadTotal: gymMetrics.flujoNeto + restaurantMetrics.flujoNeto,
     };
   });
+}
+
+function getSalesTotals(movements = []) {
+  const sales = (Array.isArray(movements) ? movements : []).filter(
+    (item) => item.tipo === "Ingreso"
+  );
+
+  return {
+    total: sum(sales, "valorTotal"),
+    collected: sum(sales, "abono"),
+    pending: sum(sales, "saldoPendiente"),
+  };
+}
+
+function renderMonthlySalesCell(totalSales, collectedAmount, pendingAmount) {
+  return `
+    <div class="monthly-sales-cell">
+      <strong>${formatCurrency(totalSales)}</strong>
+      <small>Cobrado ${formatCurrency(collectedAmount)}</small>
+      <small class="${Number(pendingAmount || 0) > 0 ? "warning-text" : "muted"}">
+        Pendiente ${formatCurrency(pendingAmount)}
+      </small>
+    </div>
+  `;
 }
 
 function handleBoxSummaryClick(event) {
@@ -13764,6 +13965,331 @@ function getFilteredPortfolioMovements() {
       ].join(" ")
     ).includes(query);
   });
+}
+
+function getPortfolioGroupStatus(movements = []) {
+  const hasPartial = movements.some((item) => item.estadoPago === "Parcial");
+  const hasPending = movements.some((item) => item.estadoPago === "Pendiente");
+
+  if (hasPartial && hasPending) {
+    return "Mixta";
+  }
+
+  if (hasPartial) {
+    return "Parcial";
+  }
+
+  return "Pendiente";
+}
+
+function getPortfolioClientGroups(movements = []) {
+  const groups = new Map();
+
+  getSortedMovements(Array.isArray(movements) ? movements : []).forEach((item) => {
+    const key = getCollectionClientKey(item.cliente);
+
+    if (!groups.has(key)) {
+      groups.set(key, {
+        key,
+        clientName: item.cliente || "",
+        movements: [],
+        valorTotal: 0,
+        abono: 0,
+        saldoPendiente: 0,
+        lines: new Set(),
+        categories: new Set(),
+      });
+    }
+
+    const group = groups.get(key);
+    if (!group.clientName && item.cliente) {
+      group.clientName = item.cliente;
+    }
+    group.movements.push(item);
+    group.valorTotal += Number(item.valorTotal || 0);
+    group.abono += Number(item.abono || 0);
+    group.saldoPendiente += Number(item.saldoPendiente || 0);
+    if (item.linea) {
+      group.lines.add(item.linea);
+    }
+    if (item.categoria) {
+      group.categories.add(item.categoria);
+    }
+  });
+
+  return [...groups.values()]
+    .map((group) => ({
+      ...group,
+      movements: getSortedMovements(group.movements),
+      lines: [...group.lines],
+      categories: [...group.categories],
+      estadoPago: getPortfolioGroupStatus(group.movements),
+    }))
+    .sort((a, b) => {
+      const balanceDiff = Number(b.saldoPendiente || 0) - Number(a.saldoPendiente || 0);
+      if (balanceDiff !== 0) {
+        return balanceDiff;
+      }
+
+      return String(a.clientName || "").localeCompare(
+        String(b.clientName || ""),
+        APP_LOCALE
+      );
+    });
+}
+
+function renderPortfolioClientGroupSummary(group, isExpanded) {
+  const firstMovement = group.movements[0];
+  const displayName = group.clientName
+    ? formatClientDisplayName(group.clientName)
+    : "Sin cliente";
+  const meta = [
+    `${group.movements.length} cuenta(s) pendiente(s)`,
+    firstMovement ? `Ultima ${formatDate(firstMovement.fecha)}` : "",
+    group.lines.length ? group.lines.join(", ") : "",
+    `Total ${formatCurrency(group.valorTotal)}`,
+    `Abono ${formatCurrency(group.abono)}`,
+  ]
+    .filter(Boolean)
+    .map((value) => escapeHtml(String(value)))
+    .join(" &middot; ");
+
+  return `
+    <div class="compact-summary">
+      <div class="compact-summary-head">
+        <div class="compact-summary-copy">
+          <button
+            class="table-link-button compact-client-button"
+            type="button"
+            data-collect-client-key="${escapeHtml(group.key)}"
+            data-collect-id="${firstMovement?.id || ""}"
+          >
+            ${escapeHtml(displayName)}
+          </button>
+        </div>
+        ${createDetailToggleButton(
+          "data-portfolio-detail-id",
+          group.key,
+          isExpanded,
+          isExpanded ? "Ocultar cuentas del cliente" : "Ver cuentas del cliente"
+        )}
+      </div>
+      <small class="compact-summary-meta">${meta}</small>
+    </div>
+  `;
+}
+
+function renderPortfolioClientGroupStatus(group) {
+  const className =
+    group.estadoPago === "Mixta" ? "status-parcial" : statusClass(group.estadoPago);
+
+  return `
+    <div class="portfolio-group-status">
+      <span class="status-pill ${className}">${escapeHtml(group.estadoPago)}</span>
+      <small>${group.movements.length} cuenta(s)</small>
+    </div>
+  `;
+}
+
+function renderPortfolioClientGroupDetail(group) {
+  return `
+    <div class="detail-panel portfolio-client-detail">
+      <div class="mini-stats compact-mini-stats">
+        <div class="mini-stat"><span>Cuentas</span><strong>${group.movements.length}</strong></div>
+        <div class="mini-stat"><span>Total facturado</span><strong>${formatCurrency(group.valorTotal)}</strong></div>
+        <div class="mini-stat"><span>Abonado</span><strong>${formatCurrency(group.abono)}</strong></div>
+        <div class="mini-stat"><span>Saldo pendiente</span><strong>${formatCurrency(group.saldoPendiente)}</strong></div>
+      </div>
+      <div class="portfolio-client-movement-list">
+        ${group.movements
+          .map((item) => {
+            const title =
+              getMovementSoldLabel(item) ||
+              item.descripcion ||
+              item.categoria ||
+              "Cuenta pendiente";
+            const meta = [
+              formatDate(item.fecha),
+              item.linea,
+              item.tipo,
+              item.categoria,
+              item.medioPago,
+            ]
+              .filter(Boolean)
+              .map((value) => escapeHtml(String(value)))
+              .join(" &middot; ");
+
+            return `
+              <article class="portfolio-client-movement-item">
+                <div class="portfolio-client-movement-copy">
+                  <strong>${escapeHtml(title)}</strong>
+                  <small>${meta}</small>
+                  <small>${
+                    item.observaciones
+                      ? escapeHtml(item.observaciones)
+                      : "<span class='muted'>Sin observaciones</span>"
+                  }</small>
+                </div>
+                <div class="portfolio-client-movement-metrics">
+                  <span>Total ${formatCurrency(item.valorTotal)}</span>
+                  <span>Abono ${formatCurrency(item.abono)}</span>
+                  <strong>Saldo ${formatCurrency(item.saldoPendiente)}</strong>
+                </div>
+              </article>
+            `;
+          })
+          .join("")}
+      </div>
+    </div>
+  `;
+}
+
+function renderPortfolioView() {
+  renderClientPanels();
+  renderClientsAdmin();
+  renderCollectionManager();
+
+  const portfolio = getSortedMovements(getFilteredPortfolioMovements());
+  const portfolioGroups = getPortfolioClientGroups(portfolio);
+  const portfolioQuery = getPortfolioSearchQuery();
+  const gym = portfolio.filter((item) => item.linea === "Gimnasio");
+  const restaurant = portfolio.filter((item) => item.linea === "Restaurante");
+  const gymGroups = getPortfolioClientGroups(gym);
+  const restaurantGroups = getPortfolioClientGroups(restaurant);
+
+  elements.portfolioSummary.innerHTML = [
+    createStatCard(
+      "Cartera gimnasio",
+      formatCurrency(sum(gym, "saldoPendiente")),
+      `${gymGroups.length} clientes &middot; ${gym.length} cuentas`
+    ),
+    createStatCard(
+      "Cartera restaurante",
+      formatCurrency(sum(restaurant, "saldoPendiente")),
+      `${restaurantGroups.length} clientes &middot; ${restaurant.length} cuentas`
+    ),
+    createStatCard(
+      "Cartera total",
+      formatCurrency(sum(portfolio, "saldoPendiente")),
+      portfolioQuery
+        ? `${portfolioGroups.length} clientes encontrados &middot; ${portfolio.length} cuentas`
+        : `Clientes ${portfolioGroups.length} &middot; Cuentas ${portfolio.length}`
+    ),
+  ].join("");
+
+  if (!portfolioGroups.length) {
+    elements.portfolioTable.innerHTML = `
+      <tr>
+        <td colspan="4" class="empty-state">
+          ${
+            portfolioQuery
+              ? "No hay cuentas pendientes que coincidan con la busqueda."
+              : "No hay clientes con saldo pendiente."
+          }
+        </td>
+      </tr>
+    `;
+    applyStackTableLabels(elements.appShell);
+    return;
+  }
+
+  elements.portfolioTable.innerHTML = portfolioGroups
+    .map((group) => {
+      const firstMovement = group.movements[0];
+      const isSelectedClient = group.key === selectedCollectionClientKey;
+      const isExpanded = expandedPortfolioDetailIds.has(String(group.key));
+      const actionLabel = group.movements.some((item) => item.tipo === "Ingreso")
+        ? "Cobrar"
+        : "Gestionar";
+
+      return `
+        <tr class="accordion-summary-row ${isExpanded ? "is-expanded" : ""} ${
+          isSelectedClient ? "portfolio-row-client-selected" : ""
+        }">
+          ${tableCell(
+            "Cliente",
+            renderPortfolioClientGroupSummary(group, isExpanded),
+            "summary-cell"
+          )}
+          ${tableCell(
+            "Cuentas",
+            renderPortfolioClientGroupStatus(group),
+            "status-cell"
+          )}
+          ${tableCell("Saldo", formatCurrency(group.saldoPendiente), "numeric-cell")}
+          ${tableCell(
+            "Acciones",
+            `
+            <div class="row-actions row-actions--compact">
+              <button
+                class="table-button"
+                type="button"
+                data-collect-client-key="${escapeHtml(group.key)}"
+                data-collect-id="${firstMovement?.id || ""}"
+              >
+                ${actionLabel}
+              </button>
+            </div>
+          `,
+            "actions-cell"
+          )}
+        </tr>
+        <tr class="accordion-detail-row ${isExpanded ? "is-open" : ""}">
+          <td colspan="4" class="accordion-detail-cell">
+            ${renderPortfolioClientGroupDetail(group)}
+          </td>
+        </tr>
+      `;
+    })
+    .join("");
+  applyStackTableLabels(elements.appShell);
+}
+
+function handlePortfolioTableClick(event) {
+  const detailTrigger = event.target.closest("[data-portfolio-detail-id]");
+  const detailId = detailTrigger?.dataset.portfolioDetailId;
+  if (detailId) {
+    if (expandedPortfolioDetailIds.has(String(detailId))) {
+      expandedPortfolioDetailIds.delete(String(detailId));
+    } else {
+      expandedPortfolioDetailIds.add(String(detailId));
+    }
+    renderPortfolioView();
+    return;
+  }
+
+  const collectTrigger = event.target.closest(
+    "[data-collect-client-key], [data-collect-id]"
+  );
+  const clientKey = collectTrigger?.dataset.collectClientKey;
+  const movementId = collectTrigger?.dataset.collectId;
+
+  if (!collectTrigger) {
+    return;
+  }
+
+  const group = clientKey
+    ? getPortfolioClientGroups(getPortfolioMovements()).find(
+        (item) => item.key === clientKey
+      )
+    : null;
+  const movement =
+    group?.movements.find((item) => String(item.id) === String(movementId)) ||
+    group?.movements[0] ||
+    getPortfolioMovements().find((item) => String(item.id) === String(movementId));
+
+  if (!movement) {
+    return;
+  }
+
+  selectCollectionClient(movement.cliente, {
+    movementId: movement.id,
+  });
+  renderPortfolioView();
+  switchView("cartera", {
+    clientPanel: "cobros",
+  });
+  elements.collectionAmount?.focus();
 }
 
 function normalizeSearchValue(value) {

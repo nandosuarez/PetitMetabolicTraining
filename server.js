@@ -3586,12 +3586,24 @@ app.patch(
 
     const result = await query(
       `
-        update sales_combo_rules
+        with selected_rule as (
+          select
+            business_line,
+            trigger_business_product_id,
+            lower(trim(name)) as normalized_name
+          from sales_combo_rules
+          where id = $1
+          limit 1
+        )
+        update sales_combo_rules scr
         set
           is_active = $2,
           updated_at = now()
-        where id = $1
-        returning *
+        from selected_rule sr
+        where scr.business_line = sr.business_line
+          and scr.trigger_business_product_id = sr.trigger_business_product_id
+          and lower(trim(scr.name)) = sr.normalized_name
+        returning scr.id
       `,
       [ruleId, isActive]
     );
@@ -3601,7 +3613,11 @@ app.patch(
     }
 
     const hydratedRule = await readSalesComboRuleById(ruleId);
-    res.json(hydratedRule || mapSalesComboRuleRow(result.rows[0]));
+    res.json({
+      ...(hydratedRule || {}),
+      updatedCount: result.rows.length,
+      updatedRuleIds: result.rows.map((row) => Number(row.id || 0)),
+    });
   })
 );
 
