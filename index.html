@@ -153,6 +153,7 @@
           <button class="nav-link active" data-view="dashboard">Panel gerencial</button>
           <button class="nav-link" data-view="movimientos">Movimientos</button>
           <button class="nav-link" data-view="cajas">Cajas</button>
+          <button class="nav-link" data-view="actividades">Actividades</button>
           <button class="nav-link" data-view="diario">Informe diario</button>
           <button class="nav-link" data-view="semanal">Informe semanal</button>
           <button class="nav-link" data-view="mensual">Resumen mensual</button>
@@ -1886,6 +1887,99 @@
               </div>
             </div>
             <div id="merchandise-orders-list" class="order-board"></div>
+          </section>
+        </section>
+
+        <section id="actividades-view" class="view">
+          <div class="content-grid two-up align-start">
+            <section id="activity-assignment-panel" class="panel">
+              <div class="panel-head">
+                <div>
+                  <p class="section-kicker">Gestión operativa</p>
+                  <h3>Asignar actividad</h3>
+                </div>
+              </div>
+
+              <form id="activity-form" class="form-grid">
+                <label class="span-2">
+                  Actividad
+                  <input
+                    id="activity-title"
+                    type="text"
+                    placeholder="Ejemplo: gestionar cobros pendientes"
+                    required
+                  />
+                </label>
+
+                <label>
+                  Responsable
+                  <select id="activity-assignee" required></select>
+                </label>
+
+                <label>
+                  Prioridad
+                  <select id="activity-priority" required>
+                    <option value="Media">Media</option>
+                    <option value="Alta">Alta</option>
+                    <option value="Baja">Baja</option>
+                  </select>
+                </label>
+
+                <label>
+                  Fecha límite
+                  <input id="activity-due-date" type="date" />
+                </label>
+
+                <label class="span-2">
+                  Detalle
+                  <textarea
+                    id="activity-description"
+                    rows="3"
+                    placeholder="Indicaciones, contexto o resultado esperado"
+                  ></textarea>
+                </label>
+
+                <div id="activity-feedback" class="form-note span-2">
+                  Asigna tareas como cobros, publicaciones, cierre de caja o seguimiento operativo.
+                </div>
+
+                <div class="form-actions span-2">
+                  <button class="primary-button" type="submit">
+                    Asignar actividad
+                  </button>
+                </div>
+              </form>
+            </section>
+
+            <section class="panel">
+              <div class="panel-head">
+                <div>
+                  <p class="section-kicker">Resumen</p>
+                  <h3>Estado de actividades</h3>
+                </div>
+              </div>
+              <div id="activity-metrics" class="mini-stats"></div>
+            </section>
+          </div>
+
+          <section class="panel">
+            <div class="panel-head">
+              <div>
+                <p class="section-kicker">Seguimiento</p>
+                <h3 id="activity-list-title">Actividades asignadas</h3>
+              </div>
+              <label class="inline-label portfolio-search">
+                Buscar
+                <input
+                  id="activity-query"
+                  type="search"
+                  placeholder="Actividad, responsable, estado..."
+                  autocomplete="off"
+                />
+              </label>
+            </div>
+
+            <div id="activity-list" class="activity-list"></div>
           </section>
         </section>
 

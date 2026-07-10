@@ -319,6 +319,128 @@ app.post(
   })
 );
 
+app.post(
+  "/api/user-activities",
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const payload = normalizeUserActivityPayload(req.body);
+    validateUserActivityPayload(payload);
+
+    const assignedUser = await getUserById(payload.assignedToUserId);
+    if (!assignedUser || !assignedUser.isActive) {
+      return res.status(400).json({
+        error: "Selecciona un usuario activo para asignar la actividad.",
+      });
+    }
+
+    const result = await query(
+      `
+        insert into user_activities (
+          title,
+          description,
+          assigned_to_user_id,
+          assigned_by_user_id,
+          due_date,
+          priority,
+          status,
+          result_notes
+        )
+        values ($1, $2, $3, $4, $5, $6, 'Pendiente', '')
+        returning id
+      `,
+      [
+        payload.title,
+        payload.description,
+        payload.assignedToUserId,
+        Number(req.authUser.id),
+        payload.dueDate || null,
+        payload.priority,
+      ]
+    );
+
+    const activity = await readUserActivityById(result.rows[0].id);
+    res.status(201).json(mapUserActivityRow(activity));
+  })
+);
+
+app.patch(
+  "/api/user-activities/:id",
+  asyncHandler(async (req, res) => {
+    const activityId = Number(req.params.id);
+    if (!Number.isInteger(activityId) || activityId <= 0) {
+      return res.status(400).json({ error: "Actividad invalida." });
+    }
+
+    const currentActivity = await readUserActivityById(activityId);
+    if (!currentActivity) {
+      return res.status(404).json({ error: "Actividad no encontrada." });
+    }
+
+    const isAdmin = req.authUser?.role === "administrador";
+    const isAssignee =
+      Number(currentActivity.assigned_to_user_id) === Number(req.authUser?.id);
+    if (!isAdmin && !isAssignee) {
+      return res.status(403).json({
+        error: "Solo puedes gestionar actividades asignadas a tu usuario.",
+      });
+    }
+
+    const payload = normalizeUserActivityUpdatePayload(req.body, {
+      allowAssignmentFields: isAdmin,
+    });
+    validateUserActivityUpdatePayload(payload);
+
+    if (isAdmin && payload.assignedToUserId) {
+      const assignedUser = await getUserById(payload.assignedToUserId);
+      if (!assignedUser || !assignedUser.isActive) {
+        return res.status(400).json({
+          error: "Selecciona un usuario activo para reasignar la actividad.",
+        });
+      }
+    }
+
+    const result = await query(
+      `
+        update user_activities
+        set
+          title = coalesce($2, title),
+          description = coalesce($3, description),
+          assigned_to_user_id = coalesce($4, assigned_to_user_id),
+          due_date = $5,
+          priority = coalesce($6, priority),
+          status = coalesce($7, status),
+          result_notes = coalesce($8, result_notes),
+          completed_at = case
+            when coalesce($7, status) = 'Completada'
+              and completed_at is null then now()
+            when coalesce($7, status) <> 'Completada' then null
+            else completed_at
+          end,
+          updated_at = now()
+        where id = $1
+        returning id
+      `,
+      [
+        activityId,
+        payload.title,
+        payload.description,
+        payload.assignedToUserId || null,
+        payload.dueDateWasProvided ? payload.dueDate || null : currentActivity.due_date,
+        payload.priority,
+        payload.status,
+        payload.resultNotes,
+      ]
+    );
+
+    if (!result.rows.length) {
+      return res.status(404).json({ error: "Actividad no encontrada." });
+    }
+
+    const activity = await readUserActivityById(activityId);
+    res.json(mapUserActivityRow(activity));
+  })
+);
+
 app.get("/api/clients", asyncHandler(async (_req, res) => {
   const clients = await listClients();
   res.json({
@@ -1120,6 +1242,7 @@ app.get("/api/bootstrap", asyncHandler(async (req, res) => {
     businessProductsResult,
     businessProductComponentsResult,
     salesComboRulesResult,
+    userActivitiesResult,
   ] =
     await Promise.all([
     query(
@@ -1314,6 +1437,7 @@ app.get("/api/bootstrap", asyncHandler(async (req, res) => {
     hasBusinessProductAccess
       ? listSalesComboRulesRows()
       : Promise.resolve({ rows: [] }),
+    listUserActivities(req.authUser),
   ]);
 
   res.json({
@@ -1338,6 +1462,7 @@ app.get("/api/bootstrap", asyncHandler(async (req, res) => {
     businessProductComponents:
       businessProductComponentsResult.rows.map(mapBusinessProductComponentRow),
     salesComboRules: salesComboRulesResult.rows.map(mapSalesComboRuleRow),
+    userActivities: userActivitiesResult.rows.map(mapUserActivityRow),
     notes: mapNotesRows(notesResult.rows),
   });
 }));
@@ -7242,6 +7367,184 @@ function mapSalesComboRuleRow(row) {
   };
 }
 
+function mapUserActivityRow(row) {
+  return {
+    id: Number(row.id || 0),
+    title: row.title || "",
+    description: row.description || "",
+    assignedToUserId: Number(row.assigned_to_user_id || 0),
+    assignedToName:
+      row.assigned_to_name || row.assigned_to_username || "Usuario",
+    assignedToUsername: row.assigned_to_username || "",
+    assignedToRole: row.assigned_to_role || "",
+    assignedByUserId: Number(row.assigned_by_user_id || 0),
+    assignedByName:
+      row.assigned_by_name || row.assigned_by_username || "Sistema",
+    dueDate: normalizeDateOnly(row.due_date),
+    priority: row.priority || "Media",
+    status: row.status || "Pendiente",
+    resultNotes: row.result_notes || "",
+    completedAt: row.completed_at || null,
+    createdAt: row.created_at || null,
+    updatedAt: row.updated_at || null,
+  };
+}
+
+function listUserActivities(user) {
+  const isAdmin = user?.role === "administrador";
+  return query(
+    `
+      select
+        ua.*,
+        coalesce(nullif(assigned_to.full_name, ''), assigned_to.username) as assigned_to_name,
+        assigned_to.username as assigned_to_username,
+        assigned_to.role as assigned_to_role,
+        coalesce(nullif(assigned_by.full_name, ''), assigned_by.username) as assigned_by_name,
+        assigned_by.username as assigned_by_username
+      from user_activities ua
+      join app_users assigned_to
+        on assigned_to.id = ua.assigned_to_user_id
+      join app_users assigned_by
+        on assigned_by.id = ua.assigned_by_user_id
+      ${isAdmin ? "" : "where ua.assigned_to_user_id = $1"}
+      order by
+        case ua.status
+          when 'Pendiente' then 0
+          when 'En gestion' then 1
+          when 'Completada' then 2
+          else 3
+        end,
+        ua.due_date nulls last,
+        ua.created_at desc,
+        ua.id desc
+    `,
+    isAdmin ? [] : [Number(user?.id || 0)]
+  );
+}
+
+async function readUserActivityById(activityId) {
+  const result = await query(
+    `
+      select
+        ua.*,
+        coalesce(nullif(assigned_to.full_name, ''), assigned_to.username) as assigned_to_name,
+        assigned_to.username as assigned_to_username,
+        assigned_to.role as assigned_to_role,
+        coalesce(nullif(assigned_by.full_name, ''), assigned_by.username) as assigned_by_name,
+        assigned_by.username as assigned_by_username
+      from user_activities ua
+      join app_users assigned_to
+        on assigned_to.id = ua.assigned_to_user_id
+      join app_users assigned_by
+        on assigned_by.id = ua.assigned_by_user_id
+      where ua.id = $1
+      limit 1
+    `,
+    [Number(activityId)]
+  );
+
+  return result.rows[0] || null;
+}
+
+function normalizeUserActivityPayload(body) {
+  return {
+    title: String(body.title || "").trim(),
+    description: String(body.description || "").trim(),
+    assignedToUserId: Number(body.assignedToUserId || 0),
+    dueDate: normalizeDateOnly(body.dueDate),
+    priority: String(body.priority || "Media").trim(),
+  };
+}
+
+function normalizeUserActivityUpdatePayload(body, options = {}) {
+  const allowAssignmentFields = Boolean(options.allowAssignmentFields);
+  const payload = {
+    title: null,
+    description: null,
+    assignedToUserId: null,
+    dueDate: "",
+    dueDateWasProvided: Object.prototype.hasOwnProperty.call(body, "dueDate"),
+    priority: null,
+    status: Object.prototype.hasOwnProperty.call(body, "status")
+      ? String(body.status || "").trim()
+      : null,
+    resultNotes: Object.prototype.hasOwnProperty.call(body, "resultNotes")
+      ? String(body.resultNotes || "").trim()
+      : null,
+  };
+
+  if (allowAssignmentFields) {
+    if (Object.prototype.hasOwnProperty.call(body, "title")) {
+      payload.title = String(body.title || "").trim();
+    }
+    if (Object.prototype.hasOwnProperty.call(body, "description")) {
+      payload.description = String(body.description || "").trim();
+    }
+    if (Object.prototype.hasOwnProperty.call(body, "assignedToUserId")) {
+      payload.assignedToUserId = Number(body.assignedToUserId || 0);
+    }
+    if (Object.prototype.hasOwnProperty.call(body, "priority")) {
+      payload.priority = String(body.priority || "").trim();
+    }
+  }
+
+  if (payload.dueDateWasProvided) {
+    payload.dueDate = normalizeDateOnly(body.dueDate);
+  }
+
+  return payload;
+}
+
+function validateUserActivityPayload(payload) {
+  if (!payload.title) {
+    throw httpError(400, "Escribe el titulo de la actividad.");
+  }
+
+  if (!Number.isInteger(payload.assignedToUserId) || payload.assignedToUserId <= 0) {
+    throw httpError(400, "Selecciona el usuario responsable de la actividad.");
+  }
+
+  if (payload.dueDate && !/^\d{4}-\d{2}-\d{2}$/.test(payload.dueDate)) {
+    throw httpError(400, "La fecha limite de la actividad no es valida.");
+  }
+
+  if (!["Baja", "Media", "Alta"].includes(payload.priority)) {
+    throw httpError(400, "Selecciona una prioridad valida para la actividad.");
+  }
+}
+
+function validateUserActivityUpdatePayload(payload) {
+  if (payload.title !== null && !payload.title) {
+    throw httpError(400, "El titulo de la actividad no puede quedar vacio.");
+  }
+
+  if (
+    payload.assignedToUserId !== null &&
+    (!Number.isInteger(payload.assignedToUserId) || payload.assignedToUserId <= 0)
+  ) {
+    throw httpError(400, "Selecciona un usuario activo para reasignar la actividad.");
+  }
+
+  if (
+    payload.dueDateWasProvided &&
+    payload.dueDate &&
+    !/^\d{4}-\d{2}-\d{2}$/.test(payload.dueDate)
+  ) {
+    throw httpError(400, "La fecha limite de la actividad no es valida.");
+  }
+
+  if (payload.priority !== null && !["Baja", "Media", "Alta"].includes(payload.priority)) {
+    throw httpError(400, "Selecciona una prioridad valida para la actividad.");
+  }
+
+  if (
+    payload.status !== null &&
+    !["Pendiente", "En gestion", "Completada", "Cancelada"].includes(payload.status)
+  ) {
+    throw httpError(400, "Selecciona un estado valido para la actividad.");
+  }
+}
+
 function mapInventoryStockMovementRow(row) {
   return {
     id: Number(row.id || 0),
@@ -8207,6 +8510,7 @@ async function start() {
   await checkConnection();
   await ensureClientRoleColumns();
   await ensureInventoryDecimalColumns();
+  await ensureUserActivitiesSchema();
   await ensureMerchandiseOrdersSchema();
   await ensureProgrammingExerciseFamiliesConstraint();
   await ensureBootstrapAdmin();
@@ -8422,6 +8726,36 @@ async function ensureInventoryDecimalColumns() {
       end if;
     end
     $$;
+  `);
+}
+
+async function ensureUserActivitiesSchema() {
+  await query(`
+    create table if not exists user_activities (
+      id bigserial primary key,
+      title text not null,
+      description text not null default '',
+      assigned_to_user_id bigint not null references app_users(id) on delete restrict,
+      assigned_by_user_id bigint not null references app_users(id) on delete restrict,
+      due_date date,
+      priority text not null default 'Media' check (priority in ('Baja', 'Media', 'Alta')),
+      status text not null default 'Pendiente' check (
+        status in ('Pendiente', 'En gestion', 'Completada', 'Cancelada')
+      ),
+      result_notes text not null default '',
+      completed_at timestamptz,
+      created_at timestamptz not null default now(),
+      updated_at timestamptz not null default now()
+    );
+
+    alter table user_activities
+      add column if not exists description text not null default '';
+
+    alter table user_activities
+      add column if not exists result_notes text not null default '';
+
+    alter table user_activities
+      add column if not exists completed_at timestamptz;
   `);
 }
 

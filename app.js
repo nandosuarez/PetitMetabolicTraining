@@ -27,6 +27,7 @@ const emptyState = {
   businessProducts: [],
   businessProductComponents: [],
   merchandiseOrders: [],
+  userActivities: [],
   accountingDocuments: [],
   programmingMethods: [],
   programmingExercises: [],
@@ -120,6 +121,7 @@ const elements = {
     contabilidad: document.getElementById("contabilidad-view"),
     cartera: document.getElementById("cartera-view"),
     pedidos: document.getElementById("pedidos-view"),
+    actividades: document.getElementById("actividades-view"),
     programacion: document.getElementById("programacion-view"),
     inventario: document.getElementById("inventario-view"),
     listas: document.getElementById("listas-view"),
@@ -138,6 +140,18 @@ const elements = {
   dashboardAlerts: document.getElementById("dashboard-alerts"),
   dashboardRecent: document.getElementById("dashboard-recent"),
   dashboardMonthBars: document.getElementById("dashboard-month-bars"),
+  activityAssignmentPanel: document.getElementById("activity-assignment-panel"),
+  activityForm: document.getElementById("activity-form"),
+  activityTitle: document.getElementById("activity-title"),
+  activityAssignee: document.getElementById("activity-assignee"),
+  activityPriority: document.getElementById("activity-priority"),
+  activityDueDate: document.getElementById("activity-due-date"),
+  activityDescription: document.getElementById("activity-description"),
+  activityFeedback: document.getElementById("activity-feedback"),
+  activityMetrics: document.getElementById("activity-metrics"),
+  activityListTitle: document.getElementById("activity-list-title"),
+  activityQuery: document.getElementById("activity-query"),
+  activityList: document.getElementById("activity-list"),
   dailyBoxReport: document.getElementById("daily-box-report"),
   weeklyBoxReport: document.getElementById("weekly-box-report"),
   monthlyBoxReport: document.getElementById("monthly-box-report"),
@@ -880,6 +894,9 @@ function bindEvents() {
   );
   addListener(elements.collectionForm, "submit", handleCollectionSubmit);
   addListener(elements.cancelCollection, "click", resetCollectionSelection);
+  addListener(elements.activityForm, "submit", handleActivitySubmit);
+  addListener(elements.activityQuery, "input", renderActivitiesView);
+  addListener(elements.activityList, "click", handleActivityListClick);
   addListener(elements.programForm, "submit", handleProgramSubmit);
   addListener(elements.cancelProgramEdit, "click", resetProgramForm);
   addListener(elements.addProgramItem, "click", handleProgramItemAdd);
@@ -1395,6 +1412,7 @@ async function loadBootstrap() {
       businessProductComponents: normalizeBusinessProductComponents(
         data.businessProductComponents
       ),
+      userActivities: normalizeUserActivities(data.userActivities),
       clients: normalizeClients(data.clients),
       athletes: normalizeProgrammingAthletes(data.athletes),
       users: Array.isArray(usersPayload?.users) ? usersPayload.users : [],
@@ -1563,6 +1581,7 @@ function getAllowedViews() {
       "dashboard",
       "movimientos",
       "cajas",
+      "actividades",
       "diario",
       "semanal",
       "mensual",
@@ -1578,11 +1597,11 @@ function getAllowedViews() {
   }
 
   if (isAssistantUser()) {
-    return ["movimientos", "cajas", "cartera", "pedidos"];
+    return ["movimientos", "cajas", "actividades", "diario", "cartera", "pedidos"];
   }
 
   if (isAccountantUser()) {
-    return ["dashboard", "diario", "semanal", "mensual", "contabilidad"];
+    return ["dashboard", "actividades", "diario", "semanal", "mensual", "contabilidad"];
   }
 
   return [];
@@ -1884,6 +1903,7 @@ function switchView(view, options = {}) {
     contabilidad: "Contabilidad",
     cartera: "Clientes",
     pedidos: "Pedidos",
+    actividades: "Actividades",
     programacion: "Programación",
     listas: "Listas maestras",
     usuarios: "Usuarios",
@@ -2086,6 +2106,7 @@ function renderAll() {
   renderMonthlyView();
   renderAccountingView();
   renderPortfolioView();
+  renderActivitiesView();
   renderProgrammingView();
   renderInventoryView();
   renderListsView();
@@ -3678,6 +3699,292 @@ function renderUsersView() {
     })
     .join("");
   applyStackTableLabels(elements.appShell);
+}
+
+function renderActivitiesView() {
+  if (!elements.activityMetrics || !elements.activityList) {
+    return;
+  }
+
+  const activities = getFilteredUserActivities();
+  const allActivities = Array.isArray(state.userActivities)
+    ? state.userActivities
+    : [];
+  const openActivities = allActivities.filter((item) =>
+    ["Pendiente", "En gestion"].includes(item.status)
+  );
+  const completedActivities = allActivities.filter(
+    (item) => item.status === "Completada"
+  );
+  const overdueActivities = allActivities.filter(
+    (item) =>
+      item.dueDate &&
+      item.dueDate < getCurrentIsoDate() &&
+      !["Completada", "Cancelada"].includes(item.status)
+  );
+
+  elements.activityAssignmentPanel?.classList.toggle("is-hidden", !isAdminUser());
+  if (elements.activityListTitle) {
+    elements.activityListTitle.textContent = isAdminUser()
+      ? "Actividades del equipo"
+      : "Mis actividades asignadas";
+  }
+
+  fillActivityAssigneeOptions();
+
+  elements.activityMetrics.innerHTML = `
+    <div class="mini-stat"><span>Total</span><strong>${allActivities.length}</strong></div>
+    <div class="mini-stat"><span>Abiertas</span><strong>${openActivities.length}</strong></div>
+    <div class="mini-stat"><span>Completadas</span><strong>${completedActivities.length}</strong></div>
+    <div class="mini-stat"><span>Vencidas</span><strong>${overdueActivities.length}</strong></div>
+    <div class="mini-stat"><span>Visibles</span><strong>${activities.length}</strong></div>
+  `;
+
+  if (!allActivities.length) {
+    elements.activityList.innerHTML = `
+      <div class="empty-state">
+        ${isAdminUser()
+          ? "Aun no hay actividades asignadas. Crea la primera desde el formulario."
+          : "Aun no tienes actividades asignadas."}
+      </div>
+    `;
+    return;
+  }
+
+  if (!activities.length) {
+    elements.activityList.innerHTML = `
+      <div class="empty-state">
+        No encontramos actividades que coincidan con esa busqueda.
+      </div>
+    `;
+    return;
+  }
+
+  elements.activityList.innerHTML = activities
+    .map((activity) => renderActivityCard(activity))
+    .join("");
+}
+
+function fillActivityAssigneeOptions() {
+  if (!elements.activityAssignee || !isAdminUser()) {
+    return;
+  }
+
+  const activeUsers = (state.users || []).filter((user) => user.isActive);
+  elements.activityAssignee.innerHTML = activeUsers.length
+    ? activeUsers
+        .map(
+          (user) => `
+            <option value="${user.id}">
+              ${escapeHtml(user.fullName || user.username)} - ${escapeHtml(
+                user.roleLabel || roleLabel(user.role)
+              )}
+            </option>
+          `
+        )
+        .join("")
+    : '<option value="">No hay usuarios activos</option>';
+}
+
+function getFilteredUserActivities() {
+  const query = normalizeSearchValue(elements.activityQuery?.value || "");
+  const activities = [...(state.userActivities || [])].sort(compareActivities);
+
+  if (!query) {
+    return activities;
+  }
+
+  return activities.filter((activity) =>
+    normalizeSearchValue(
+      [
+        activity.title,
+        activity.description,
+        activity.assignedToName,
+        activity.assignedToUsername,
+        activity.assignedByName,
+        activity.priority,
+        activity.status,
+        activity.resultNotes,
+        activity.dueDate,
+      ].join(" ")
+    ).includes(query)
+  );
+}
+
+function compareActivities(left, right) {
+  const statusRank = {
+    Pendiente: 0,
+    "En gestion": 1,
+    Completada: 2,
+    Cancelada: 3,
+  };
+  const leftRank = statusRank[left.status] ?? 9;
+  const rightRank = statusRank[right.status] ?? 9;
+
+  if (leftRank !== rightRank) {
+    return leftRank - rightRank;
+  }
+
+  const leftDue = left.dueDate || "9999-12-31";
+  const rightDue = right.dueDate || "9999-12-31";
+  if (leftDue !== rightDue) {
+    return String(leftDue).localeCompare(String(rightDue));
+  }
+
+  return String(right.createdAt || "").localeCompare(String(left.createdAt || ""));
+}
+
+function renderActivityCard(activity) {
+  const isOverdue =
+    activity.dueDate &&
+    activity.dueDate < getCurrentIsoDate() &&
+    !["Completada", "Cancelada"].includes(activity.status);
+  const statusLabel = activity.status === "En gestion" ? "En gestión" : activity.status;
+  const statusClass = {
+    Pendiente: "status-pendiente",
+    "En gestion": "status-parcial",
+    Completada: "status-pagado",
+    Cancelada: "user-status-inactive",
+  }[activity.status] || "status-pendiente";
+
+  return `
+    <article class="activity-card ${isOverdue ? "activity-card-overdue" : ""}">
+      <div class="activity-card-head">
+        <div class="activity-card-copy">
+          <strong>${escapeHtml(activity.title)}</strong>
+          <small>
+            ${escapeHtml(activity.assignedToName || "Sin responsable")}
+            ${isAdminUser() ? ` &middot; Asignada por ${escapeHtml(activity.assignedByName || "Sistema")}` : ""}
+          </small>
+        </div>
+        <span class="status-pill ${statusClass}">${escapeHtml(statusLabel)}</span>
+      </div>
+
+      <div class="activity-meta-row">
+        <span>Prioridad ${escapeHtml(activity.priority || "Media")}</span>
+        <span>${activity.dueDate ? `Fecha limite ${formatDate(activity.dueDate)}` : "Sin fecha limite"}</span>
+        ${isOverdue ? "<strong class='negative'>Vencida</strong>" : ""}
+      </div>
+
+      ${
+        activity.description
+          ? `<p class="activity-description">${escapeHtml(activity.description)}</p>`
+          : ""
+      }
+
+      <div class="activity-update-grid">
+        <label>
+          Estado
+          <select data-activity-status="${activity.id}">
+            ${["Pendiente", "En gestion", "Completada", "Cancelada"]
+              .map(
+                (status) => `
+                  <option value="${status}" ${
+                    activity.status === status ? "selected" : ""
+                  }>${status === "En gestion" ? "En gestión" : status}</option>
+                `
+              )
+              .join("")}
+          </select>
+        </label>
+        <label>
+          Observación de gestión
+          <textarea
+            data-activity-notes="${activity.id}"
+            rows="2"
+            placeholder="Ejemplo: cobro realizado, pendiente respuesta, caja cerrada..."
+          >${escapeHtml(activity.resultNotes || "")}</textarea>
+        </label>
+      </div>
+
+      <div class="activity-card-actions">
+        <button
+          class="table-button"
+          type="button"
+          data-activity-save-id="${activity.id}"
+        >
+          Guardar gestión
+        </button>
+        <small>${activity.completedAt ? `Completada ${formatDateTime(activity.completedAt)}` : `Actualizada ${formatDateTime(activity.updatedAt)}`}</small>
+      </div>
+    </article>
+  `;
+}
+
+async function handleActivitySubmit(event) {
+  event.preventDefault();
+
+  if (!isAdminUser()) {
+    elements.activityFeedback.textContent =
+      "Solo el administrador puede asignar actividades.";
+    return;
+  }
+
+  const payload = {
+    title: elements.activityTitle.value.trim(),
+    assignedToUserId: Number(elements.activityAssignee.value || 0),
+    dueDate: elements.activityDueDate.value,
+    priority: elements.activityPriority.value,
+    description: elements.activityDescription.value.trim(),
+  };
+
+  if (!payload.title) {
+    elements.activityFeedback.textContent = "Escribe la actividad a asignar.";
+    elements.activityTitle.focus();
+    return;
+  }
+
+  if (!(payload.assignedToUserId > 0)) {
+    elements.activityFeedback.textContent =
+      "Selecciona el usuario responsable de la actividad.";
+    elements.activityAssignee.focus();
+    return;
+  }
+
+  try {
+    await apiRequest("/api/user-activities", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+    elements.activityForm.reset();
+    elements.activityPriority.value = "Media";
+    await loadBootstrap();
+    switchView("actividades");
+    elements.activityFeedback.textContent = "Actividad asignada correctamente.";
+  } catch (error) {
+    elements.activityFeedback.textContent = error.message;
+  }
+}
+
+async function handleActivityListClick(event) {
+  const saveButton = event.target.closest("[data-activity-save-id]");
+  const activityId = Number(saveButton?.dataset.activitySaveId || 0);
+
+  if (!(activityId > 0)) {
+    return;
+  }
+
+  const statusField = elements.activityList.querySelector(
+    `[data-activity-status="${activityId}"]`
+  );
+  const notesField = elements.activityList.querySelector(
+    `[data-activity-notes="${activityId}"]`
+  );
+
+  try {
+    await apiRequest(`/api/user-activities/${activityId}`, {
+      method: "PATCH",
+      body: JSON.stringify({
+        status: statusField?.value || "Pendiente",
+        resultNotes: notesField?.value?.trim() || "",
+      }),
+    });
+    await loadBootstrap();
+    switchView("actividades");
+    setStatus("Actividad actualizada correctamente.");
+  } catch (error) {
+    setStatus(error.message);
+  }
 }
 
 function renderImportView() {
@@ -11138,6 +11445,20 @@ function normalizeCollections(items) {
   }));
 }
 
+function normalizeUserActivities(items) {
+  if (!Array.isArray(items)) {
+    return [];
+  }
+
+  return items.map((item) => ({
+    ...item,
+    id: Number(item.id || 0),
+    assignedToUserId: Number(item.assignedToUserId || 0),
+    assignedByUserId: Number(item.assignedByUserId || 0),
+    dueDate: normalizeDateOnly(item.dueDate),
+  }));
+}
+
 function normalizeBoxTransfers(items) {
   if (!Array.isArray(items)) {
     return [];
@@ -11330,6 +11651,7 @@ function getMetrics(movements) {
 
   return {
     registros: movements.length,
+    ventasTotales: sum(ingresos, "valorTotal"),
     ingresosCobrados: sum(ingresos, "abono"),
     gastosPagados: sum(gastos, "abono"),
     flujoNeto: sum(movements, "flujoNeto"),
@@ -12770,6 +13092,7 @@ function createReportCard(title, metrics) {
     <article class="report-card">
       <h4>${title}</h4>
       <div class="metric-list">
+        ${createMetricRow("Ventas totales", formatCurrency(metrics.ventasTotales))}
         ${createMetricRow("Ingresos cobrados", formatCurrency(metrics.ingresosCobrados))}
         ${createMetricRow("Salidas pagadas", formatCurrency(metrics.gastosPagados))}
         ${createMetricRow("Flujo neto", formatCurrency(metrics.flujoNeto), metrics.flujoNeto >= 0 ? "positive" : "negative")}
@@ -14304,6 +14627,104 @@ function handlePortfolioTableClick(event) {
     clientPanel: "cobros",
   });
   elements.collectionAmount?.focus();
+}
+
+function renderDashboard() {
+  const { year: currentYear, month: currentMonth } = getCurrentDateParts();
+  const monthMovements = state.movements.filter(
+    (item) => item.ano === currentYear && item.mesNumero === currentMonth
+  );
+  const totalMetrics = getMetrics(state.movements);
+  const gymMetrics = getMetrics(
+    state.movements.filter((item) => item.linea === "Gimnasio")
+  );
+  const restaurantMetrics = getMetrics(
+    state.movements.filter((item) => item.linea === "Restaurante")
+  );
+  const monthMetrics = getMetrics(monthMovements);
+  const boxSummaries = getPaymentBoxSummaries();
+
+  elements.dashboardSummary.innerHTML = [
+    createStatCard(
+      "Consolidado",
+      formatCurrency(totalMetrics.flujoNeto),
+      `${totalMetrics.registros} registros &middot; Ventas ${formatCurrency(totalMetrics.ventasTotales)} &middot; Cartera ${formatCurrency(totalMetrics.saldoPendiente)}`
+    ),
+    createStatCard(
+      "Gimnasio",
+      formatCurrency(gymMetrics.flujoNeto),
+      `Ventas ${formatCurrency(gymMetrics.ventasTotales)} &middot; Cobrado ${formatCurrency(gymMetrics.ingresosCobrados)} &middot; Salidas ${formatCurrency(gymMetrics.gastosPagados)}`
+    ),
+    createStatCard(
+      "Restaurante",
+      formatCurrency(restaurantMetrics.flujoNeto),
+      `Ventas ${formatCurrency(restaurantMetrics.ventasTotales)} &middot; Cobrado ${formatCurrency(restaurantMetrics.ingresosCobrados)} &middot; Salidas ${formatCurrency(restaurantMetrics.gastosPagados)}`
+    ),
+    createStatCard(
+      `Mes actual &middot; ${monthNames[currentMonth - 1]}`,
+      formatCurrency(monthMetrics.flujoNeto),
+      `Ventas ${formatCurrency(monthMetrics.ventasTotales)} &middot; Cobrado ${formatCurrency(monthMetrics.ingresosCobrados)} &middot; Salidas ${formatCurrency(monthMetrics.gastosPagados)}`
+    ),
+    createStatCard(
+      "Disponible en cajas",
+      formatCurrency(sum(boxSummaries, "balance")),
+      `${boxSummaries.filter((item) => item.isActive).length} cajas activas`
+    ),
+  ].join("");
+
+  const alerts = getSortedMovements(
+    state.movements.filter((item) => item.saldoPendiente > 0)
+  )
+    .sort((a, b) => b.saldoPendiente - a.saldoPendiente)
+    .slice(0, 5);
+
+  elements.dashboardAlerts.innerHTML = alerts.length
+    ? alerts
+        .map(
+          (item) => `
+            <article class="list-item">
+              <strong>${escapeHtml(item.cliente || "Sin cliente")} &middot; ${formatCurrency(item.saldoPendiente)}</strong>
+              <small>${escapeHtml(item.linea)} &middot; ${escapeHtml(item.categoria)} &middot; ${escapeHtml(item.descripcion || "Sin descripcion")}</small>
+            </article>
+          `
+        )
+        .join("")
+    : '<div class="empty-state">Aun no hay cartera pendiente.</div>';
+
+  const recent = getSortedMovements(state.movements).slice(0, 5);
+  elements.dashboardRecent.innerHTML = recent.length
+    ? recent
+        .map(
+          (item) => `
+            <article class="list-item">
+              <strong>${escapeHtml(item.descripcion || "Sin descripcion")}</strong>
+              <small>${formatDate(item.fecha)} &middot; ${escapeHtml(item.linea)} &middot; ${escapeHtml(item.tipo)} &middot; ${formatCurrency(item.abono)}</small>
+            </article>
+          `
+        )
+        .join("")
+    : '<div class="empty-state">Todavia no hay movimientos registrados.</div>';
+
+  const monthlyRows = buildMonthlyRows(currentYear);
+  const maxValue = Math.max(
+    1,
+    ...monthlyRows.map((row) => Math.abs(row.utilidadTotal))
+  );
+
+  elements.dashboardMonthBars.innerHTML = monthlyRows
+    .map((row) => {
+      const width = `${Math.max(6, (Math.abs(row.utilidadTotal) / maxValue) * 100)}%`;
+      return `
+        <div class="month-bar">
+          <strong>${row.mes}</strong>
+          <div class="month-bar-track">
+            <div class="month-bar-fill" style="width:${width}"></div>
+          </div>
+          <span class="${row.utilidadTotal >= 0 ? "positive" : "negative"}">${formatCurrency(row.utilidadTotal)}</span>
+        </div>
+      `;
+    })
+    .join("");
 }
 
 function normalizeSearchValue(value) {

@@ -198,6 +198,23 @@ create table if not exists app_sessions (
   last_seen_at timestamptz not null default now()
 );
 
+create table if not exists user_activities (
+  id bigserial primary key,
+  title text not null,
+  description text not null default '',
+  assigned_to_user_id bigint not null references app_users(id) on delete restrict,
+  assigned_by_user_id bigint not null references app_users(id) on delete restrict,
+  due_date date,
+  priority text not null default 'Media' check (priority in ('Baja', 'Media', 'Alta')),
+  status text not null default 'Pendiente' check (
+    status in ('Pendiente', 'En gestion', 'Completada', 'Cancelada')
+  ),
+  result_notes text not null default '',
+  completed_at timestamptz,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
 create table if not exists movement_edit_audits (
   id bigserial primary key,
   movement_id bigint not null references movements(id) on delete cascade,
