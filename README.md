@@ -40,6 +40,9 @@ TZ=America/Bogota
 BOOTSTRAP_ADMIN_USERNAME=admin
 BOOTSTRAP_ADMIN_PASSWORD=TuClaveSegura#2026
 BOOTSTRAP_ADMIN_FULL_NAME=Administrador Petit
+WODBUSTER_BASE_URL=https://petitmetabololic.wodbuster.com
+WODBUSTER_API_USERNAME=tu_usuario_api
+WODBUSTER_API_PASSWORD=tu_clave_api
 ```
 
 ## Zona horaria
@@ -82,6 +85,10 @@ Luego abre:
 - El resumen mensual, cartera e informes se calculan con los movimientos almacenados en PostgreSQL.
 - Los usuarios creados desde la administracion quedan con contraseña temporal y deben cambiarla al primer ingreso.
 - El administrador puede reasignar una contraseña temporal a cualquier usuario activo si olvida su clave.
+- El administrador puede descargar pagos de WodBuster por fechas a una bandeja de revision desde `Importaciones`.
+- Descargar no crea movimientos: cada pago debe gestionarse individualmente como pagado, parcial, pendiente o descartado.
+- Los pagos de WodBuster se identifican de forma unica para evitar duplicados y conservan el enlace al movimiento confirmado.
+- Las credenciales de WodBuster solo se leen desde variables de entorno; nunca deben guardarse en el repositorio.
 - En produccion, si la base esta vacia, el servidor exige `BOOTSTRAP_ADMIN_USERNAME` y `BOOTSTRAP_ADMIN_PASSWORD` para crear el primer administrador.
 
 ## Despliegue en Render
@@ -100,6 +107,8 @@ Luego abre:
   - region `virginia`
   - acceso externo bloqueado (`ipAllowList: []`)
 - En el primer despliegue Render te pedira la variable secreta `BOOTSTRAP_ADMIN_PASSWORD`.
+- Para activar la sincronizacion, configura `WODBUSTER_BASE_URL`, `WODBUSTER_API_USERNAME` y `WODBUSTER_API_PASSWORD` en el entorno del servicio.
+- La prueba automatizada del flujo de revision se ejecuta con `npm run test:wodbuster-review` mientras el servidor local esta activo.
 - El usuario inicial queda por defecto como `admin` y debe cambiar su contraseña temporal al primer ingreso.
 
 ## Siguiente iteracion recomendada

@@ -164,7 +164,7 @@
           <button class="nav-link" data-view="inventario">Inventario</button>
           <button class="nav-link" data-view="listas">Listas maestras</button>
           <button class="nav-link admin-only is-hidden" data-view="usuarios">Usuarios</button>
-          <button class="nav-link admin-only is-hidden" data-view="importar">Importar Excel</button>
+          <button class="nav-link admin-only is-hidden" data-view="importar">Importaciones</button>
         </nav>
 
         <section class="sidebar-card">
@@ -3847,6 +3847,87 @@
 
         <section id="importar-view" class="view">
           <div class="content-grid two-up align-start">
+            <section class="panel">
+              <div class="panel-head">
+                <div>
+                  <p class="section-kicker">Integración WodBuster</p>
+                  <h3>Descargar pagos para revisar</h3>
+                </div>
+              </div>
+
+              <form id="wodbuster-fetch-form" class="form-grid">
+                <label>
+                  Desde
+                  <input id="wodbuster-date-from" type="date" required />
+                </label>
+
+                <label>
+                  Hasta
+                  <input id="wodbuster-date-to" type="date" required />
+                </label>
+
+                <div id="wodbuster-feedback" class="form-note span-2">
+                  Verificando la configuración de WodBuster.
+                </div>
+
+                <div class="form-actions span-2">
+                  <button class="primary-button" type="submit">
+                    Descargar para revisar
+                  </button>
+                </div>
+              </form>
+            </section>
+
+            <section class="panel">
+              <div class="panel-head">
+                <div>
+                  <p class="section-kicker">Control previo</p>
+                  <h3>Ningún pago entra automáticamente</h3>
+                </div>
+              </div>
+
+              <div id="wodbuster-summary" class="stack-list">
+                <div class="empty-state">
+                  La descarga solo llena una bandeja. Después podrás revisar cada registro y decidir cuánto se recibió realmente.
+                </div>
+              </div>
+            </section>
+
+            <section class="panel grid-span-full">
+              <div class="panel-head wodbuster-list-head">
+                <div>
+                  <p class="section-kicker">Bandeja de revisión</p>
+                  <h3>Pagos descargados</h3>
+                </div>
+                <div class="wodbuster-list-filters">
+                  <label>
+                    Estado
+                    <select id="wodbuster-payment-filter">
+                      <option value="pending_review">Por revisar</option>
+                      <option value="imported">Registrados</option>
+                      <option value="dismissed">Descartados</option>
+                      <option value="exceptions">Reversiones y omitidos</option>
+                      <option value="all">Todos</option>
+                    </select>
+                  </label>
+                  <label>
+                    Buscar
+                    <input
+                      id="wodbuster-payment-query"
+                      type="search"
+                      placeholder="Cliente, cédula, correo o concepto"
+                    />
+                  </label>
+                </div>
+              </div>
+
+              <div id="wodbuster-review-feedback" class="form-note">
+                Abre un pago para revisarlo antes de registrarlo.
+              </div>
+              <datalist id="wodbuster-client-options"></datalist>
+              <div id="wodbuster-payments-list" class="stack-list"></div>
+            </section>
+
             <section class="panel">
               <div class="panel-head">
                 <div>

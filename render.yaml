@@ -24,6 +24,12 @@ services:
         sync: false
       - key: BOOTSTRAP_ADMIN_FULL_NAME
         value: Administrador Petit
+      - key: WODBUSTER_BASE_URL
+        value: https://petitmetabololic.wodbuster.com
+      - key: WODBUSTER_API_USERNAME
+        sync: false
+      - key: WODBUSTER_API_PASSWORD
+        sync: false
 
 databases:
   - name: petit-metabolic-training-db

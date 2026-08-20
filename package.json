@@ -8,6 +8,7 @@
     "dev": "node server.js",
     "db:init": "node scripts/init-db.js",
     "db:check": "node scripts/check-db.js",
+    "test:wodbuster-review": "node scripts/test-wodbuster-review.js",
     "user:create": "node scripts/create-app-user.js"
   },
   "dependencies": {

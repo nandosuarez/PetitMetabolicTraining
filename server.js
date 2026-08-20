@@ -6,6 +6,10 @@ const officeCrypto = require("officecrypto-tool");
 const XLSX = require("xlsx");
 const { query, withClient, checkConnection } = require("./server/db");
 const {
+  fetchWodBusterPayments,
+  getWodBusterConfigStatus,
+} = require("./server/wodbuster");
+const {
   clearSessionCookie,
   countActiveAdminUsers,
   createAppUser,
@@ -1243,6 +1247,7 @@ app.get("/api/bootstrap", asyncHandler(async (req, res) => {
     businessProductComponentsResult,
     salesComboRulesResult,
     userActivitiesResult,
+    wodbusterPaymentsResult,
   ] =
     await Promise.all([
     query(
@@ -1438,8 +1443,29 @@ app.get("/api/bootstrap", asyncHandler(async (req, res) => {
       ? listSalesComboRulesRows()
       : Promise.resolve({ rows: [] }),
     listUserActivities(req.authUser),
+    req.authUser?.role === "administrador"
+      ? query(
+          `
+            select
+              wp.*,
+              m.payment_status as movement_payment_status,
+              m.paid_amount as movement_paid_amount,
+              m.balance_due as movement_balance_due,
+              m.payment_method as movement_payment_method,
+              m.category as movement_category,
+              coalesce(nullif(ru.full_name, ''), ru.username) as reviewed_by_name
+            from wodbuster_payment_imports wp
+            left join movements m
+              on m.id = wp.movement_id
+            left join app_users ru
+              on ru.id = wp.reviewed_by_user_id
+            order by wp.paid_at desc nulls last, wp.id desc
+          `
+        )
+      : Promise.resolve({ rows: [] }),
   ]);
 
+  const wodbusterClientState = buildWodBusterClientState(clientResult.rows);
   res.json({
     lists: mapCatalogRows(catalogResult.rows),
     catalogItems: mapCatalogItemRows(catalogResult.rows),
@@ -1463,6 +1489,13 @@ app.get("/api/bootstrap", asyncHandler(async (req, res) => {
       businessProductComponentsResult.rows.map(mapBusinessProductComponentRow),
     salesComboRules: salesComboRulesResult.rows.map(mapSalesComboRuleRow),
     userActivities: userActivitiesResult.rows.map(mapUserActivityRow),
+    wodbusterPayments: wodbusterPaymentsResult.rows.map((row) =>
+      mapWodBusterPaymentRow(row, wodbusterClientState)
+    ),
+    wodbusterIntegration:
+      req.authUser?.role === "administrador"
+        ? getWodBusterConfigStatus()
+        : { configured: false },
     notes: mapNotesRows(notesResult.rows),
   });
 }));
@@ -1656,6 +1689,102 @@ app.post("/api/import/excel", requireAdmin, asyncHandler(async (req, res) => {
   const report = await importExcelWorkbook(payload);
   res.status(201).json(report);
 }));
+
+app.get(
+  "/api/integrations/wodbuster/status",
+  requireAdmin,
+  asyncHandler(async (_req, res) => {
+    res.json(getWodBusterConfigStatus());
+  })
+);
+
+app.post(
+  "/api/integrations/wodbuster/fetch",
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const payload = normalizeWodBusterFetchPayload(req.body);
+    validateWodBusterFetchPayload(payload);
+
+    const result = await fetchWodBusterPaymentsForRequest(payload);
+    const report = await stageWodBusterPayments(
+      result.payments,
+      Number(req.authUser.id)
+    );
+    res.status(201).json({
+      message: "Los pagos se descargaron para revisión. No se creó ningún movimiento.",
+      host: result.endpointHost,
+      range: {
+        fromDate: payload.fromDate,
+        toDate: payload.toDate,
+      },
+      ...report,
+    });
+  })
+);
+
+app.post(
+  "/api/integrations/wodbuster/payments/:id/register",
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const paymentId = Number(req.params.id);
+    if (!Number.isInteger(paymentId) || paymentId <= 0) {
+      throw httpError(400, "El pago de WodBuster no es válido.");
+    }
+
+    const payload = normalizeWodBusterReviewPayload(req.body);
+    const movement = await registerWodBusterPayment(
+      paymentId,
+      payload,
+      Number(req.authUser.id)
+    );
+    res.status(201).json({
+      message: `El pago quedó registrado como ${movement.estadoPago.toLowerCase()}.`,
+      movement,
+    });
+  })
+);
+
+app.post(
+  "/api/integrations/wodbuster/payments/:id/dismiss",
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const paymentId = Number(req.params.id);
+    const reason = String(req.body.reason || "").trim();
+    if (!Number.isInteger(paymentId) || paymentId <= 0) {
+      throw httpError(400, "El pago de WodBuster no es válido.");
+    }
+    if (reason.length < 4) {
+      throw httpError(400, "Escribe una razón de al menos 4 caracteres.");
+    }
+
+    await setWodBusterPaymentReviewStatus(paymentId, {
+      fromStatus: "pending_review",
+      toStatus: "dismissed",
+      notes: reason,
+      userId: Number(req.authUser.id),
+    });
+    res.json({ message: "El registro se retiró de la bandeja pendiente." });
+  })
+);
+
+app.post(
+  "/api/integrations/wodbuster/payments/:id/reopen",
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const paymentId = Number(req.params.id);
+    if (!Number.isInteger(paymentId) || paymentId <= 0) {
+      throw httpError(400, "El pago de WodBuster no es válido.");
+    }
+
+    await setWodBusterPaymentReviewStatus(paymentId, {
+      fromStatus: "dismissed",
+      toStatus: "pending_review",
+      notes: "",
+      userId: null,
+    });
+    res.json({ message: "El pago volvió a la bandeja para revisión." });
+  })
+);
 
 app.post(
   "/api/import/clients-users-workbook",
@@ -4305,6 +4434,501 @@ function normalizeExcelImportPayload(body) {
     importMovements: body.importMovements !== false,
     importClients: body.importClients !== false,
   };
+}
+
+function normalizeWodBusterFetchPayload(body) {
+  return {
+    fromDate: normalizeDateOnly(body.fromDate),
+    toDate: normalizeDateOnly(body.toDate),
+  };
+}
+
+function normalizeWodBusterReviewPayload(body) {
+  const paidAmount = Number(body.paidAmount);
+  return {
+    clientId: Number(body.clientId || 0),
+    clientName: String(body.clientName || "").trim(),
+    category: String(body.category || "").trim(),
+    paidAmount: Number.isFinite(paidAmount)
+      ? Number(paidAmount.toFixed(2))
+      : Number.NaN,
+    paymentMethod: String(body.paymentMethod || "").trim(),
+    description: String(body.description || "").trim(),
+    notes: String(body.notes || "").trim(),
+  };
+}
+
+async function fetchWodBusterPaymentsForRequest(payload) {
+  try {
+    return await fetchWodBusterPayments(payload);
+  } catch (error) {
+    error.expose = true;
+    throw error;
+  }
+}
+
+function validateWodBusterFetchPayload(payload) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(payload.fromDate)) {
+    throw httpError(400, "Selecciona la fecha inicial de WodBuster.");
+  }
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(payload.toDate)) {
+    throw httpError(400, "Selecciona la fecha final de WodBuster.");
+  }
+
+  const fromDate = new Date(`${payload.fromDate}T00:00:00-05:00`);
+  const toDate = new Date(`${payload.toDate}T23:59:59-05:00`);
+  if (toDate < fromDate) {
+    throw httpError(400, "La fecha final no puede ser anterior a la inicial.");
+  }
+  if (toDate.getTime() - fromDate.getTime() > 366 * 24 * 60 * 60 * 1000) {
+    throw httpError(400, "Consulta como máximo 366 días por sincronización.");
+  }
+
+}
+
+async function stageWodBusterPayments(payments, userId) {
+  return withClient(async (client) => {
+    await client.query("begin");
+
+    try {
+      const externalKeys = [
+        ...new Set(payments.map((payment) => payment.externalKey).filter(Boolean)),
+      ];
+      const existingResult = externalKeys.length
+        ? await client.query(
+            `
+              select external_key
+              from wodbuster_payment_imports
+              where external_key = any($1::text[])
+            `,
+            [externalKeys]
+          )
+        : { rows: [] };
+      const existingKeys = new Set(
+        existingResult.rows.map((row) => row.external_key)
+      );
+      const report = {
+        downloaded: payments.length,
+        newRecords: 0,
+        alreadyKnown: 0,
+        pendingReview: 0,
+        reversals: 0,
+        invalid: 0,
+      };
+
+      for (const payment of payments) {
+        const discoveredStatus = payment.importable
+          ? "pending_review"
+          : Number(payment.amount) < 0
+            ? "reversal"
+            : "skipped";
+        const wasKnown = existingKeys.has(payment.externalKey);
+        const upsertResult = await client.query(
+          `
+            insert into wodbuster_payment_imports (
+              external_key,
+              external_payment_id,
+              status,
+              paid_at,
+              amount,
+              payment_method_raw,
+              client_name_raw,
+              client_document_raw,
+              client_email_raw,
+              client_phone_raw,
+              concept_raw,
+              issue,
+              raw_payload,
+              fetched_by_user_id
+            )
+            values (
+              $1, $2, $3, $4, $5, $6, $7, $8,
+              $9, $10, $11, $12, $13::jsonb, $14
+            )
+            on conflict (external_key) do update
+            set
+              external_payment_id = excluded.external_payment_id,
+              paid_at = case
+                when wodbuster_payment_imports.status = 'imported'
+                  then wodbuster_payment_imports.paid_at
+                else excluded.paid_at
+              end,
+              amount = case
+                when wodbuster_payment_imports.status = 'imported'
+                  then wodbuster_payment_imports.amount
+                else excluded.amount
+              end,
+              payment_method_raw = excluded.payment_method_raw,
+              client_name_raw = excluded.client_name_raw,
+              client_document_raw = excluded.client_document_raw,
+              client_email_raw = excluded.client_email_raw,
+              client_phone_raw = excluded.client_phone_raw,
+              concept_raw = excluded.concept_raw,
+              issue = excluded.issue,
+              raw_payload = excluded.raw_payload,
+              status = case
+                when wodbuster_payment_imports.status in ('imported', 'dismissed')
+                  then wodbuster_payment_imports.status
+                else excluded.status
+              end,
+              updated_at = now()
+            returning status
+          `,
+          [
+            payment.externalKey,
+            payment.externalId || null,
+            discoveredStatus,
+            payment.paidAt || null,
+            payment.amount,
+            payment.paymentMethod || "",
+            payment.clientName || "",
+            payment.documentNumber || "",
+            payment.email || "",
+            payment.phone || "",
+            payment.concept || payment.conceptType || "",
+            payment.issue || "",
+            JSON.stringify(payment.raw || {}),
+            userId,
+          ]
+        );
+        const currentStatus = upsertResult.rows[0]?.status || discoveredStatus;
+
+        if (wasKnown) {
+          report.alreadyKnown += 1;
+        } else {
+          report.newRecords += 1;
+          existingKeys.add(payment.externalKey);
+        }
+        if (currentStatus === "pending_review") {
+          report.pendingReview += 1;
+        }
+        if (currentStatus === "reversal") {
+          report.reversals += 1;
+        }
+        if (currentStatus === "skipped") {
+          report.invalid += 1;
+        }
+      }
+
+      await client.query("commit");
+      return report;
+    } catch (error) {
+      await client.query("rollback");
+      throw error;
+    }
+  });
+}
+
+async function registerWodBusterPayment(paymentId, reviewPayload, userId) {
+  return withClient(async (client) => {
+    await client.query("begin");
+
+    try {
+      const paymentResult = await client.query(
+        `
+          select *
+          from wodbuster_payment_imports
+          where id = $1
+          for update
+        `,
+        [paymentId]
+      );
+      const payment = paymentResult.rows[0];
+      if (!payment) {
+        throw httpError(404, "El pago de WodBuster ya no existe.");
+      }
+      if (payment.status !== "pending_review") {
+        throw httpError(409, "Este pago ya fue gestionado o no se puede registrar.");
+      }
+
+      const totalAmount = Number(payment.amount || 0);
+      if (!(totalAmount > 0)) {
+        throw httpError(400, "El pago no tiene un valor positivo para registrar.");
+      }
+      if (
+        !Number.isFinite(reviewPayload.paidAmount) ||
+        reviewPayload.paidAmount < 0 ||
+        reviewPayload.paidAmount > totalAmount
+      ) {
+        throw httpError(
+          400,
+          "El abono real debe estar entre cero y el valor informado por WodBuster."
+        );
+      }
+
+      let selectedClient = null;
+      if (Number.isInteger(reviewPayload.clientId) && reviewPayload.clientId > 0) {
+        const clientResult = await client.query(
+          `
+            select *
+            from clients
+            where id = $1
+              and is_active = true
+              and is_client = true
+          `,
+          [reviewPayload.clientId]
+        );
+        selectedClient = clientResult.rows[0] || null;
+        if (!selectedClient) {
+          throw httpError(400, "El cliente seleccionado ya no está activo.");
+        }
+      }
+
+      const balanceDue = Number(
+        (totalAmount - reviewPayload.paidAmount).toFixed(2)
+      );
+      if (balanceDue > 0 && !selectedClient) {
+        throw httpError(
+          400,
+          "Selecciona un cliente registrado para dejar el pago pendiente o parcial."
+        );
+      }
+
+      await validateWodBusterMovementMappings(
+        client,
+        reviewPayload.category,
+        reviewPayload.paymentMethod
+      );
+      const movementPayload = normalizeMovementPayload({
+        linea: "Gimnasio",
+        fecha:
+          payment.paid_at instanceof Date
+            ? formatDateInBogota(payment.paid_at)
+            : normalizeDateOnly(payment.paid_at),
+        tipo: "Ingreso",
+        categoria: reviewPayload.category,
+        cliente:
+          selectedClient?.full_name ||
+          reviewPayload.clientName ||
+          payment.client_name_raw ||
+          "",
+        descripcion:
+          reviewPayload.description || payment.concept_raw || "Pago WodBuster",
+        medioPago: reviewPayload.paymentMethod,
+        valorTotal: totalAmount,
+        abono: reviewPayload.paidAmount,
+        observaciones: buildWodBusterMovementNotes(payment, reviewPayload.notes),
+        businessProductId: 0,
+        inventoryProductId: 0,
+        inventoryQuantity: 0,
+        inventoryEffect: "ninguno",
+      });
+      validateMovementPayload(movementPayload);
+
+      const movementResult = await client.query(
+        `
+          insert into movements (
+            business_line,
+            movement_date,
+            movement_type,
+            category,
+            business_product_id,
+            client_name,
+            description,
+            payment_status,
+            payment_method,
+            total_amount,
+            paid_amount,
+            balance_due,
+            cash_flow,
+            inventory_product_id,
+            inventory_quantity,
+            inventory_effect,
+            year,
+            month_number,
+            month_name,
+            notes,
+            source_system,
+            external_reference
+          )
+          values (
+            $1, $2, $3, $4, null, $5, $6, $7, $8, $9, $10,
+            $11, $12, null, 0, 'ninguno', $13, $14, $15, $16,
+            'wodbuster', $17
+          )
+          returning *
+        `,
+        [
+          movementPayload.linea,
+          movementPayload.fecha,
+          movementPayload.tipo,
+          movementPayload.categoria,
+          movementPayload.cliente,
+          movementPayload.descripcion,
+          movementPayload.estadoPago,
+          movementPayload.medioPago,
+          movementPayload.valorTotal,
+          movementPayload.abono,
+          movementPayload.saldoPendiente,
+          movementPayload.flujoNeto,
+          movementPayload.ano,
+          movementPayload.mesNumero,
+          movementPayload.mesNombre,
+          movementPayload.observaciones,
+          payment.external_key,
+        ]
+      );
+
+      await client.query(
+        `
+          update wodbuster_payment_imports
+          set
+            status = 'imported',
+            movement_id = $2,
+            reviewed_by_user_id = $3,
+            reviewed_at = now(),
+            admin_notes = $4,
+            updated_at = now()
+          where id = $1
+        `,
+        [paymentId, movementResult.rows[0].id, userId, reviewPayload.notes]
+      );
+
+      await client.query("commit");
+      return mapMovementRow(movementResult.rows[0]);
+    } catch (error) {
+      await client.query("rollback");
+      throw error;
+    }
+  });
+}
+
+async function setWodBusterPaymentReviewStatus(paymentId, options) {
+  const result = await query(
+    `
+      update wodbuster_payment_imports
+      set
+        status = $3,
+        reviewed_by_user_id = $4,
+        reviewed_at = case when $4::bigint is null then null else now() end,
+        admin_notes = $5,
+        updated_at = now()
+      where id = $1
+        and status = $2
+      returning id
+    `,
+    [
+      paymentId,
+      options.fromStatus,
+      options.toStatus,
+      options.userId,
+      options.notes || "",
+    ]
+  );
+  if (!result.rows[0]) {
+    throw httpError(409, "El pago ya cambió de estado. Recarga los datos.");
+  }
+}
+
+async function validateWodBusterMovementMappings(client, category, paymentMethod) {
+  if (!category) {
+    throw httpError(400, "Selecciona la categoría del movimiento.");
+  }
+  if (!paymentMethod) {
+    throw httpError(400, "Selecciona la caja o medio de pago.");
+  }
+
+  const result = await client.query(
+    `
+      select group_name, value
+      from catalog_items
+      where is_active = true
+        and (
+          (group_name = 'gimnasioCategorias' and value = $1) or
+          (group_name = 'mediosPago' and value = $2)
+        )
+    `,
+    [category, paymentMethod]
+  );
+  if (
+    !result.rows.some(
+      (row) => row.group_name === "gimnasioCategorias" && row.value === category
+    )
+  ) {
+    throw httpError(400, "La categoría seleccionada ya no está activa.");
+  }
+  if (
+    !result.rows.some(
+      (row) => row.group_name === "mediosPago" && row.value === paymentMethod
+    )
+  ) {
+    throw httpError(400, "La caja seleccionada ya no está activa.");
+  }
+}
+
+function buildWodBusterClientState(rows) {
+  const state = {
+    byDocument: new Map(),
+    byEmail: new Map(),
+    byName: new Map(),
+  };
+  rows.forEach((row) => addWodBusterClientToState(state, row));
+  return state;
+}
+
+function addWodBusterClientToState(state, row) {
+  if (row.is_active === false || row.is_client === false) {
+    return;
+  }
+
+  const documentKey = normalizeWodBusterIdentifier(row.document_number);
+  const emailKey = String(row.email || "").trim().toLowerCase();
+  const nameKeys = [row.full_name, row.alias]
+    .map((value) => normalizeComparableText(value))
+    .filter(Boolean);
+
+  if (documentKey) {
+    state.byDocument.set(documentKey, row);
+  }
+  if (emailKey) {
+    state.byEmail.set(emailKey, row);
+  }
+  nameKeys.forEach((key) => state.byName.set(key, row));
+}
+
+function findWodBusterClientMatch(state, payment) {
+  const documentKey = normalizeWodBusterIdentifier(
+    payment.client_document_raw || payment.documentNumber
+  );
+  const emailKey = String(
+    payment.client_email_raw || payment.email || ""
+  ).trim().toLowerCase();
+  const nameKeys = [
+    payment.client_name_raw,
+    payment.clientName,
+    payment.fullName,
+    payment.displayName,
+  ]
+    .map((value) => normalizeComparableText(value))
+    .filter(Boolean);
+
+  return (
+    (documentKey && state.byDocument.get(documentKey)) ||
+    (emailKey && state.byEmail.get(emailKey)) ||
+    nameKeys.map((key) => state.byName.get(key)).find(Boolean) ||
+    null
+  );
+}
+
+function buildWodBusterMovementNotes(payment, adminNotes = "") {
+  const details = ["Importado desde WodBuster."];
+  if (payment.external_payment_id) {
+    details.push(`Referencia: ${payment.external_payment_id}.`);
+  }
+  if (payment.payment_method_raw) {
+    details.push(`Forma original: ${payment.payment_method_raw}.`);
+  }
+  if (adminNotes) {
+    details.push(`Revisión: ${adminNotes}`);
+  }
+  return details.join(" ");
+}
+
+function normalizeWodBusterIdentifier(value) {
+  return String(value || "")
+    .trim()
+    .replace(/[^a-zA-Z0-9]/g, "")
+    .toLowerCase();
 }
 
 function normalizeUsersClientsImportPayload(body) {
@@ -7632,8 +8256,46 @@ function mapMovementRow(row) {
     mesNumero: Number(row.month_number),
     mesNombre: row.month_name,
     observaciones: row.notes || "",
+    sourceSystem: row.source_system || "manual",
+    externalReference: row.external_reference || "",
     creadoEn: row.created_at,
     actualizadoEn: row.updated_at,
+  };
+}
+
+function mapWodBusterPaymentRow(row, clientState) {
+  const matchedClient = findWodBusterClientMatch(clientState, row);
+  const paymentDate =
+    row.paid_at instanceof Date
+      ? formatDateInBogota(row.paid_at)
+      : normalizeDateOnly(row.paid_at);
+
+  return {
+    id: Number(row.id),
+    status: row.status || "pending_review",
+    paymentDate,
+    paidAt: row.paid_at || null,
+    amount: Number(row.amount || 0),
+    originalPaymentMethod: row.payment_method_raw || "",
+    clientName: row.client_name_raw || "",
+    clientDocument: row.client_document_raw || "",
+    clientEmail: row.client_email_raw || "",
+    clientPhone: row.client_phone_raw || "",
+    concept: row.concept_raw || "",
+    issue: row.issue || "",
+    matchedClientId: Number(matchedClient?.id || 0),
+    matchedClientName: matchedClient?.full_name || "",
+    movementId: Number(row.movement_id || 0),
+    movementPaymentStatus: row.movement_payment_status || "",
+    movementPaidAmount: Number(row.movement_paid_amount || 0),
+    movementBalanceDue: Number(row.movement_balance_due || 0),
+    movementPaymentMethod: row.movement_payment_method || "",
+    movementCategory: row.movement_category || "",
+    reviewedBy: row.reviewed_by_name || "",
+    reviewedAt: row.reviewed_at || null,
+    adminNotes: row.admin_notes || "",
+    createdAt: row.created_at || null,
+    updatedAt: row.updated_at || null,
   };
 }
 
@@ -8497,7 +9159,9 @@ function httpError(status, message) {
 app.use((error, _req, res, _next) => {
   const status = Number(error.status || 500);
   const message =
-    status >= 500 ? "Ocurrio un error interno en el servidor." : error.message;
+    status >= 500 && !error.expose
+      ? "Ocurrio un error interno en el servidor."
+      : error.message;
 
   if (status >= 500) {
     console.error(error);
@@ -8513,6 +9177,7 @@ async function start() {
   await ensureUserActivitiesSchema();
   await ensureMerchandiseOrdersSchema();
   await ensureProgrammingExerciseFamiliesConstraint();
+  await ensureWodBusterIntegrationSchema();
   await ensureBootstrapAdmin();
 
   app.listen(port, host, () => {
@@ -8856,6 +9521,97 @@ async function ensureProgrammingExerciseFamiliesConstraint() {
         null;
     end
     $$;
+  `);
+}
+
+async function ensureWodBusterIntegrationSchema() {
+  await query(`
+    alter table movements
+      add column if not exists source_system text not null default 'manual';
+
+    alter table movements
+      add column if not exists external_reference text;
+
+    create unique index if not exists movements_source_external_reference_idx
+      on movements(source_system, external_reference)
+      where external_reference is not null;
+
+    create table if not exists wodbuster_payment_imports (
+      id bigserial primary key,
+      external_key text not null unique,
+      external_payment_id text,
+      movement_id bigint references movements(id) on delete set null,
+      status text not null check (
+        status in ('pending_review', 'imported', 'reversal', 'skipped', 'dismissed')
+      ),
+      paid_at timestamptz,
+      amount numeric(14, 2) not null default 0,
+      payment_method_raw text,
+      client_name_raw text,
+      client_document_raw text,
+      client_email_raw text,
+      client_phone_raw text,
+      concept_raw text,
+      issue text,
+      raw_payload jsonb not null default '{}'::jsonb,
+      fetched_by_user_id bigint not null references app_users(id),
+      reviewed_by_user_id bigint references app_users(id),
+      reviewed_at timestamptz,
+      admin_notes text,
+      created_at timestamptz not null default now(),
+      updated_at timestamptz not null default now()
+    );
+
+    do $$
+    begin
+      if exists (
+        select 1
+        from information_schema.columns
+        where table_schema = 'public'
+          and table_name = 'wodbuster_payment_imports'
+          and column_name = 'imported_by_user_id'
+      ) and not exists (
+        select 1
+        from information_schema.columns
+        where table_schema = 'public'
+          and table_name = 'wodbuster_payment_imports'
+          and column_name = 'fetched_by_user_id'
+      ) then
+        alter table wodbuster_payment_imports
+          rename column imported_by_user_id to fetched_by_user_id;
+      end if;
+    end
+    $$;
+
+    alter table wodbuster_payment_imports
+      add column if not exists client_document_raw text;
+
+    alter table wodbuster_payment_imports
+      add column if not exists client_email_raw text;
+
+    alter table wodbuster_payment_imports
+      add column if not exists client_phone_raw text;
+
+    alter table wodbuster_payment_imports
+      add column if not exists reviewed_by_user_id bigint references app_users(id);
+
+    alter table wodbuster_payment_imports
+      add column if not exists reviewed_at timestamptz;
+
+    alter table wodbuster_payment_imports
+      add column if not exists admin_notes text;
+
+    alter table wodbuster_payment_imports
+      drop constraint if exists wodbuster_payment_imports_status_check;
+
+    alter table wodbuster_payment_imports
+      add constraint wodbuster_payment_imports_status_check
+      check (
+        status in ('pending_review', 'imported', 'reversal', 'skipped', 'dismissed')
+      );
+
+    create index if not exists wodbuster_payment_imports_paid_at_idx
+      on wodbuster_payment_imports(paid_at desc, id desc);
   `);
 }
 

@@ -237,6 +237,93 @@ create table if not exists movement_collections (
 );
 
 alter table movements
+  add column if not exists source_system text not null default 'manual';
+
+alter table movements
+  add column if not exists external_reference text;
+
+create unique index if not exists movements_source_external_reference_idx
+  on movements(source_system, external_reference)
+  where external_reference is not null;
+
+create table if not exists wodbuster_payment_imports (
+  id bigserial primary key,
+  external_key text not null unique,
+  external_payment_id text,
+  movement_id bigint references movements(id) on delete set null,
+  status text not null check (
+    status in ('pending_review', 'imported', 'reversal', 'skipped', 'dismissed')
+  ),
+  paid_at timestamptz,
+  amount numeric(14, 2) not null default 0,
+  payment_method_raw text,
+  client_name_raw text,
+  client_document_raw text,
+  client_email_raw text,
+  client_phone_raw text,
+  concept_raw text,
+  issue text,
+  raw_payload jsonb not null default '{}'::jsonb,
+  fetched_by_user_id bigint not null references app_users(id),
+  reviewed_by_user_id bigint references app_users(id),
+  reviewed_at timestamptz,
+  admin_notes text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+do $$
+begin
+  if exists (
+    select 1
+    from information_schema.columns
+    where table_schema = 'public'
+      and table_name = 'wodbuster_payment_imports'
+      and column_name = 'imported_by_user_id'
+  ) and not exists (
+    select 1
+    from information_schema.columns
+    where table_schema = 'public'
+      and table_name = 'wodbuster_payment_imports'
+      and column_name = 'fetched_by_user_id'
+  ) then
+    alter table wodbuster_payment_imports
+      rename column imported_by_user_id to fetched_by_user_id;
+  end if;
+end
+$$;
+
+alter table wodbuster_payment_imports
+  add column if not exists client_document_raw text;
+
+alter table wodbuster_payment_imports
+  add column if not exists client_email_raw text;
+
+alter table wodbuster_payment_imports
+  add column if not exists client_phone_raw text;
+
+alter table wodbuster_payment_imports
+  add column if not exists reviewed_by_user_id bigint references app_users(id);
+
+alter table wodbuster_payment_imports
+  add column if not exists reviewed_at timestamptz;
+
+alter table wodbuster_payment_imports
+  add column if not exists admin_notes text;
+
+alter table wodbuster_payment_imports
+  drop constraint if exists wodbuster_payment_imports_status_check;
+
+alter table wodbuster_payment_imports
+  add constraint wodbuster_payment_imports_status_check
+  check (
+    status in ('pending_review', 'imported', 'reversal', 'skipped', 'dismissed')
+  );
+
+create index if not exists wodbuster_payment_imports_paid_at_idx
+  on wodbuster_payment_imports(paid_at desc, id desc);
+
+alter table movements
   drop constraint if exists movements_movement_type_check;
 
 alter table movements

@@ -32,6 +32,10 @@ const emptyState = {
   programmingMethods: [],
   programmingExercises: [],
   classPrograms: [],
+  wodbusterPayments: [],
+  wodbusterIntegration: {
+    configured: false,
+  },
   notes: {
     daily: {},
     weekly: {},
@@ -80,10 +84,12 @@ const expandedMovementDetailIds = new Set();
 const expandedPortfolioDetailIds = new Set();
 const expandedCollectionAccountIds = new Set();
 const expandedClientHistoryIds = new Set();
+const expandedWodBusterPaymentIds = new Set();
 let isSidebarOpen = false;
 const COMPACT_SIDEBAR_BREAKPOINT = 1180;
 let lastImportReport = null;
 let lastUsersClientsImportReport = null;
+let lastWodBusterFetchReport = null;
 let programDraftItems = [];
 let selectedProgramRosterId = null;
 let selectedProgramEnrollmentId = null;
@@ -561,6 +567,16 @@ const elements = {
   usersClientsImportSummary: document.getElementById(
     "users-clients-import-summary"
   ),
+  wodbusterFetchForm: document.getElementById("wodbuster-fetch-form"),
+  wodbusterDateFrom: document.getElementById("wodbuster-date-from"),
+  wodbusterDateTo: document.getElementById("wodbuster-date-to"),
+  wodbusterFeedback: document.getElementById("wodbuster-feedback"),
+  wodbusterSummary: document.getElementById("wodbuster-summary"),
+  wodbusterPaymentFilter: document.getElementById("wodbuster-payment-filter"),
+  wodbusterPaymentQuery: document.getElementById("wodbuster-payment-query"),
+  wodbusterReviewFeedback: document.getElementById("wodbuster-review-feedback"),
+  wodbusterClientOptions: document.getElementById("wodbuster-client-options"),
+  wodbusterPaymentsList: document.getElementById("wodbuster-payments-list"),
 };
 
 init();
@@ -1056,6 +1072,16 @@ function bindEvents() {
     "submit",
     handleUsersClientsImportSubmit
   );
+  addListener(
+    elements.wodbusterFetchForm,
+    "submit",
+    handleWodBusterFetchSubmit
+  );
+  addListener(elements.wodbusterPaymentFilter, "change", renderWodBusterIntegration);
+  addListener(elements.wodbusterPaymentQuery, "input", renderWodBusterIntegration);
+  addListener(elements.wodbusterPaymentsList, "click", handleWodBusterPaymentClick);
+  addListener(elements.wodbusterPaymentsList, "submit", handleWodBusterReviewSubmit);
+  addListener(elements.wodbusterPaymentsList, "input", handleWodBusterReviewInput);
 
   document
     .querySelectorAll("[data-list-form]")
@@ -1707,6 +1733,13 @@ function hydrateDefaultDates() {
   if (elements.inventoryMovementDate) {
     elements.inventoryMovementDate.value = today;
   }
+  if (elements.wodbusterDateFrom && elements.wodbusterDateTo) {
+    const currentParts = getCurrentDateParts();
+    elements.wodbusterDateFrom.value = `${currentParts.year}-${String(
+      currentParts.month
+    ).padStart(2, "0")}-01`;
+    elements.wodbusterDateTo.value = today;
+  }
   elements.monthlyYear.value = String(getCurrentDateParts().year);
 
   const start = addDays(getCurrentTimeZoneDate(), -6);
@@ -1907,7 +1940,7 @@ function switchView(view, options = {}) {
     programacion: "Programación",
     listas: "Listas maestras",
     usuarios: "Usuarios",
-    importar: "Importar Excel",
+    importar: "Importaciones",
   };
   titles.inventario = "Inventario";
 
@@ -2325,6 +2358,11 @@ function renderMovementDetail(item) {
     <div class="detail-panel">
       <div class="detail-grid">
         ${createDetailItem("Caja", escapeHtml(item.medioPago))}
+        ${
+          item.sourceSystem === "wodbuster"
+            ? createDetailItem("Origen", "WodBuster")
+            : ""
+        }
         ${createDetailItem("Abono", formatCurrency(item.abono))}
         ${createDetailItem(
           "Flujo neto",
@@ -3997,6 +4035,8 @@ function renderImportView() {
     return;
   }
 
+  renderWodBusterIntegration();
+
   if (!isAdminUser()) {
     elements.excelImportSummary.innerHTML = `
       <div class="empty-state">
@@ -4079,6 +4119,346 @@ function renderImportView() {
       <div class="mini-stat"><span>Total en clientes</span><strong>${Number(lastUsersClientsImportReport.totalClients || 0)}</strong></div>
     </div>
   `;
+}
+
+function renderWodBusterIntegration() {
+  if (
+    !elements.wodbusterSummary ||
+    !elements.wodbusterPaymentsList ||
+    !elements.wodbusterFeedback
+  ) {
+    return;
+  }
+
+  if (!isAdminUser()) {
+    elements.wodbusterFeedback.textContent =
+      "Solo el administrador puede descargar pagos de WodBuster.";
+    elements.wodbusterSummary.innerHTML = `
+      <div class="empty-state">
+        Solo el administrador puede consultar esta integración.
+      </div>
+    `;
+    elements.wodbusterPaymentsList.innerHTML = "";
+    return;
+  }
+
+  const integration = state.wodbusterIntegration || {};
+  if (!integration.configured) {
+    const missing = [];
+    if (!integration.hasBaseUrl || !integration.validBaseUrl) {
+      missing.push("WODBUSTER_BASE_URL");
+    }
+    if (!integration.hasUsername) {
+      missing.push("WODBUSTER_API_USERNAME");
+    }
+    if (!integration.hasPassword) {
+      missing.push("WODBUSTER_API_PASSWORD");
+    }
+    elements.wodbusterFeedback.textContent = `Configura en Render: ${
+      missing.join(", ") || "las variables de WodBuster"
+    }.`;
+  } else {
+    const currentFeedback = String(
+      elements.wodbusterFeedback.textContent || ""
+    ).trim();
+    if (
+      !currentFeedback ||
+      currentFeedback === "Verificando la configuración de WodBuster." ||
+      currentFeedback.startsWith("Configura en Render:")
+    ) {
+      elements.wodbusterFeedback.textContent = `Conexión preparada para ${
+        integration.host || "WodBuster"
+      }. La descarga no crea movimientos automáticamente.`;
+    }
+  }
+
+  const payments = Array.isArray(state.wodbusterPayments)
+    ? state.wodbusterPayments
+    : [];
+  const pendingCount = payments.filter(
+    (payment) => payment.status === "pending_review"
+  ).length;
+  const importedCount = payments.filter(
+    (payment) => payment.status === "imported"
+  ).length;
+  const dismissedCount = payments.filter(
+    (payment) => payment.status === "dismissed"
+  ).length;
+  const exceptionCount = payments.filter((payment) =>
+    ["reversal", "skipped"].includes(payment.status)
+  ).length;
+  elements.wodbusterSummary.innerHTML = `
+    ${
+      lastWodBusterFetchReport
+        ? `<article class="list-item">
+            <strong>Última descarga completada</strong>
+            <small>${escapeHtml(lastWodBusterFetchReport.message || "Los registros quedaron en revisión.")}</small>
+          </article>`
+        : ""
+    }
+    <div class="mini-stats compact-mini-stats">
+      <div class="mini-stat"><span>Por revisar</span><strong>${pendingCount}</strong></div>
+      <div class="mini-stat"><span>Registrados</span><strong>${importedCount}</strong></div>
+      <div class="mini-stat"><span>Descartados</span><strong>${dismissedCount}</strong></div>
+      <div class="mini-stat"><span>Excepciones</span><strong>${exceptionCount}</strong></div>
+    </div>
+  `;
+
+  fillWodBusterClientOptions();
+  const filteredPayments = getFilteredWodBusterPayments(payments);
+  elements.wodbusterPaymentsList.innerHTML = filteredPayments.length
+    ? filteredPayments.map(renderWodBusterPaymentCard).join("")
+    : `<div class="empty-state">No hay pagos para este filtro.</div>`;
+}
+
+function getFilteredWodBusterPayments(payments) {
+  const filter = elements.wodbusterPaymentFilter?.value || "pending_review";
+  const query = normalizeSearchValue(elements.wodbusterPaymentQuery?.value || "");
+  return payments.filter((payment) => {
+    const matchesStatus =
+      filter === "all" ||
+      payment.status === filter ||
+      (filter === "exceptions" &&
+        ["reversal", "skipped"].includes(payment.status));
+    if (!matchesStatus) {
+      return false;
+    }
+    if (!query) {
+      return true;
+    }
+    return normalizeSearchValue(
+      [
+        payment.clientName,
+        payment.clientDocument,
+        payment.clientEmail,
+        payment.clientPhone,
+        payment.concept,
+        payment.originalPaymentMethod,
+        payment.paymentDate,
+        payment.matchedClientName,
+      ].join(" ")
+    ).includes(query);
+  });
+}
+
+function renderWodBusterPaymentCard(payment) {
+  const isExpanded = expandedWodBusterPaymentIds.has(String(payment.id));
+  const status = getWodBusterStatusPresentation(payment);
+  return `
+    <article class="wodbuster-payment-card ${isExpanded ? "is-expanded" : ""}">
+      <div class="wodbuster-payment-summary">
+        <div class="wodbuster-payment-main">
+          <strong>${escapeHtml(payment.clientName || "Sin nombre en WodBuster")}</strong>
+          <small>${escapeHtml(payment.paymentDate || "Sin fecha")} · ${escapeHtml(
+            payment.originalPaymentMethod || "Sin forma de pago"
+          )}</small>
+        </div>
+        <div class="wodbuster-payment-concept">
+          <span>${escapeHtml(payment.concept || "Sin concepto")}</span>
+          <strong>${formatCurrency(payment.amount || 0)}</strong>
+        </div>
+        <span class="status-pill ${status.className}">${escapeHtml(status.label)}</span>
+        <button
+          class="ghost-button small-button"
+          type="button"
+          data-wodbuster-toggle="${payment.id}"
+          aria-expanded="${isExpanded}"
+        >
+          ${isExpanded ? "Cerrar" : payment.status === "pending_review" ? "Gestionar" : "Ver"}
+        </button>
+      </div>
+      ${isExpanded ? renderWodBusterPaymentDetail(payment) : ""}
+    </article>
+  `;
+}
+
+function renderWodBusterPaymentDetail(payment) {
+  const matchedClientText = payment.matchedClientName
+    ? `Coincidencia encontrada: ${payment.matchedClientName}`
+    : "No encontramos automáticamente este cliente.";
+  return `
+    <div class="wodbuster-payment-detail">
+      <div class="detail-grid">
+        ${createDetailItem("Cliente WodBuster", escapeHtml(payment.clientName || "Sin nombre"))}
+        ${createDetailItem("Cédula", escapeHtml(payment.clientDocument || "Sin documento"))}
+        ${createDetailItem("Correo", escapeHtml(payment.clientEmail || "Sin correo"))}
+        ${createDetailItem("Cruce de cliente", escapeHtml(matchedClientText))}
+        ${createDetailItem("Concepto", escapeHtml(payment.concept || "Sin concepto"), "detail-item--wide")}
+        ${
+          payment.issue
+            ? createDetailItem("Observación de origen", escapeHtml(payment.issue), "detail-item--wide")
+            : ""
+        }
+      </div>
+      ${renderWodBusterPaymentManagement(payment)}
+    </div>
+  `;
+}
+
+function renderWodBusterPaymentManagement(payment) {
+  if (payment.status === "pending_review") {
+    const category = getDefaultWodBusterCategory();
+    const paymentMethod = getDefaultWodBusterPaymentMethod(payment);
+    const clientValue = payment.matchedClientName || "";
+    return `
+      <form class="wodbuster-review-form form-grid" data-wodbuster-review-form="${payment.id}" data-total="${Number(
+        payment.amount || 0
+      )}">
+        <label>
+          Cliente de la app
+          <input
+            type="search"
+            list="wodbuster-client-options"
+            data-wodbuster-client
+            value="${escapeHtml(clientValue)}"
+            placeholder="Busca por nombre o alias"
+            autocomplete="off"
+          />
+          <span class="inline-hint">Es obligatorio si queda algún saldo pendiente.</span>
+        </label>
+        <label>
+          Abono realmente recibido
+          <input
+            type="number"
+            min="0"
+            max="${Number(payment.amount || 0)}"
+            step="0.01"
+            value="${Number(payment.amount || 0)}"
+            data-wodbuster-paid-amount
+            required
+          />
+          <span class="inline-hint">Usa 0 si WodBuster lo marcó pagado, pero aún deben cobrarlo.</span>
+        </label>
+        <label>
+          Categoría
+          <select data-wodbuster-category required>
+            ${buildWodBusterSelectOptions(state.lists.gimnasioCategorias || [], category)}
+          </select>
+        </label>
+        <label>
+          Caja / medio de pago
+          <select data-wodbuster-payment-method required>
+            ${buildWodBusterSelectOptions(state.lists.mediosPago || [], paymentMethod)}
+          </select>
+          <span class="inline-hint">Con abono 0 no se sumará dinero a la caja.</span>
+        </label>
+        <label class="span-2">
+          Descripción
+          <input data-wodbuster-description value="${escapeHtml(
+            payment.concept || "Pago WodBuster"
+          )}" />
+        </label>
+        <label class="span-2">
+          Notas de revisión
+          <textarea data-wodbuster-notes placeholder="Opcional para registrar; mínimo 4 caracteres para descartar"></textarea>
+        </label>
+        <div class="form-note span-2" data-wodbuster-calculated-status>
+          Quedará Pagado y entrará ${formatCurrency(payment.amount || 0)} a caja.
+        </div>
+        <div class="form-actions span-2">
+          <button class="primary-button" type="submit">Registrar movimiento</button>
+          <button class="ghost-button danger" type="button" data-wodbuster-dismiss="${payment.id}">
+            No registrar
+          </button>
+        </div>
+      </form>
+    `;
+  }
+
+  if (payment.status === "dismissed") {
+    return `
+      <div class="wodbuster-managed-note">
+        <strong>No se registró como movimiento.</strong>
+        <span>${escapeHtml(payment.adminNotes || "Sin observación")}</span>
+        <button class="ghost-button" type="button" data-wodbuster-reopen="${payment.id}">
+          Volver a revisar
+        </button>
+      </div>
+    `;
+  }
+
+  if (payment.status === "imported") {
+    return `
+      <div class="wodbuster-managed-note">
+        <strong>Movimiento #${payment.movementId} · ${escapeHtml(
+          payment.movementPaymentStatus || "Registrado"
+        )}</strong>
+        <span>Abono ${formatCurrency(payment.movementPaidAmount || 0)} · Saldo ${formatCurrency(
+          payment.movementBalanceDue || 0
+        )} · ${escapeHtml(payment.movementPaymentMethod || "Sin caja")}</span>
+        <small>Gestionado por ${escapeHtml(payment.reviewedBy || "Administrador")}</small>
+      </div>
+    `;
+  }
+
+  return `
+    <div class="wodbuster-managed-note">
+      <strong>Este registro no genera movimiento.</strong>
+      <span>${escapeHtml(payment.issue || "Requiere revisión del origen en WodBuster.")}</span>
+    </div>
+  `;
+}
+
+function getWodBusterStatusPresentation(payment) {
+  if (payment.status === "imported") {
+    return {
+      label: payment.movementPaymentStatus || "Registrado",
+      className: statusClass(payment.movementPaymentStatus || "Pagado"),
+    };
+  }
+  return {
+    pending_review: { label: "Por revisar", className: "status-parcial" },
+    dismissed: { label: "No registrar", className: "user-status-inactive" },
+    reversal: { label: "Reversión", className: "status-pendiente" },
+    skipped: { label: "Omitido", className: "status-pendiente" },
+  }[payment.status] || { label: "Por revisar", className: "status-parcial" };
+}
+
+function getDefaultWodBusterCategory() {
+  const categories = state.lists.gimnasioCategorias || [];
+  return (
+    categories.find((item) => normalizeSearchValue(item).includes("membres")) ||
+    categories[0] ||
+    ""
+  );
+}
+
+function getDefaultWodBusterPaymentMethod(payment) {
+  const methods = state.lists.mediosPago || [];
+  const original = normalizeSearchValue(payment.originalPaymentMethod || "");
+  if (original.includes("efectivo")) {
+    return methods.find((item) => normalizeSearchValue(item) === "efectivo") || methods[0] || "";
+  }
+  return (
+    methods.find((item) => normalizeSearchValue(item) === "bancolombia") ||
+    methods.find((item) => normalizeSearchValue(item) !== "efectivo") ||
+    methods[0] ||
+    ""
+  );
+}
+
+function buildWodBusterSelectOptions(values, selectedValue) {
+  return values
+    .map(
+      (value) => `<option value="${escapeHtml(value)}" ${
+        value === selectedValue ? "selected" : ""
+      }>${escapeHtml(value)}</option>`
+    )
+    .join("");
+}
+
+function fillWodBusterClientOptions() {
+  if (!elements.wodbusterClientOptions) {
+    return;
+  }
+  elements.wodbusterClientOptions.innerHTML = (state.clients || [])
+    .filter((client) => client.isActive && client.isClient !== false)
+    .map(
+      (client) => `<option value="${escapeHtml(client.fullName || "")}">${escapeHtml(
+        [client.alias, client.documentNumber].filter(Boolean).join(" · ")
+      )}</option>`
+    )
+    .join("");
 }
 
 function renderInventoryView() {
@@ -5835,6 +6215,220 @@ async function handleExcelImportSubmit(event) {
     elements.excelImportFeedback.textContent =
       error.message || "No se pudo cargar el archivo Excel.";
   }
+}
+
+function readWodBusterFetchPayload() {
+  return {
+    fromDate: elements.wodbusterDateFrom?.value || "",
+    toDate: elements.wodbusterDateTo?.value || "",
+  };
+}
+
+async function handleWodBusterFetchSubmit(event) {
+  event.preventDefault();
+
+  if (!isAdminUser()) {
+    elements.wodbusterFeedback.textContent =
+      "Solo el administrador puede descargar pagos de WodBuster.";
+    return;
+  }
+
+  if (!state.wodbusterIntegration?.configured) {
+    elements.wodbusterFeedback.textContent =
+      "Completa primero las variables privadas de WodBuster en Render.";
+    return;
+  }
+
+  const payload = readWodBusterFetchPayload();
+  elements.wodbusterFeedback.textContent =
+    "Descargando pagos a la bandeja de revisión...";
+
+  try {
+    lastWodBusterFetchReport = await apiRequest(
+      "/api/integrations/wodbuster/fetch",
+      {
+        method: "POST",
+        body: JSON.stringify(payload),
+      }
+    );
+    await loadBootstrap();
+    elements.wodbusterPaymentFilter.value = "pending_review";
+    elements.wodbusterFeedback.textContent = `${Number(
+      lastWodBusterFetchReport.downloaded || 0
+    )} registro(s) descargados. Ninguno fue agregado a movimientos.`;
+    elements.wodbusterReviewFeedback.textContent = `${Number(
+      lastWodBusterFetchReport.pendingReview || 0
+    )} pago(s) están pendientes de revisión individual.`;
+    switchView("importar");
+  } catch (error) {
+    elements.wodbusterFeedback.textContent =
+      error.message || "No se pudieron descargar los pagos de WodBuster.";
+  }
+}
+
+async function handleWodBusterPaymentClick(event) {
+  const toggle = event.target.closest("[data-wodbuster-toggle]");
+  if (toggle) {
+    const paymentId = String(toggle.dataset.wodbusterToggle || "");
+    const wasExpanded = expandedWodBusterPaymentIds.has(paymentId);
+    expandedWodBusterPaymentIds.clear();
+    if (!wasExpanded) {
+      expandedWodBusterPaymentIds.add(paymentId);
+    }
+    renderWodBusterIntegration();
+    return;
+  }
+
+  const dismiss = event.target.closest("[data-wodbuster-dismiss]");
+  if (dismiss) {
+    const paymentId = String(dismiss.dataset.wodbusterDismiss || "");
+    const form = dismiss.closest("[data-wodbuster-review-form]");
+    const reason = String(
+      form?.querySelector("[data-wodbuster-notes]")?.value || ""
+    ).trim();
+    if (reason.length < 4) {
+      elements.wodbusterReviewFeedback.textContent =
+        "Para no registrar el pago, escribe una razón de al menos 4 caracteres.";
+      return;
+    }
+
+    elements.wodbusterReviewFeedback.textContent = "Actualizando la bandeja...";
+    try {
+      const result = await apiRequest(
+        `/api/integrations/wodbuster/payments/${paymentId}/dismiss`,
+        {
+          method: "POST",
+          body: JSON.stringify({ reason }),
+        }
+      );
+      expandedWodBusterPaymentIds.delete(paymentId);
+      await loadBootstrap();
+      elements.wodbusterReviewFeedback.textContent =
+        result.message || "El pago no se registrará.";
+    } catch (error) {
+      elements.wodbusterReviewFeedback.textContent =
+        error.message || "No se pudo actualizar el pago.";
+    }
+    return;
+  }
+
+  const reopen = event.target.closest("[data-wodbuster-reopen]");
+  if (reopen) {
+    const paymentId = String(reopen.dataset.wodbusterReopen || "");
+    elements.wodbusterReviewFeedback.textContent = "Reabriendo el pago...";
+    try {
+      const result = await apiRequest(
+        `/api/integrations/wodbuster/payments/${paymentId}/reopen`,
+        { method: "POST", body: "{}" }
+      );
+      expandedWodBusterPaymentIds.delete(paymentId);
+      await loadBootstrap();
+      elements.wodbusterReviewFeedback.textContent =
+        result.message || "El pago volvió a revisión.";
+    } catch (error) {
+      elements.wodbusterReviewFeedback.textContent =
+        error.message || "No se pudo reabrir el pago.";
+    }
+  }
+}
+
+async function handleWodBusterReviewSubmit(event) {
+  const form = event.target.closest("[data-wodbuster-review-form]");
+  if (!form) {
+    return;
+  }
+  event.preventDefault();
+
+  const paymentId = String(form.dataset.wodbusterReviewForm || "");
+  const payment = (state.wodbusterPayments || []).find(
+    (item) => String(item.id) === paymentId
+  );
+  if (!payment) {
+    elements.wodbusterReviewFeedback.textContent =
+      "No encontramos el pago. Recarga los datos e intenta nuevamente.";
+    return;
+  }
+
+  const clientInput = String(
+    form.querySelector("[data-wodbuster-client]")?.value || ""
+  ).trim();
+  const selectedClient = findWodBusterClientFromInput(clientInput);
+  const paidAmountInput = form.querySelector("[data-wodbuster-paid-amount]");
+  const paidAmount = Number(paidAmountInput?.value);
+  if (String(paidAmountInput?.value || "").trim() === "" || !Number.isFinite(paidAmount)) {
+    elements.wodbusterReviewFeedback.textContent =
+      "Escribe el abono que realmente se recibió; puede ser cero.";
+    return;
+  }
+
+  elements.wodbusterReviewFeedback.textContent =
+    "Registrando el movimiento con el estado calculado...";
+  try {
+    const result = await apiRequest(
+      `/api/integrations/wodbuster/payments/${paymentId}/register`,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          clientId: Number(selectedClient?.id || 0),
+          clientName: clientInput || payment.clientName || "",
+          category: form.querySelector("[data-wodbuster-category]")?.value || "",
+          paidAmount,
+          paymentMethod:
+            form.querySelector("[data-wodbuster-payment-method]")?.value || "",
+          description:
+            form.querySelector("[data-wodbuster-description]")?.value?.trim() || "",
+          notes: form.querySelector("[data-wodbuster-notes]")?.value?.trim() || "",
+        }),
+      }
+    );
+    expandedWodBusterPaymentIds.delete(paymentId);
+    await loadBootstrap();
+    elements.wodbusterReviewFeedback.textContent =
+      result.message || "El movimiento se registró correctamente.";
+  } catch (error) {
+    elements.wodbusterReviewFeedback.textContent =
+      error.message || "No se pudo registrar el movimiento.";
+  }
+}
+
+function handleWodBusterReviewInput(event) {
+  if (!event.target.matches("[data-wodbuster-paid-amount]")) {
+    return;
+  }
+  const form = event.target.closest("[data-wodbuster-review-form]");
+  const feedback = form?.querySelector("[data-wodbuster-calculated-status]");
+  if (!form || !feedback) {
+    return;
+  }
+  const total = Number(form.dataset.total || 0);
+  const rawValue = String(event.target.value || "").trim();
+  if (!rawValue) {
+    feedback.textContent = "Escribe el abono realmente recibido.";
+    return;
+  }
+  const paid = Number(rawValue);
+  if (!Number.isFinite(paid) || paid < 0 || paid > total) {
+    feedback.textContent = `El abono debe estar entre $0 y ${formatCurrency(total)}.`;
+    return;
+  }
+  const status = paid <= 0 ? "Pendiente" : paid >= total ? "Pagado" : "Parcial";
+  const balance = Math.max(total - paid, 0);
+  feedback.textContent = `${status}: entran ${formatCurrency(paid)} a caja y queda un saldo de ${formatCurrency(balance)}.`;
+}
+
+function findWodBusterClientFromInput(value) {
+  const normalizedValue = normalizeSearchValue(value || "");
+  if (!normalizedValue) {
+    return null;
+  }
+  return (state.clients || []).find(
+    (client) =>
+      client.isActive &&
+      client.isClient !== false &&
+      [client.fullName, client.alias, client.documentNumber, client.email].some(
+        (field) => normalizeSearchValue(field || "") === normalizedValue
+      )
+  ) || null;
 }
 
 async function handleUsersClientsImportSubmit(event) {
