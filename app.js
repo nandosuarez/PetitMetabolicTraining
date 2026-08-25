@@ -80,6 +80,7 @@ let activeInventoryPanel = "activos";
 let selectedCollectionMovementId = null;
 let selectedCollectionClientKey = null;
 let selectedCollectionMovementIds = [];
+let editingBoxLedgerEntryId = "";
 const expandedMovementDetailIds = new Set();
 const expandedPortfolioDetailIds = new Set();
 const expandedCollectionAccountIds = new Set();
@@ -259,6 +260,7 @@ const elements = {
   boxDateTo: document.getElementById("box-date-to"),
   boxTypeFilter: document.getElementById("box-type-filter"),
   boxFilterSummary: document.getElementById("box-filter-summary"),
+  boxLedgerFeedback: document.getElementById("box-ledger-feedback"),
   boxLedgerTable: document.getElementById("box-ledger-table"),
   boxMenuButtons: [...document.querySelectorAll("[data-box-panel]")],
   boxPanels: {
@@ -575,7 +577,6 @@ const elements = {
   wodbusterPaymentFilter: document.getElementById("wodbuster-payment-filter"),
   wodbusterPaymentQuery: document.getElementById("wodbuster-payment-query"),
   wodbusterReviewFeedback: document.getElementById("wodbuster-review-feedback"),
-  wodbusterClientOptions: document.getElementById("wodbuster-client-options"),
   wodbusterPaymentsList: document.getElementById("wodbuster-payments-list"),
 };
 
@@ -812,6 +813,8 @@ function bindEvents() {
   addListener(elements.abono, "input", syncComputedPaymentStatus);
   addListener(elements.boxTransferForm, "submit", handleBoxTransferSubmit);
   addListener(elements.boxTransfersTable, "click", handleBoxTransfersTableClick);
+  addListener(elements.boxLedgerTable, "click", handleBoxLedgerTableClick);
+  addListener(elements.boxLedgerTable, "submit", handleBoxLedgerEditSubmit);
 
   [
     elements.filterLine,
@@ -1082,6 +1085,11 @@ function bindEvents() {
   addListener(elements.wodbusterPaymentsList, "click", handleWodBusterPaymentClick);
   addListener(elements.wodbusterPaymentsList, "submit", handleWodBusterReviewSubmit);
   addListener(elements.wodbusterPaymentsList, "input", handleWodBusterReviewInput);
+  addListener(
+    elements.wodbusterPaymentsList,
+    "focusin",
+    handleWodBusterReviewFocusIn
+  );
 
   document
     .querySelectorAll("[data-list-form]")
@@ -4204,7 +4212,6 @@ function renderWodBusterIntegration() {
     </div>
   `;
 
-  fillWodBusterClientOptions();
   const filteredPayments = getFilteredWodBusterPayments(payments);
   elements.wodbusterPaymentsList.innerHTML = filteredPayments.length
     ? filteredPayments.map(renderWodBusterPaymentCard).join("")
@@ -4304,16 +4311,26 @@ function renderWodBusterPaymentManagement(payment) {
       <form class="wodbuster-review-form form-grid" data-wodbuster-review-form="${payment.id}" data-total="${Number(
         payment.amount || 0
       )}">
-        <label>
+        <label class="search-field wodbuster-client-search">
           Cliente de la app
           <input
             type="search"
-            list="wodbuster-client-options"
             data-wodbuster-client
             value="${escapeHtml(clientValue)}"
             placeholder="Busca por nombre o alias"
             autocomplete="off"
           />
+          <input
+            type="hidden"
+            data-wodbuster-client-id
+            value="${Number(payment.matchedClientId || 0) || ""}"
+          />
+          <div
+            class="search-suggestions is-hidden"
+            data-wodbuster-client-suggestions
+            role="listbox"
+            aria-label="Clientes registrados en la app"
+          ></div>
           <span class="inline-hint">Es obligatorio si queda algún saldo pendiente.</span>
         </label>
         <label>
@@ -4443,20 +4460,6 @@ function buildWodBusterSelectOptions(values, selectedValue) {
       (value) => `<option value="${escapeHtml(value)}" ${
         value === selectedValue ? "selected" : ""
       }>${escapeHtml(value)}</option>`
-    )
-    .join("");
-}
-
-function fillWodBusterClientOptions() {
-  if (!elements.wodbusterClientOptions) {
-    return;
-  }
-  elements.wodbusterClientOptions.innerHTML = (state.clients || [])
-    .filter((client) => client.isActive && client.isClient !== false)
-    .map(
-      (client) => `<option value="${escapeHtml(client.fullName || "")}">${escapeHtml(
-        [client.alias, client.documentNumber].filter(Boolean).join(" · ")
-      )}</option>`
     )
     .join("");
 }
@@ -6267,6 +6270,29 @@ async function handleWodBusterFetchSubmit(event) {
 }
 
 async function handleWodBusterPaymentClick(event) {
+  const clientOption = event.target.closest("[data-wodbuster-client-option]");
+  if (clientOption) {
+    const clientId = Number(clientOption.dataset.wodbusterClientOption || 0);
+    const form = clientOption.closest("[data-wodbuster-review-form]");
+    const client = getWodBusterActiveClients().find(
+      (item) => Number(item.id) === clientId
+    );
+    if (form && client) {
+      form.querySelector("[data-wodbuster-client]").value = client.fullName || "";
+      form.querySelector("[data-wodbuster-client-id]").value = String(client.id);
+      hideWodBusterClientSuggestions(form);
+    }
+    return;
+  }
+
+  const clientInput = event.target.closest("[data-wodbuster-client]");
+  if (clientInput) {
+    renderWodBusterClientSuggestions(clientInput, { forceOpen: true });
+    return;
+  }
+
+  hideWodBusterClientSuggestions();
+
   const toggle = event.target.closest("[data-wodbuster-toggle]");
   if (toggle) {
     const paymentId = String(toggle.dataset.wodbusterToggle || "");
@@ -6352,7 +6378,13 @@ async function handleWodBusterReviewSubmit(event) {
   const clientInput = String(
     form.querySelector("[data-wodbuster-client]")?.value || ""
   ).trim();
-  const selectedClient = findWodBusterClientFromInput(clientInput);
+  const selectedClientId = Number(
+    form.querySelector("[data-wodbuster-client-id]")?.value || 0
+  );
+  const selectedClient =
+    getWodBusterActiveClients().find(
+      (client) => Number(client.id) === selectedClientId
+    ) || findWodBusterClientFromInput(clientInput);
   const paidAmountInput = form.querySelector("[data-wodbuster-paid-amount]");
   const paidAmount = Number(paidAmountInput?.value);
   if (String(paidAmountInput?.value || "").trim() === "" || !Number.isFinite(paidAmount)) {
@@ -6392,6 +6424,16 @@ async function handleWodBusterReviewSubmit(event) {
 }
 
 function handleWodBusterReviewInput(event) {
+  if (event.target.matches("[data-wodbuster-client]")) {
+    const form = event.target.closest("[data-wodbuster-review-form]");
+    const clientIdInput = form?.querySelector("[data-wodbuster-client-id]");
+    if (clientIdInput) {
+      clientIdInput.value = "";
+    }
+    renderWodBusterClientSuggestions(event.target, { forceOpen: true });
+    return;
+  }
+
   if (!event.target.matches("[data-wodbuster-paid-amount]")) {
     return;
   }
@@ -6414,6 +6456,98 @@ function handleWodBusterReviewInput(event) {
   const status = paid <= 0 ? "Pendiente" : paid >= total ? "Pagado" : "Parcial";
   const balance = Math.max(total - paid, 0);
   feedback.textContent = `${status}: entran ${formatCurrency(paid)} a caja y queda un saldo de ${formatCurrency(balance)}.`;
+}
+
+function handleWodBusterReviewFocusIn(event) {
+  if (!event.target.matches("[data-wodbuster-client]")) {
+    return;
+  }
+  renderWodBusterClientSuggestions(event.target, { forceOpen: true });
+}
+
+function renderWodBusterClientSuggestions(input, options = {}) {
+  const form = input?.closest("[data-wodbuster-review-form]");
+  const suggestions = form?.querySelector("[data-wodbuster-client-suggestions]");
+  if (!form || !suggestions) {
+    return;
+  }
+
+  const query = normalizeSearchValue(input.value || "");
+  const matches = getWodBusterActiveClients()
+    .filter((client) => {
+      if (!query) {
+        return true;
+      }
+      return normalizeSearchValue(
+        [
+          client.fullName,
+          client.alias,
+          client.documentNumber,
+          client.phone,
+          client.email,
+        ]
+          .filter(Boolean)
+          .join(" ")
+      ).includes(query);
+    })
+    .slice(0, 10);
+
+  if (!matches.length) {
+    suggestions.innerHTML = `
+      <div class="search-suggestion-empty">
+        No encontramos clientes con ese filtro.
+      </div>
+    `;
+  } else {
+    suggestions.innerHTML = matches
+      .map(
+        (client) => `
+          <button
+            class="search-suggestion-item"
+            type="button"
+            data-wodbuster-client-option="${Number(client.id)}"
+          >
+            <span class="search-suggestion-title">${escapeHtml(
+              client.fullName || "Sin nombre"
+            )}</span>
+            <span class="search-suggestion-meta">${escapeHtml(
+              buildWodBusterClientSearchMeta(client)
+            )}</span>
+          </button>
+        `
+      )
+      .join("");
+  }
+
+  suggestions.classList.toggle(
+    "is-hidden",
+    !options.forceOpen && !String(input.value || "").trim()
+  );
+}
+
+function hideWodBusterClientSuggestions(scope = elements.wodbusterPaymentsList) {
+  scope
+    ?.querySelectorAll("[data-wodbuster-client-suggestions]")
+    .forEach((suggestions) => suggestions.classList.add("is-hidden"));
+}
+
+function getWodBusterActiveClients() {
+  return (state.clients || []).filter(
+    (client) => client.isActive && client.isClient !== false
+  );
+}
+
+function buildWodBusterClientSearchMeta(client) {
+  return (
+    [
+      client.alias ? `Alias: ${client.alias}` : "",
+      client.documentNumber ? `Cédula: ${client.documentNumber}` : "",
+      client.phone ? `Tel: ${client.phone}` : "",
+      client.email || "",
+    ]
+      .filter(Boolean)
+      .join(" · ") || "Cliente activo"
+  );
 }
 
 function findWodBusterClientFromInput(value) {
@@ -12305,6 +12439,9 @@ function getBoxLedgerEntries() {
       movement.tipo === "Costo" ? "Costo operativo" : "Gasto operativo";
     entries.push({
       id: `movement-${movement.id}`,
+      sourceType: "movement",
+      sourceId: Number(movement.id),
+      movementId: Number(movement.id),
       date: movement.fecha,
       createdAt: movement.actualizadoEn || movement.creadoEn || movement.fecha,
       boxName,
@@ -12339,6 +12476,9 @@ function getBoxLedgerEntries() {
     const amount = Number(collection.amount || 0);
     entries.push({
       id: `collection-${collection.id}`,
+      sourceType: "collection",
+      sourceId: Number(collection.id),
+      movementId: Number(collection.movementId),
       date: collection.collectionDate,
       createdAt: collection.createdAt || collection.collectionDate,
       boxName: collection.paymentMethod,
@@ -12372,6 +12512,9 @@ function getBoxLedgerEntries() {
 
     entries.push({
       id: `transfer-out-${transfer.id}`,
+      sourceType: "transfer",
+      sourceId: Number(transfer.id),
+      movementId: 0,
       date: transfer.transferDate,
       createdAt: transfer.createdAt || transfer.transferDate,
       boxName: transfer.sourcePaymentMethod,
@@ -12395,6 +12538,9 @@ function getBoxLedgerEntries() {
 
     entries.push({
       id: `transfer-in-${transfer.id}`,
+      sourceType: "transfer",
+      sourceId: Number(transfer.id),
+      movementId: 0,
       date: transfer.transferDate,
       createdAt: transfer.createdAt || transfer.transferDate,
       boxName: transfer.targetPaymentMethod,
@@ -13483,6 +13629,97 @@ function handleBoxSummaryClick(event) {
   renderBoxesView();
 }
 
+function handleBoxLedgerTableClick(event) {
+  const editButton = event.target.closest("[data-box-ledger-edit-id]");
+  const cancelButton = event.target.closest("[data-box-ledger-edit-cancel]");
+
+  if (cancelButton) {
+    editingBoxLedgerEntryId = "";
+    if (elements.boxLedgerFeedback) {
+      elements.boxLedgerFeedback.textContent =
+        "Corrección cancelada. No se modificó ningún saldo de caja.";
+    }
+    renderBoxesView();
+    return;
+  }
+
+  if (!editButton) {
+    return;
+  }
+  if (!isAdminUser()) {
+    if (elements.boxLedgerFeedback) {
+      elements.boxLedgerFeedback.textContent =
+        "Solo el administrador puede corregir movimientos de caja.";
+    }
+    return;
+  }
+
+  editingBoxLedgerEntryId = String(editButton.dataset.boxLedgerEditId || "");
+  if (elements.boxLedgerFeedback) {
+    elements.boxLedgerFeedback.textContent =
+      "Selecciona la caja correcta y explica el motivo del ajuste.";
+  }
+  renderBoxesView();
+  const editForm = [...elements.boxLedgerTable.querySelectorAll(
+    "[data-box-entry-edit-form]"
+  )].find((form) => form.dataset.boxEntryEditForm === editingBoxLedgerEntryId);
+  editForm?.querySelector("[data-box-entry-payment-method]")?.focus();
+}
+
+async function handleBoxLedgerEditSubmit(event) {
+  const form = event.target.closest("[data-box-entry-edit-form]");
+  if (!form) {
+    return;
+  }
+  event.preventDefault();
+
+  if (!isAdminUser()) {
+    elements.boxLedgerFeedback.textContent =
+      "Solo el administrador puede corregir movimientos de caja.";
+    return;
+  }
+
+  const entryType = String(form.dataset.boxEntryType || "");
+  const sourceId = Number(form.dataset.boxEntrySourceId || 0);
+  const paymentMethod = String(
+    form.querySelector("[data-box-entry-payment-method]")?.value || ""
+  ).trim();
+  const justification = String(
+    form.querySelector("[data-box-entry-justification]")?.value || ""
+  ).trim();
+
+  if (!paymentMethod) {
+    elements.boxLedgerFeedback.textContent = "Selecciona la caja correcta.";
+    return;
+  }
+  if (justification.length < 10) {
+    elements.boxLedgerFeedback.textContent =
+      "Escribe una justificación de al menos 10 caracteres.";
+    form.querySelector("[data-box-entry-justification]")?.focus();
+    return;
+  }
+
+  elements.boxLedgerFeedback.textContent =
+    "Actualizando la caja y el movimiento relacionado...";
+  try {
+    const result = await apiRequest(
+      `/api/box-entries/${encodeURIComponent(entryType)}/${sourceId}/payment-method`,
+      {
+        method: "PATCH",
+        body: JSON.stringify({ paymentMethod, justification }),
+      }
+    );
+    editingBoxLedgerEntryId = "";
+    await loadBootstrap();
+    switchView("cajas", { boxPanel: "movimientos" });
+    elements.boxLedgerFeedback.textContent =
+      result.message || "La caja quedó corregida correctamente.";
+  } catch (error) {
+    elements.boxLedgerFeedback.textContent =
+      error.message || "No se pudo corregir el movimiento de caja.";
+  }
+}
+
 function renderBoxesView() {
   renderBoxPanels();
   renderBoxTransfersHistory();
@@ -13617,9 +13854,29 @@ function renderBoxesView() {
 
   elements.boxLedgerTable.innerHTML = ledgerEntries.length
     ? ledgerEntries
-        .map(
-          (entry) => `
-            <tr>
+        .map((entry) => {
+          const canEdit =
+            isAdminUser() && ["movement", "collection"].includes(entry.sourceType);
+          const isEditing = editingBoxLedgerEntryId === entry.id;
+          const actions = canEdit
+            ? `
+                <button
+                  class="table-button icon-button"
+                  type="button"
+                  data-box-ledger-edit-id="${escapeHtml(entry.id)}"
+                  title="Corregir caja"
+                  aria-label="Corregir caja de ${escapeHtml(entry.reference || "movimiento")}"
+                >
+                  <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                    <path d="M4 20h4l10-10-4-4L4 16v4Z"></path>
+                    <path d="m13 7 4 4"></path>
+                  </svg>
+                </button>
+              `
+            : "<span class='muted'>-</span>";
+
+          return `
+            <tr class="${isEditing ? "is-editing" : ""}">
               ${tableCell("Fecha", escapeHtml(formatDate(entry.date)))}
               ${tableCell("Caja", escapeHtml(entry.boxName))}
               ${tableCell("Tipo", escapeHtml(entry.entryType))}
@@ -13628,10 +13885,11 @@ function renderBoxesView() {
               ${tableCell("Registrado por", escapeHtml(entry.registeredBy || "Sistema"))}
               ${tableCell("Entrada", formatCurrency(entry.inflow || 0))}
               ${tableCell("Salida", formatCurrency(entry.outflow || 0))}
-              ${tableCell("Saldo neto", formatCurrency(entry.amount || 0))}
+              ${tableCell("Acciones", `<div class="row-actions row-actions--compact">${actions}</div>`)}
             </tr>
-          `
-        )
+            ${isEditing ? renderBoxLedgerEditRow(entry) : ""}
+          `;
+        })
         .join("")
     : `
       <tr>
@@ -13640,6 +13898,64 @@ function renderBoxesView() {
         </td>
       </tr>
     `;
+
+  applyStackTableLabels(elements.appShell);
+}
+
+function renderBoxLedgerEditRow(entry) {
+  const paymentMethods = [
+    ...new Set([
+      entry.boxName,
+      ...(state.lists.mediosPago || []),
+    ].filter(Boolean)),
+  ];
+  const options = paymentMethods
+    .map(
+      (method) => `
+        <option value="${escapeHtml(method)}" ${
+          method === entry.boxName ? "selected" : ""
+        }>${escapeHtml(method)}</option>
+      `
+    )
+    .join("");
+
+  return `
+    <tr class="box-ledger-edit-row">
+      <td colspan="9">
+        <form
+          class="box-ledger-edit-form"
+          data-box-entry-edit-form="${escapeHtml(entry.id)}"
+          data-box-entry-type="${escapeHtml(entry.sourceType)}"
+          data-box-entry-source-id="${Number(entry.sourceId || 0)}"
+        >
+          <div class="box-ledger-edit-context">
+            <span>Corrigiendo</span>
+            <strong>${escapeHtml(entry.reference || "Movimiento de caja")}</strong>
+            <small>${escapeHtml(entry.detail || "Sin detalle")}</small>
+          </div>
+          <label>
+            Caja correcta
+            <select data-box-entry-payment-method required>${options}</select>
+          </label>
+          <label class="box-ledger-edit-justification">
+            Justificación
+            <input
+              data-box-entry-justification
+              minlength="10"
+              placeholder="Explica por qué se corrige la caja"
+              required
+            />
+          </label>
+          <div class="form-actions">
+            <button class="primary-button" type="submit">Guardar corrección</button>
+            <button class="ghost-button" type="button" data-box-ledger-edit-cancel>
+              Cancelar
+            </button>
+          </div>
+        </form>
+      </td>
+    </tr>
+  `;
 }
 
 function createStatCard(label, value, meta) {

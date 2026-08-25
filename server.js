@@ -1994,6 +1994,49 @@ app.put("/api/movements/:id", requireOperationalWriteAccess, asyncHandler(async 
         throw httpError(404, "Movimiento no encontrado.");
       }
 
+      const paymentMethodChanged =
+        payload.medioPago !== previousSnapshot.medioPago;
+      const paidOnlyThroughCollections =
+        collectedAmount > 0 &&
+        Math.abs(Number(payload.abono || 0) - collectedAmount) < 0.005;
+
+      if (paymentMethodChanged && paidOnlyThroughCollections) {
+        await client.query(
+          `
+            update movement_collections
+            set
+              payment_method = $2,
+              updated_at = now()
+            where movement_id = $1
+          `,
+          [movementId, payload.medioPago]
+        );
+      }
+
+      if (paymentMethodChanged) {
+        await client.query(
+          `
+            insert into box_payment_method_edit_audits (
+              entry_type,
+              source_id,
+              movement_id,
+              previous_payment_method,
+              new_payment_method,
+              justification,
+              edited_by_user_id
+            )
+            values ('movement', $1, $1, $2, $3, $4, $5)
+          `,
+          [
+            movementId,
+            previousSnapshot.medioPago,
+            payload.medioPago,
+            payload.justificacionEdicion || payload.observaciones,
+            Number(req.authUser.id),
+          ]
+        );
+      }
+
       await applyMovementInventoryLink(
         client,
         movementId,
@@ -2163,60 +2206,283 @@ app.post("/api/movements/:id/collections", requireOperationalWriteAccess, asyncH
   const nextStatus = resolvePaymentStatus(nextPaidAmount, totalAmount);
   const nextCashFlow = movement.tipo === "Ingreso" ? nextPaidAmount : nextPaidAmount * -1;
 
-  const collectionResult = await query(
-    `
-      insert into movement_collections (
-        movement_id,
-        collection_date,
-        amount,
-        payment_method,
-        notes,
-        registered_by_user_id
-      )
-      values ($1, $2, $3, $4, $5, $6)
-      returning *
-    `,
-    [
-      movementId,
-      payload.collectionDate,
-      payload.amount,
-      payload.paymentMethod,
-      payload.notes,
-      Number(req.authUser.id),
-    ]
-  );
+  const savedRows = await withClient(async (client) => {
+    await client.query("begin");
 
-  const updatedMovementResult = await query(
-    `
-      update movements
-      set
-        paid_amount = $2,
-        balance_due = $3,
-        payment_status = $4,
-        cash_flow = $5,
-        updated_at = now()
-      where id = $1
-      returning *
-    `,
-    [
-      movementId,
-      nextPaidAmount,
-      nextBalance,
-      nextStatus,
-      nextCashFlow,
-    ]
-  );
+    try {
+      const collectionResult = await client.query(
+        `
+          insert into movement_collections (
+            movement_id,
+            collection_date,
+            amount,
+            payment_method,
+            notes,
+            registered_by_user_id
+          )
+          values ($1, $2, $3, $4, $5, $6)
+          returning *
+        `,
+        [
+          movementId,
+          payload.collectionDate,
+          payload.amount,
+          payload.paymentMethod,
+          payload.notes,
+          Number(req.authUser.id),
+        ]
+      );
+
+      const updatedMovementResult = await client.query(
+        `
+          update movements
+          set
+            paid_amount = $2,
+            balance_due = $3,
+            payment_status = $4,
+            cash_flow = $5,
+            payment_method = $6,
+            updated_at = now()
+          where id = $1
+          returning *
+        `,
+        [
+          movementId,
+          nextPaidAmount,
+          nextBalance,
+          nextStatus,
+          nextCashFlow,
+          payload.paymentMethod,
+        ]
+      );
+
+      await client.query("commit");
+      return {
+        collection: collectionResult.rows[0],
+        movement: updatedMovementResult.rows[0],
+      };
+    } catch (error) {
+      await client.query("rollback");
+      throw error;
+    }
+  });
 
   res.status(201).json({
     collection: mapCollectionRow({
-      ...collectionResult.rows[0],
+      ...savedRows.collection,
       registered_by_name:
         req.authUser.fullName || req.authUser.username || "Sistema",
       registered_by_username: req.authUser.username || "",
     }),
-    movement: mapMovementRow(updatedMovementResult.rows[0]),
+    movement: mapMovementRow(savedRows.movement),
   });
 }));
+
+app.patch(
+  "/api/box-entries/:entryType/:id/payment-method",
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const entryType = String(req.params.entryType || "").trim();
+    const sourceId = Number(req.params.id);
+    const paymentMethod = String(req.body.paymentMethod || "").trim();
+    const justification = String(req.body.justification || "").trim();
+
+    if (!["movement", "collection"].includes(entryType)) {
+      throw httpError(400, "El tipo de movimiento de caja no es válido.");
+    }
+    if (!Number.isInteger(sourceId) || sourceId <= 0) {
+      throw httpError(400, "El movimiento de caja no es válido.");
+    }
+    if (!paymentMethod) {
+      throw httpError(400, "Selecciona la caja correcta.");
+    }
+    if (justification.length < 10) {
+      throw httpError(
+        400,
+        "Escribe una justificación de al menos 10 caracteres para corregir la caja."
+      );
+    }
+
+    const result = await withClient(async (client) => {
+      await client.query("begin");
+
+      try {
+        const activeMethodResult = await client.query(
+          `
+            select 1
+            from catalog_items
+            where group_name = 'mediosPago'
+              and value = $1
+              and is_active = true
+            limit 1
+          `,
+          [paymentMethod]
+        );
+        if (!activeMethodResult.rows.length) {
+          throw httpError(400, "La caja seleccionada no existe o está inactiva.");
+        }
+
+        let movementId = 0;
+        let previousPaymentMethod = "";
+        let movementRow = null;
+        let collectionRow = null;
+
+        if (entryType === "movement") {
+          const movementResult = await client.query(
+            "select * from movements where id = $1 for update",
+            [sourceId]
+          );
+          movementRow = movementResult.rows[0] || null;
+          if (!movementRow) {
+            throw httpError(404, "El movimiento relacionado ya no existe.");
+          }
+
+          movementId = Number(movementRow.id);
+          previousPaymentMethod = String(movementRow.payment_method || "");
+          const collectionsResult = await client.query(
+            `
+              select coalesce(sum(amount), 0) as total
+              from movement_collections
+              where movement_id = $1
+            `,
+            [movementId]
+          );
+          const collectionsTotal = Number(collectionsResult.rows[0]?.total || 0);
+          const paidOnlyThroughCollections =
+            collectionsTotal > 0 &&
+            Math.abs(Number(movementRow.paid_amount || 0) - collectionsTotal) < 0.005;
+
+          if (paidOnlyThroughCollections) {
+            await client.query(
+              `
+                update movement_collections
+                set payment_method = $2, updated_at = now()
+                where movement_id = $1
+              `,
+              [movementId, paymentMethod]
+            );
+          }
+
+          const updatedMovementResult = await client.query(
+            `
+              update movements
+              set payment_method = $2, updated_at = now()
+              where id = $1
+              returning *
+            `,
+            [movementId, paymentMethod]
+          );
+          movementRow = updatedMovementResult.rows[0];
+        } else {
+          const collectionResult = await client.query(
+            `
+              select mc.*, m.paid_amount
+              from movement_collections mc
+              join movements m on m.id = mc.movement_id
+              where mc.id = $1
+              for update of mc, m
+            `,
+            [sourceId]
+          );
+          const currentCollection = collectionResult.rows[0] || null;
+          if (!currentCollection) {
+            throw httpError(404, "El cobro o pago relacionado ya no existe.");
+          }
+
+          movementId = Number(currentCollection.movement_id);
+          previousPaymentMethod = String(currentCollection.payment_method || "");
+          const updatedCollectionResult = await client.query(
+            `
+              update movement_collections
+              set payment_method = $2, updated_at = now()
+              where id = $1
+              returning *
+            `,
+            [sourceId, paymentMethod]
+          );
+          collectionRow = updatedCollectionResult.rows[0];
+
+          const collectionsResult = await client.query(
+            `
+              select coalesce(sum(amount), 0) as total
+              from movement_collections
+              where movement_id = $1
+            `,
+            [movementId]
+          );
+          const collectionsTotal = Number(collectionsResult.rows[0]?.total || 0);
+          const paidOnlyThroughCollections =
+            collectionsTotal > 0 &&
+            Math.abs(Number(currentCollection.paid_amount || 0) - collectionsTotal) < 0.005;
+
+          if (paidOnlyThroughCollections) {
+            const updatedMovementResult = await client.query(
+              `
+                update movements
+                set payment_method = $2, updated_at = now()
+                where id = $1
+                returning *
+              `,
+              [movementId, paymentMethod]
+            );
+            movementRow = updatedMovementResult.rows[0];
+          } else {
+            const movementResult = await client.query(
+              "select * from movements where id = $1",
+              [movementId]
+            );
+            movementRow = movementResult.rows[0] || null;
+          }
+        }
+
+        if (previousPaymentMethod !== paymentMethod) {
+          await client.query(
+            `
+              insert into box_payment_method_edit_audits (
+                entry_type,
+                source_id,
+                movement_id,
+                previous_payment_method,
+                new_payment_method,
+                justification,
+                edited_by_user_id
+              )
+              values ($1, $2, $3, $4, $5, $6, $7)
+            `,
+            [
+              entryType,
+              sourceId,
+              movementId,
+              previousPaymentMethod,
+              paymentMethod,
+              justification,
+              Number(req.authUser.id),
+            ]
+          );
+        }
+
+        await client.query("commit");
+        return { movementRow, collectionRow };
+      } catch (error) {
+        await client.query("rollback");
+        throw error;
+      }
+    });
+
+    res.json({
+      message: "La caja se corrigió y los registros vinculados quedaron actualizados.",
+      movement: result.movementRow ? mapMovementRow(result.movementRow) : null,
+      collection: result.collectionRow
+        ? mapCollectionRow({
+            ...result.collectionRow,
+            registered_by_name:
+              req.authUser.fullName || req.authUser.username || "Sistema",
+            registered_by_username: req.authUser.username || "",
+          })
+        : null,
+    });
+  })
+);
 
 app.get(
   "/api/merchandise-orders",
@@ -8312,6 +8578,7 @@ function mapCollectionRow(row) {
       row.registered_by_username ||
       "Sistema",
     createdAt: row.created_at || null,
+    updatedAt: row.updated_at || row.created_at || null,
   };
 }
 

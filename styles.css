@@ -1026,6 +1026,40 @@ textarea {
   color: var(--ink);
 }
 
+.box-ledger-edit-row td {
+  padding: 0 !important;
+  background: rgba(159, 239, 1, 0.06);
+}
+
+.box-ledger-edit-form {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  align-items: end;
+  gap: 14px;
+  padding: 16px;
+  border: 1px solid rgba(159, 239, 1, 0.35);
+  border-radius: 0 0 16px 16px;
+}
+
+.box-ledger-edit-form label,
+.box-ledger-edit-context {
+  display: grid;
+  gap: 6px;
+}
+
+.box-ledger-edit-context span,
+.box-ledger-edit-context small {
+  color: var(--muted);
+}
+
+.box-ledger-edit-form .form-actions {
+  margin: 0;
+}
+
+#box-ledger-table tr.is-editing > td {
+  background: rgba(159, 239, 1, 0.08);
+}
+
 .collection-context {
   display: grid;
   gap: 6px;
@@ -3194,8 +3228,15 @@ table.adaptive-stack-table {
 }
 
 .wodbuster-payment-card.is-expanded {
+  position: relative;
+  z-index: 3;
+  overflow: visible;
   border-color: rgba(159, 239, 1, 0.48);
   box-shadow: 0 16px 34px rgba(18, 24, 20, 0.07);
+}
+
+.wodbuster-client-search:focus-within {
+  z-index: 20;
 }
 
 .wodbuster-payment-summary {

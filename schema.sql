@@ -233,8 +233,27 @@ create table if not exists movement_collections (
   payment_method text not null,
   notes text,
   registered_by_user_id bigint not null references app_users(id),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+alter table movement_collections
+  add column if not exists updated_at timestamptz not null default now();
+
+create table if not exists box_payment_method_edit_audits (
+  id bigserial primary key,
+  entry_type text not null check (entry_type in ('movement', 'collection')),
+  source_id bigint not null,
+  movement_id bigint not null references movements(id) on delete cascade,
+  previous_payment_method text not null,
+  new_payment_method text not null,
+  justification text not null,
+  edited_by_user_id bigint not null references app_users(id),
   created_at timestamptz not null default now()
 );
+
+create index if not exists box_payment_method_edit_audits_movement_idx
+  on box_payment_method_edit_audits(movement_id, created_at desc);
 
 alter table movements
   add column if not exists source_system text not null default 'manual';
