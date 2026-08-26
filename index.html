@@ -359,12 +359,14 @@
                 </div>
 
                 <label class="search-field">
-                  Cliente
+                  Cliente <span aria-hidden="true">*</span>
                   <input
                     id="cliente-search"
                     type="search"
                     placeholder="Escribe para buscar un cliente"
                     autocomplete="off"
+                    required
+                    aria-required="true"
                   />
                   <div
                     id="cliente-suggestions"

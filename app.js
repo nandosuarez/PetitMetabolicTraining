@@ -7245,15 +7245,18 @@ async function handleMovementSubmit(event) {
   event.preventDefault();
 
   const typedClientQuery = String(elements.clienteSearch?.value || "").trim();
-  const resolvedClient =
-    syncMovementClientSelectionFromSearch({
-      allowClosestMatch: true,
-      allowSingleMatch: true,
-    }) || !typedClientQuery;
+  const resolvedClient = syncMovementClientSelectionFromSearch({
+    allowClosestMatch: true,
+    allowSingleMatch: true,
+  });
 
-  if (!resolvedClient && typedClientQuery) {
+  if (
+    !typedClientQuery ||
+    !resolvedClient ||
+    !String(elements.cliente?.value || "").trim()
+  ) {
     elements.movementFeedback.textContent =
-      "Selecciona un cliente valido de la lista antes de guardar el movimiento.";
+      "Selecciona un cliente válido de la lista antes de guardar la venta.";
     elements.clienteSearch?.focus();
     return;
   }
@@ -12722,6 +12725,13 @@ function validateMovement(payload, options = {}) {
     return {
       valid: false,
       message: "El abono no puede ser mayor que el valor total.",
+    };
+  }
+
+  if (payload.tipo === "Ingreso" && !String(payload.cliente || "").trim()) {
+    return {
+      valid: false,
+      message: "Selecciona el cliente antes de guardar la venta.",
     };
   }
 

@@ -1800,7 +1800,7 @@ app.post(
 
 app.post("/api/movements", requireOperationalWriteAccess, asyncHandler(async (req, res) => {
   const payload = normalizeMovementPayload(req.body);
-  validateMovementPayload(payload);
+  validateMovementPayload(payload, { requireIncomeClient: true });
 
   const movement = await withClient(async (client) => {
     await client.query("begin");
@@ -1885,6 +1885,7 @@ app.put("/api/movements/:id", requireOperationalWriteAccess, asyncHandler(async 
 
   const payload = normalizeMovementPayload(req.body);
   validateMovementPayload(payload, {
+    requireIncomeClient: true,
     requireEditJustification:
       req.authUser?.role === "asistente_operativo",
     requireObservationMinOnEdit: true,
@@ -5432,6 +5433,14 @@ function validateMovementPayload(payload, options = {}) {
 
   if (payload.abono > payload.valorTotal) {
     throw httpError(400, "El abono no puede ser mayor que el valor total.");
+  }
+
+  if (
+    options.requireIncomeClient &&
+    payload.tipo === "Ingreso" &&
+    !payload.cliente
+  ) {
+    throw httpError(400, "Selecciona el cliente antes de guardar la venta.");
   }
 
   if (payload.saldoPendiente > 0 && !payload.cliente) {
