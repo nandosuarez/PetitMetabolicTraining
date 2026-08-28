@@ -160,6 +160,21 @@ create table if not exists app_users (
   updated_at timestamptz not null default now()
 );
 
+alter table movements
+  add column if not exists registered_by_user_id bigint;
+
+alter table movements
+  drop constraint if exists movements_registered_by_user_id_fkey;
+
+alter table movements
+  add constraint movements_registered_by_user_id_fkey
+  foreign key (registered_by_user_id)
+  references app_users(id)
+  on delete set null;
+
+create index if not exists movements_registered_by_user_idx
+  on movements (registered_by_user_id);
+
 alter table app_users
   add column if not exists role text not null default 'administrador';
 

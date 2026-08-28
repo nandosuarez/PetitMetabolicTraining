@@ -21,6 +21,19 @@ async function postMovement(body) {
   return { response, payload };
 }
 
+async function getBootstrap() {
+  const response = await fetch(`${baseUrl}/api/bootstrap`, {
+    headers: {
+      Cookie: `petit_session=${encodeURIComponent(token)}`,
+    },
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(payload.error || "No se pudo consultar la información de prueba.");
+  }
+  return payload;
+}
+
 async function main() {
   const setupResult = await query(
     `
@@ -28,6 +41,9 @@ async function main() {
         (select id from app_users
           where role = 'administrador' and is_active = true
           order by id limit 1) as admin_id,
+        (select coalesce(nullif(full_name, ''), username) from app_users
+          where role = 'administrador' and is_active = true
+          order by id limit 1) as admin_name,
         (select value from catalog_items
           where group_name = 'gimnasioCategorias' and is_active = true
           order by sort_order, id limit 1) as category,
@@ -77,7 +93,28 @@ async function main() {
   }
   movementId = Number(accepted.payload.id);
 
-  console.log("Prueba de cliente obligatorio OK: rechazo sin cliente y registro válido con cliente.");
+  if (
+    Number(accepted.payload.registeredByUserId || 0) !== Number(setup.admin_id) ||
+    accepted.payload.registeredBy !== setup.admin_name
+  ) {
+    throw new Error("El movimiento no devolvió el usuario que hizo el registro.");
+  }
+
+  const bootstrap = await getBootstrap();
+  const savedMovement = (bootstrap.movements || []).find(
+    (movement) => Number(movement.id) === movementId
+  );
+  if (
+    !savedMovement ||
+    Number(savedMovement.registeredByUserId || 0) !== Number(setup.admin_id) ||
+    savedMovement.registeredBy !== setup.admin_name
+  ) {
+    throw new Error("La consulta de movimientos no conservó el usuario de registro.");
+  }
+
+  console.log(
+    "Prueba de movimientos OK: cliente obligatorio y usuario de registro conservados."
+  );
 }
 
 async function cleanup() {

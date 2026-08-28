@@ -1259,25 +1259,40 @@ app.get("/api/bootstrap", asyncHandler(async (req, res) => {
     ),
     query(
       `
-        select *
-        from movements
-        ${isAssistantOperative ? "where created_at >= now() - interval '24 hours'" : ""}
-        order by movement_date desc, updated_at desc, id desc
+        select
+          m.*,
+          coalesce(nullif(u.full_name, ''), u.username) as registered_by_name,
+          u.username as registered_by_username
+        from movements m
+        left join app_users u
+          on u.id = m.registered_by_user_id
+        ${isAssistantOperative ? "where m.created_at >= now() - interval '24 hours'" : ""}
+        order by m.movement_date desc, m.updated_at desc, m.id desc
       `
     ),
     query(
       `
-        select *
-        from movements
-        order by movement_date desc, updated_at desc, id desc
+        select
+          m.*,
+          coalesce(nullif(u.full_name, ''), u.username) as registered_by_name,
+          u.username as registered_by_username
+        from movements m
+        left join app_users u
+          on u.id = m.registered_by_user_id
+        order by m.movement_date desc, m.updated_at desc, m.id desc
       `
     ),
     query(
       `
-        select *
-        from movements
-        where balance_due > 0
-        order by movement_date desc, updated_at desc, id desc
+        select
+          m.*,
+          coalesce(nullif(u.full_name, ''), u.username) as registered_by_name,
+          u.username as registered_by_username
+        from movements m
+        left join app_users u
+          on u.id = m.registered_by_user_id
+        where m.balance_due > 0
+        order by m.movement_date desc, m.updated_at desc, m.id desc
       `
     ),
     isAssistantOperative
@@ -1686,7 +1701,7 @@ app.post("/api/import/excel", requireAdmin, asyncHandler(async (req, res) => {
   const payload = normalizeExcelImportPayload(req.body);
   validateExcelImportPayload(payload);
 
-  const report = await importExcelWorkbook(payload);
+  const report = await importExcelWorkbook(payload, Number(req.authUser.id));
   res.status(201).json(report);
 }));
 
@@ -1828,11 +1843,13 @@ app.post("/api/movements", requireOperationalWriteAccess, asyncHandler(async (re
             year,
             month_number,
             month_name,
-            notes
+            notes,
+            registered_by_user_id
           )
           values (
             $1, $2, $3, $4, $5, $6, $7, $8,
-            $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20
+            $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20,
+            $21
           )
           returning *
         `,
@@ -1857,6 +1874,7 @@ app.post("/api/movements", requireOperationalWriteAccess, asyncHandler(async (re
           payload.mesNumero,
           payload.mesNombre,
           payload.observaciones,
+          Number(req.authUser.id),
         ]
       );
 
@@ -1876,7 +1894,14 @@ app.post("/api/movements", requireOperationalWriteAccess, asyncHandler(async (re
     }
   });
 
-  res.status(201).json(mapMovementRow(movement));
+  res.status(201).json(
+    mapMovementRow({
+      ...movement,
+      registered_by_name:
+        req.authUser.fullName || req.authUser.username || "Sistema",
+      registered_by_username: req.authUser.username || "",
+    })
+  );
 }));
 
 app.put("/api/movements/:id", requireOperationalWriteAccess, asyncHandler(async (req, res) => {
@@ -2192,6 +2217,24 @@ app.post("/api/movements/:id/collections", requireOperationalWriteAccess, asyncH
     });
   }
 
+  const previousCollectionsResult = await query(
+    `
+      select coalesce(sum(amount), 0) as collected_amount
+      from movement_collections
+      where movement_id = $1
+    `,
+    [movementId]
+  );
+  const previousCollectionsAmount = Number(
+    previousCollectionsResult.rows[0]?.collected_amount || 0
+  );
+  const directPaymentAmount = Math.max(
+    Number(movement.abono || 0) - previousCollectionsAmount,
+    0
+  );
+  const movementPaymentMethod =
+    directPaymentAmount > 0 ? movement.medioPago : payload.paymentMethod;
+
   const nextPaidAmount = Number(movement.abono || 0) + payload.amount;
   const totalAmount = Number(movement.valorTotal || 0);
   const nextBalance = Math.max(totalAmount - nextPaidAmount, 0);
@@ -2244,7 +2287,7 @@ app.post("/api/movements/:id/collections", requireOperationalWriteAccess, asyncH
           nextBalance,
           nextStatus,
           nextCashFlow,
-          payload.paymentMethod,
+          movementPaymentMethod,
         ]
       );
 
@@ -2711,11 +2754,12 @@ app.post(
               year,
               month_number,
               month_name,
-              notes
+              notes,
+              registered_by_user_id
             )
             values (
               $1, $2, 'Ingreso', $3, $4, $5, $6, $7, $8, $9,
-              $10, $11, $10, null, 0, 'ninguno', $12, $13, $14, $15
+              $10, $11, $10, null, 0, 'ninguno', $12, $13, $14, $15, $16
             )
             returning id
           `,
@@ -2737,6 +2781,7 @@ app.post(
             [payload.notes, `Pedido de prendas #${createdOrderId}`]
               .filter(Boolean)
               .join(" | "),
+            Number(req.authUser.id),
           ]
         );
         const movementId = Number(movementResult.rows[0].id);
@@ -4997,12 +5042,13 @@ async function registerWodBusterPayment(paymentId, reviewPayload, userId) {
             month_name,
             notes,
             source_system,
-            external_reference
+            external_reference,
+            registered_by_user_id
           )
           values (
             $1, $2, $3, $4, null, $5, $6, $7, $8, $9, $10,
             $11, $12, null, 0, 'ninguno', $13, $14, $15, $16,
-            'wodbuster', $17
+            'wodbuster', $17, $18
           )
           returning *
         `,
@@ -5024,6 +5070,7 @@ async function registerWodBusterPayment(paymentId, reviewPayload, userId) {
           movementPayload.mesNombre,
           movementPayload.observaciones,
           payment.external_key,
+          userId,
         ]
       );
 
@@ -5616,7 +5663,7 @@ function validateUsersClientsImportPayload(payload) {
   }
 }
 
-async function importExcelWorkbook(payload) {
+async function importExcelWorkbook(payload, registeredByUserId) {
   const warnings = [];
   let workbook;
 
@@ -5698,7 +5745,8 @@ async function importExcelWorkbook(payload) {
           catalogState,
           clientState,
           movementKeys,
-          warnings
+          warnings,
+          registeredByUserId
         );
         report.movementsInserted += movementReport.inserted;
         report.movementsSkipped += movementReport.skipped;
@@ -6430,7 +6478,8 @@ async function insertImportedMovements(
   catalogState,
   clientState,
   movementKeys,
-  warnings
+  warnings,
+  registeredByUserId
 ) {
   let inserted = 0;
   let skipped = 0;
@@ -6468,11 +6517,12 @@ async function insertImportedMovements(
           year,
           month_number,
           month_name,
-          notes
+          notes,
+          registered_by_user_id
         )
         values (
           $1, $2, $3, $4, $5, $6, $7, $8,
-          $9, $10, $11, $12, $13, $14, $15, $16
+          $9, $10, $11, $12, $13, $14, $15, $16, $17
         )
       `,
       [
@@ -6492,6 +6542,7 @@ async function insertImportedMovements(
         payload.mesNumero,
         payload.mesNombre,
         payload.observaciones,
+        registeredByUserId || null,
       ]
     );
 
@@ -8524,6 +8575,11 @@ function mapMovementRow(row) {
     observaciones: row.notes || "",
     sourceSystem: row.source_system || "manual",
     externalReference: row.external_reference || "",
+    registeredByUserId: Number(row.registered_by_user_id || 0),
+    registeredBy:
+      row.registered_by_name ||
+      row.registered_by_username ||
+      "Sistema / histórico",
     creadoEn: row.created_at,
     actualizadoEn: row.updated_at,
   };

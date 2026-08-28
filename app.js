@@ -2361,17 +2361,32 @@ function renderMovementDetail(item) {
     : item.inventoryProductId
       ? `Producto #${item.inventoryProductId}`
       : "";
+  const paymentTrace = getMovementPaymentTrace(item);
+  const initialPayment = paymentTrace.find((payment) => payment.isInitial);
 
   return `
     <div class="detail-panel">
       <div class="detail-grid">
-        ${createDetailItem("Caja", escapeHtml(item.medioPago))}
+        ${
+          initialPayment
+            ? createDetailItem(
+                "Pago inicial",
+                `${escapeHtml(initialPayment.paymentMethod)} · ${formatCurrency(
+                  initialPayment.amount
+                )}`
+              )
+            : ""
+        }
         ${
           item.sourceSystem === "wodbuster"
             ? createDetailItem("Origen", "WodBuster")
             : ""
         }
         ${createDetailItem("Abono", formatCurrency(item.abono))}
+        ${createDetailItem(
+          "Registrado por",
+          escapeHtml(item.registeredBy || "Sistema / histórico")
+        )}
         ${createDetailItem(
           "Flujo neto",
           `<span class="${item.flujoNeto >= 0 ? "positive" : "negative"}">${formatCurrency(
@@ -2407,7 +2422,115 @@ function renderMovementDetail(item) {
           "detail-item--wide"
         )}
       </div>
+      ${renderMovementPaymentTrace(item, paymentTrace)}
     </div>
+  `;
+}
+
+function getMovementPaymentTrace(item) {
+  const collections = getCollectionHistory(item.id).sort((a, b) => {
+    if (a.collectionDate === b.collectionDate) {
+      return String(a.createdAt || "").localeCompare(String(b.createdAt || ""));
+    }
+
+    return String(a.collectionDate).localeCompare(String(b.collectionDate));
+  });
+  const collectionsTotal = collections.reduce(
+    (total, collection) => total + Number(collection.amount || 0),
+    0
+  );
+  const directPaymentAmount = Math.max(
+    Number(item.abono || 0) - collectionsTotal,
+    0
+  );
+  const trace = [];
+
+  if (directPaymentAmount > 0) {
+    trace.push({
+      id: `initial-${item.id}`,
+      isInitial: true,
+      label: "Pago inicial",
+      date: item.fecha,
+      amount: directPaymentAmount,
+      paymentMethod: item.medioPago,
+      registeredBy: item.registeredBy || "Sistema / histórico",
+      notes: "",
+    });
+  }
+
+  collections.forEach((collection, index) => {
+    trace.push({
+      id: `collection-${collection.id}`,
+      isInitial: false,
+      label: `Cobro ${index + 1}`,
+      date: collection.collectionDate,
+      amount: Number(collection.amount || 0),
+      paymentMethod: collection.paymentMethod,
+      registeredBy: collection.registeredBy || "Sistema",
+      notes: collection.notes || "",
+    });
+  });
+
+  return trace;
+}
+
+function renderMovementPaymentTrace(item, trace = getMovementPaymentTrace(item)) {
+  const totalPaid = trace.reduce(
+    (total, payment) => total + Number(payment.amount || 0),
+    0
+  );
+  const paymentMethods = [
+    ...new Set(trace.map((payment) => payment.paymentMethod).filter(Boolean)),
+  ];
+
+  return `
+    <section class="movement-payment-trace" aria-label="Trazabilidad de pagos">
+      <div class="movement-payment-trace-head">
+        <div>
+          <span>Trazabilidad de pagos</span>
+          <strong>${
+            trace.length
+              ? `${trace.length} registro(s) · ${paymentMethods.length} caja(s)`
+              : "Sin pagos registrados"
+          }</strong>
+        </div>
+        <strong>${formatCurrency(totalPaid)}</strong>
+      </div>
+      <div class="movement-payment-trace-list">
+        ${
+          trace.length
+            ? trace
+                .map(
+                  (payment, index) => `
+                    <article class="movement-payment-trace-item">
+                      <span class="movement-payment-trace-index">${index + 1}</span>
+                      <div class="movement-payment-trace-copy">
+                        <strong>${escapeHtml(payment.label)}</strong>
+                        <small>${formatDate(payment.date)} · ${escapeHtml(
+                          payment.registeredBy
+                        )}</small>
+                        ${
+                          payment.notes
+                            ? `<small>${escapeHtml(payment.notes)}</small>`
+                            : ""
+                        }
+                      </div>
+                      <div class="movement-payment-trace-value">
+                        <strong>${formatCurrency(payment.amount)}</strong>
+                        <span>${escapeHtml(payment.paymentMethod)}</span>
+                      </div>
+                    </article>
+                  `
+                )
+                .join("")
+            : `
+                <div class="empty-state movement-payment-trace-empty">
+                  Esta venta todavía no tiene pagos ni cobros registrados.
+                </div>
+              `
+        }
+      </div>
+    </section>
   `;
 }
 
@@ -12464,7 +12587,7 @@ function getBoxLedgerEntries() {
       ]
         .filter(Boolean)
         .join(" · "),
-      registeredBy: "Sistema",
+      registeredBy: movement.registeredBy || "Sistema / histórico",
       inflow: isIncome ? directAmount : 0,
       outflow: isIncome ? 0 : directAmount,
       amount: isIncome ? directAmount : directAmount * -1,

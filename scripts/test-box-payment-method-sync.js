@@ -7,6 +7,7 @@ const baseUrl = process.env.TEST_BASE_URL || "http://localhost:3000";
 const runId = `test:box-sync:${Date.now()}`;
 const movementIds = [];
 let token = "";
+let adminUserId = 0;
 
 async function api(path, body, method = "POST") {
   const response = await fetch(`${baseUrl}${path}`, {
@@ -24,8 +25,12 @@ async function api(path, body, method = "POST") {
   return payload;
 }
 
-async function createMovement({ category, paymentMethod, paidAmount = 0 }) {
-  const totalAmount = 100000;
+async function createMovement({
+  category,
+  paymentMethod,
+  paidAmount = 0,
+  totalAmount = 100000,
+}) {
   const balanceDue = totalAmount - paidAmount;
   const paymentStatus =
     paidAmount <= 0 ? "Pendiente" : paidAmount >= totalAmount ? "Pagado" : "Parcial";
@@ -48,12 +53,13 @@ async function createMovement({ category, paymentMethod, paidAmount = 0 }) {
         month_number,
         month_name,
         notes,
-        source_system
+        source_system,
+        registered_by_user_id
       )
       values (
         'Gimnasio', current_date, 'Ingreso', $1, $2, $3, $4, $5,
         $6, $7, $8, $7, extract(year from current_date)::integer,
-        extract(month from current_date)::integer, 'Prueba', $9, 'test'
+        extract(month from current_date)::integer, 'Prueba', $9, 'test', $10
       )
       returning id, to_char(movement_date, 'YYYY-MM-DD') as movement_date
     `,
@@ -67,6 +73,7 @@ async function createMovement({ category, paymentMethod, paidAmount = 0 }) {
       paidAmount,
       balanceDue,
       "Movimiento temporal para validar sincronización de cajas",
+      adminUserId,
     ]
   );
   const movementId = Number(result.rows[0].id);
@@ -116,8 +123,8 @@ async function main() {
       limit 1
     `
   );
-  const adminId = Number(adminResult.rows[0]?.id || 0);
-  if (!adminId) {
+  adminUserId = Number(adminResult.rows[0]?.id || 0);
+  if (!adminUserId) {
     throw new Error("No hay un administrador activo para ejecutar la prueba.");
   }
 
@@ -151,7 +158,7 @@ async function main() {
     throw new Error("La prueba requiere una categoría de gimnasio activa.");
   }
 
-  token = (await createSession(adminId)).token;
+  token = (await createSession(adminUserId)).token;
   const pendingMovement = await createMovement({
     category,
     paymentMethod: methods[0],
@@ -170,6 +177,44 @@ async function main() {
     throw new Error("No se creó el cobro de prueba.");
   }
   await assertPaymentMethods(pendingMovement.id, methods[0], methods[0]);
+
+  const splitMovement = await createMovement({
+    category,
+    paymentMethod: methods[0],
+    paidAmount: 30000,
+    totalAmount: 80000,
+  });
+  await api(
+    `/api/movements/${splitMovement.id}/collections`,
+    {
+      collectionDate: splitMovement.date,
+      amount: 50000,
+      paymentMethod: methods[1],
+      notes: "Segundo pago de prueba en una caja diferente",
+    }
+  );
+  await assertPaymentMethods(splitMovement.id, methods[0], methods[1]);
+
+  const splitResult = await query(
+    `
+      select
+        m.paid_amount - coalesce(sum(mc.amount), 0) as direct_amount,
+        coalesce(sum(mc.amount), 0) as collected_amount,
+        m.registered_by_user_id
+      from movements m
+      left join movement_collections mc on mc.movement_id = m.id
+      where m.id = $1
+      group by m.id
+    `,
+    [splitMovement.id]
+  );
+  if (
+    Number(splitResult.rows[0]?.direct_amount || 0) !== 30000 ||
+    Number(splitResult.rows[0]?.collected_amount || 0) !== 50000 ||
+    Number(splitResult.rows[0]?.registered_by_user_id || 0) !== adminUserId
+  ) {
+    throw new Error("El pago dividido no conservó sus valores o el usuario de registro.");
+  }
 
   await api(
     `/api/movements/${pendingMovement.id}`,
@@ -227,7 +272,7 @@ async function main() {
   }
 
   console.log(
-    "Prueba de cajas OK: cobro, movimiento, caja inversa y auditoría sincronizados."
+    "Prueba de cajas OK: pago dividido, cobro, caja inversa y auditoría sincronizados."
   );
 }
 

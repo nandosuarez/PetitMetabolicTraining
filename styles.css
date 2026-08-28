@@ -3194,6 +3194,98 @@ table.adaptive-stack-table {
   grid-column: 1 / -1;
 }
 
+.movement-payment-trace {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+  padding: 14px;
+  border: 1px solid rgba(159, 239, 1, 0.34);
+  border-radius: 16px;
+  background: linear-gradient(135deg, rgba(159, 239, 1, 0.1), rgba(255, 255, 255, 0.78));
+}
+
+.movement-payment-trace-head,
+.movement-payment-trace-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.movement-payment-trace-head > div,
+.movement-payment-trace-copy,
+.movement-payment-trace-value {
+  display: grid;
+  gap: 3px;
+}
+
+.movement-payment-trace-head span,
+.movement-payment-trace-value span {
+  color: var(--muted);
+  font-size: 0.74rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.movement-payment-trace-list {
+  display: grid;
+  gap: 8px;
+}
+
+.movement-payment-trace-item {
+  padding: 11px 12px;
+  border-radius: 13px;
+  background: rgba(255, 255, 255, 0.88);
+}
+
+.movement-payment-trace-index {
+  display: grid;
+  flex: 0 0 30px;
+  width: 30px;
+  height: 30px;
+  place-items: center;
+  border-radius: 50%;
+  color: #111;
+  font-weight: 800;
+  background: var(--accent);
+}
+
+.movement-payment-trace-copy {
+  min-width: 0;
+  margin-right: auto;
+}
+
+.movement-payment-trace-copy small {
+  color: var(--muted);
+}
+
+.movement-payment-trace-value {
+  justify-items: end;
+  text-align: right;
+}
+
+.movement-payment-trace-empty {
+  padding: 12px;
+}
+
+@media (max-width: 640px) {
+  .movement-payment-trace-head,
+  .movement-payment-trace-item {
+    align-items: flex-start;
+  }
+
+  .movement-payment-trace-item {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .movement-payment-trace-value {
+    grid-column: 2;
+    justify-items: start;
+    text-align: left;
+  }
+}
+
 .grid-span-full {
   grid-column: 1 / -1;
 }
