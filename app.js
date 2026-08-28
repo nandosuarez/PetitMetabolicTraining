@@ -2565,21 +2565,27 @@ function renderMovementsView() {
                     <path d="m12 6 4 4"></path>
                   </svg>
                 </button>
-                <button
-                  class="table-button danger icon-button"
-                  type="button"
-                  data-delete-id="${item.id}"
-                  title="Eliminar movimiento"
-                  aria-label="Eliminar movimiento"
-                >
-                  <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-                    <path d="M4 7h16"></path>
-                    <path d="M10 11v6"></path>
-                    <path d="M14 11v6"></path>
-                    <path d="M6 7l1 12h10l1-12"></path>
-                    <path d="M9 7V4h6v3"></path>
-                  </svg>
-                </button>
+                ${
+                  isAdminUser()
+                    ? `
+                      <button
+                        class="table-button danger icon-button"
+                        type="button"
+                        data-delete-id="${item.id}"
+                        title="Eliminar movimiento"
+                        aria-label="Eliminar movimiento"
+                      >
+                        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                          <path d="M4 7h16"></path>
+                          <path d="M10 11v6"></path>
+                          <path d="M14 11v6"></path>
+                          <path d="M6 7l1 12h10l1-12"></path>
+                          <path d="M9 7V4h6v3"></path>
+                        </svg>
+                      </button>
+                    `
+                    : ""
+                }
               </div>
             `,
               "actions-cell"

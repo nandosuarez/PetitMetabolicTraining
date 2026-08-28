@@ -2080,7 +2080,7 @@ app.put("/api/movements/:id", requireOperationalWriteAccess, asyncHandler(async 
   res.json(updatedMovement);
 }));
 
-app.delete("/api/movements/:id", requireOperationalWriteAccess, asyncHandler(async (req, res) => {
+app.delete("/api/movements/:id", requireAdmin, asyncHandler(async (req, res) => {
   const movementId = Number(req.params.id);
   await assertMovementMutationAllowed(req.authUser, movementId);
 
@@ -2096,15 +2096,6 @@ app.delete("/api/movements/:id", requireOperationalWriteAccess, asyncHandler(asy
 
   if (!movementResult.rows.length) {
     return res.status(404).json({ error: "Movimiento no encontrado." });
-  }
-
-  if (
-    ["Costo", "Gasto"].includes(movementResult.rows[0].movement_type) &&
-    req.authUser?.role !== "administrador"
-  ) {
-    return res.status(403).json({
-      error: "Solo el perfil administrador puede eliminar movimientos de costos o gastos.",
-    });
   }
 
   const deletedId = await withClient(async (client) => {
