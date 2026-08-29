@@ -1930,6 +1930,7 @@
           item.descripcion,
           item.medioPago,
           item.observaciones,
+          item.registeredBy,
           item.valorTotal,
           item.abono,
         ].join(" ")
@@ -1997,7 +1998,12 @@
           <tr>
             <td>${escapeHtml(formatDate(item.fecha))}</td>
             <td>${escapeHtml(item.tipo)}</td>
-            <td>${escapeHtml(summary || "Sin detalle")}</td>
+            <td>
+              <strong>${escapeHtml(summary || "Sin detalle")}</strong>
+              <div class="inline-hint">
+                Registrado por ${escapeHtml(item.registeredBy || "Sistema / histórico")}
+              </div>
+            </td>
             <td>${escapeHtml(item.medioPago || "Sin caja")}</td>
             <td>${formatCurrency(item.valorTotal)}</td>
             <td>${formatCurrency(item.abono)}</td>
