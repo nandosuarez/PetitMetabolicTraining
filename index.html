@@ -160,6 +160,7 @@
           <button class="nav-link" data-view="contabilidad">Contabilidad</button>
           <button class="nav-link" data-view="cartera">Clientes</button>
           <button class="nav-link" data-view="pedidos">Pedidos</button>
+          <button class="nav-link" data-view="promocion">Promoción diciembre</button>
           <button class="nav-link" data-view="programacion">Programación</button>
           <button class="nav-link" data-view="inventario">Inventario</button>
           <button class="nav-link" data-view="listas">Listas maestras</button>
@@ -1893,6 +1894,158 @@
               </div>
             </div>
             <div id="merchandise-orders-list" class="order-board"></div>
+          </section>
+        </section>
+
+        <section id="promocion-view" class="view">
+          <section class="promotion-hero">
+            <div class="promotion-hero-copy">
+              <p class="section-kicker">Campaña especial · 100 cupos</p>
+              <h3>Mensualidad de diciembre por $66.000</h3>
+              <p>
+                Registra aquí a cada persona que pague y mantenla pendiente para
+                activar su mensualidad desde el 15 de noviembre de 2026.
+              </p>
+            </div>
+            <div class="promotion-hero-price">
+              <span>Pago anticipado</span>
+              <strong>$66.000</strong>
+              <small>Consumible en diciembre</small>
+            </div>
+          </section>
+
+          <div id="promotion-metrics" class="stats-grid"></div>
+
+          <div class="content-grid two-up align-start">
+            <section class="panel">
+              <div class="panel-head">
+                <div>
+                  <p class="section-kicker">Nuevo cupo</p>
+                  <h3>Registrar persona que pagó</h3>
+                </div>
+              </div>
+
+              <form id="promotion-form" class="form-grid">
+                <input id="promotion-client-id" type="hidden" />
+
+                <label class="search-field span-2">
+                  Cliente
+                  <input
+                    id="promotion-client-search"
+                    type="search"
+                    placeholder="Busca por nombre, alias, DNI o teléfono"
+                    autocomplete="off"
+                    required
+                  />
+                  <div
+                    id="promotion-client-suggestions"
+                    class="search-suggestions is-hidden"
+                    role="listbox"
+                    aria-label="Clientes disponibles para la promoción"
+                  ></div>
+                  <span class="inline-hint">
+                    Selecciona una persona de la base de clientes.
+                  </span>
+                </label>
+
+                <label>
+                  Fecha del pago
+                  <input id="promotion-payment-date" type="date" required />
+                </label>
+
+                <label>
+                  Caja / medio de pago
+                  <select id="promotion-payment-method" required></select>
+                </label>
+
+                <label>
+                  Valor promocional
+                  <input id="promotion-price" type="text" value="$66.000" readonly />
+                </label>
+
+                <label class="span-2">
+                  Observaciones
+                  <textarea
+                    id="promotion-notes"
+                    rows="3"
+                    maxlength="500"
+                    placeholder="Información opcional sobre el pago o la activación"
+                  ></textarea>
+                </label>
+
+                <div id="promotion-feedback" class="form-note span-2">
+                  Al guardar también se registrará el ingreso en movimientos y cajas.
+                </div>
+
+                <div class="form-actions span-2">
+                  <button class="primary-button" type="submit">
+                    Registrar pago y reservar cupo
+                  </button>
+                </div>
+              </form>
+            </section>
+
+            <section class="panel promotion-guide">
+              <div class="panel-head">
+                <div>
+                  <p class="section-kicker">Proceso de activación</p>
+                  <h3>Preparados para diciembre</h3>
+                </div>
+              </div>
+              <div class="promotion-timeline">
+                <article>
+                  <span>1</span>
+                  <div>
+                    <strong>Registrar el pago</strong>
+                    <p>Selecciona al cliente y la caja donde ingresaron los $66.000.</p>
+                  </div>
+                </article>
+                <article>
+                  <span>2</span>
+                  <div>
+                    <strong>Mantener pendiente</strong>
+                    <p>La persona quedará en el listado de mensualidades por activar.</p>
+                  </div>
+                </article>
+                <article>
+                  <span>3</span>
+                  <div>
+                    <strong>Activar desde el 15 de noviembre</strong>
+                    <p>Marca la mensualidad como activada para que se consuma en diciembre.</p>
+                  </div>
+                </article>
+              </div>
+            </section>
+          </div>
+
+          <section class="panel">
+            <div class="panel-head promotion-list-head">
+              <div>
+                <p class="section-kicker">Seguimiento de cupos</p>
+                <h3>Personas registradas</h3>
+              </div>
+              <div class="promotion-filters">
+                <label>
+                  Estado
+                  <select id="promotion-filter-status">
+                    <option value="all">Todos</option>
+                    <option value="pending_activation">Pendientes de activar</option>
+                    <option value="activated">Activadas</option>
+                  </select>
+                </label>
+                <label>
+                  Buscar
+                  <input
+                    id="promotion-filter-query"
+                    type="search"
+                    placeholder="Nombre, alias, DNI o teléfono"
+                  />
+                </label>
+              </div>
+            </div>
+            <div id="promotion-registrations" class="promotion-registration-list">
+              <div class="empty-state">Cargando promoción...</div>
+            </div>
           </section>
         </section>
 
@@ -4084,5 +4237,6 @@
     <script src="./app.js"></script>
     <script src="./app.overrides.js"></script>
     <script src="./app.orders.js"></script>
+    <script src="./app.promotions.js"></script>
   </body>
 </html>

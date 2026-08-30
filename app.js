@@ -128,6 +128,7 @@ const elements = {
     contabilidad: document.getElementById("contabilidad-view"),
     cartera: document.getElementById("cartera-view"),
     pedidos: document.getElementById("pedidos-view"),
+    promocion: document.getElementById("promocion-view"),
     actividades: document.getElementById("actividades-view"),
     programacion: document.getElementById("programacion-view"),
     inventario: document.getElementById("inventario-view"),
@@ -1622,6 +1623,7 @@ function getAllowedViews() {
       "contabilidad",
       "cartera",
       "pedidos",
+      "promocion",
       "programacion",
       "inventario",
       "listas",
@@ -1631,7 +1633,15 @@ function getAllowedViews() {
   }
 
   if (isAssistantUser()) {
-    return ["movimientos", "cajas", "actividades", "diario", "cartera", "pedidos"];
+    return [
+      "movimientos",
+      "cajas",
+      "actividades",
+      "diario",
+      "cartera",
+      "pedidos",
+      "promocion",
+    ];
   }
 
   if (isAccountantUser()) {
@@ -1944,6 +1954,7 @@ function switchView(view, options = {}) {
     contabilidad: "Contabilidad",
     cartera: "Clientes",
     pedidos: "Pedidos",
+    promocion: "Promoción diciembre",
     actividades: "Actividades",
     programacion: "Programación",
     listas: "Listas maestras",

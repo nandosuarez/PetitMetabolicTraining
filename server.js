@@ -65,6 +65,8 @@ const protectedCatalogGroups = new Set([
   "estadosPago",
 ]);
 
+const DECEMBER_PROMOTION_CODE = "diciembre-2026-66000";
+
 const programmingExerciseFamilies = new Set([
   "multiarticular_tren_inferior",
   "multiarticular_tren_superior",
@@ -600,6 +602,275 @@ app.patch(
     }
 
     res.json(mapClientRow(result.rows[0]));
+  })
+);
+
+app.get(
+  "/api/promotions/december-2026",
+  requireOperationalWriteAccess,
+  asyncHandler(async (_req, res) => {
+    res.json(await readDecemberPromotion());
+  })
+);
+
+app.post(
+  "/api/promotions/december-2026/registrations",
+  requireOperationalWriteAccess,
+  asyncHandler(async (req, res) => {
+    const payload = normalizePromotionRegistrationPayload(req.body);
+    validatePromotionRegistrationPayload(payload);
+
+    let registrationId = 0;
+    try {
+      registrationId = await withClient(async (client) => {
+        await client.query("begin");
+
+        try {
+          const campaignResult = await client.query(
+            `
+              select *
+              from promotion_campaigns
+              where code = $1
+              limit 1
+              for update
+            `,
+            [DECEMBER_PROMOTION_CODE]
+          );
+          const campaign = campaignResult.rows[0];
+          if (!campaign || !campaign.is_active) {
+            throw httpError(400, "La promoción de diciembre no está disponible.");
+          }
+
+          const clientResult = await client.query(
+            `
+              select *
+              from clients
+              where id = $1
+                and is_active = true
+                and is_client = true
+              limit 1
+            `,
+            [payload.clientId]
+          );
+          const selectedClient = clientResult.rows[0];
+          if (!selectedClient) {
+            throw httpError(400, "Selecciona un cliente activo para reservar el cupo.");
+          }
+
+          const paymentMethodResult = await client.query(
+            `
+              select 1
+              from catalog_items
+              where group_name = 'mediosPago'
+                and value = $1
+                and is_active = true
+              limit 1
+            `,
+            [payload.paymentMethod]
+          );
+          if (!paymentMethodResult.rows.length) {
+            throw httpError(400, "Selecciona una caja o medio de pago activo.");
+          }
+
+          const existingResult = await client.query(
+            `
+              select id
+              from promotion_registrations
+              where campaign_id = $1
+                and client_id = $2
+              limit 1
+            `,
+            [campaign.id, payload.clientId]
+          );
+          if (existingResult.rows.length) {
+            throw httpError(409, "Este cliente ya tiene un cupo registrado en la promoción.");
+          }
+
+          const capacityResult = await client.query(
+            `
+              select count(*)::integer as registered_count
+              from promotion_registrations
+              where campaign_id = $1
+            `,
+            [campaign.id]
+          );
+          if (
+            Number(capacityResult.rows[0]?.registered_count || 0) >=
+            Number(campaign.capacity || 0)
+          ) {
+            throw httpError(409, "Los 100 cupos de la promoción ya fueron registrados.");
+          }
+
+          const [year, monthNumber] = payload.paymentDate.split("-").map(Number);
+          const movementResult = await client.query(
+            `
+              insert into movements (
+                business_line,
+                movement_date,
+                movement_type,
+                category,
+                business_product_id,
+                client_name,
+                description,
+                payment_status,
+                payment_method,
+                total_amount,
+                paid_amount,
+                balance_due,
+                cash_flow,
+                inventory_product_id,
+                inventory_quantity,
+                inventory_effect,
+                year,
+                month_number,
+                month_name,
+                notes,
+                source_system,
+                registered_by_user_id
+              )
+              values (
+                'Gimnasio', $1, 'Ingreso', 'Promoción diciembre', null,
+                $2, $3, 'Pagado', $4, $5, $5, 0, $5,
+                null, 0, 'ninguno', $6, $7, $8, $9, 'promotion', $10
+              )
+              returning id
+            `,
+            [
+              payload.paymentDate,
+              selectedClient.full_name,
+              campaign.name,
+              payload.paymentMethod,
+              Number(campaign.unit_price),
+              year,
+              monthNumber,
+              monthNames[(monthNumber || 1) - 1] || "",
+              [
+                `Cupo promoción ${campaign.name}`,
+                payload.notes,
+              ]
+                .filter(Boolean)
+                .join(" | "),
+              Number(req.authUser.id),
+            ]
+          );
+
+          const registrationResult = await client.query(
+            `
+              insert into promotion_registrations (
+                campaign_id,
+                client_id,
+                movement_id,
+                payment_date,
+                payment_method,
+                amount_paid,
+                notes,
+                registered_by_user_id
+              )
+              values ($1, $2, $3, $4, $5, $6, $7, $8)
+              returning id
+            `,
+            [
+              campaign.id,
+              payload.clientId,
+              movementResult.rows[0].id,
+              payload.paymentDate,
+              payload.paymentMethod,
+              Number(campaign.unit_price),
+              payload.notes,
+              Number(req.authUser.id),
+            ]
+          );
+
+          await client.query("commit");
+          return Number(registrationResult.rows[0].id);
+        } catch (error) {
+          await client.query("rollback");
+          throw error;
+        }
+      });
+    } catch (error) {
+      if (error?.code === "23505") {
+        throw httpError(409, "Este cliente ya tiene un cupo registrado en la promoción.");
+      }
+      throw error;
+    }
+
+    const promotion = await readDecemberPromotion();
+    res.status(201).json({
+      registration: promotion.registrations.find(
+        (item) => Number(item.id) === registrationId
+      ),
+      campaign: promotion.campaign,
+    });
+  })
+);
+
+app.patch(
+  "/api/promotions/december-2026/registrations/:id/activate",
+  requireOperationalWriteAccess,
+  asyncHandler(async (req, res) => {
+    const registrationId = Number(req.params.id);
+    if (!Number.isInteger(registrationId) || registrationId <= 0) {
+      return res.status(400).json({ error: "Cupo promocional inválido." });
+    }
+
+    const activationDate = getCurrentIsoDateInBogota();
+    const result = await query(
+      `
+        update promotion_registrations pr
+        set
+          status = 'activated',
+          activation_date = $2,
+          activated_by_user_id = $3,
+          activated_at = now(),
+          updated_at = now()
+        from promotion_campaigns pc
+        where pr.id = $1
+          and pc.id = pr.campaign_id
+          and pc.code = $4
+          and pr.status = 'pending_activation'
+          and $2::date >= pc.activation_start_date
+        returning pr.id
+      `,
+      [
+        registrationId,
+        activationDate,
+        Number(req.authUser.id),
+        DECEMBER_PROMOTION_CODE,
+      ]
+    );
+
+    if (!result.rows.length) {
+      const currentResult = await query(
+        `
+          select pr.status, pc.activation_start_date
+          from promotion_registrations pr
+          join promotion_campaigns pc on pc.id = pr.campaign_id
+          where pr.id = $1
+            and pc.code = $2
+          limit 1
+        `,
+        [registrationId, DECEMBER_PROMOTION_CODE]
+      );
+      const current = currentResult.rows[0];
+      if (!current) {
+        return res.status(404).json({ error: "Cupo promocional no encontrado." });
+      }
+      if (current.status === "activated") {
+        return res.status(409).json({ error: "Esta mensualidad ya fue activada." });
+      }
+      return res.status(400).json({
+        error: "Las activaciones estarán disponibles desde el 15 de noviembre de 2026.",
+      });
+    }
+
+    const promotion = await readDecemberPromotion();
+    res.json({
+      registration: promotion.registrations.find(
+        (item) => Number(item.id) === registrationId
+      ),
+      campaign: promotion.campaign,
+    });
   })
 );
 
@@ -4597,6 +4868,33 @@ function normalizeMovementPayload(body) {
   };
 }
 
+function normalizePromotionRegistrationPayload(body) {
+  return {
+    clientId: Number(body.clientId || 0),
+    paymentDate: normalizeDateOnly(body.paymentDate),
+    paymentMethod: String(body.paymentMethod || "").trim(),
+    notes: String(body.notes || "").trim(),
+  };
+}
+
+function validatePromotionRegistrationPayload(payload) {
+  if (!Number.isInteger(payload.clientId) || payload.clientId <= 0) {
+    throw httpError(400, "Selecciona la persona que pagó la promoción.");
+  }
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(payload.paymentDate)) {
+    throw httpError(400, "Selecciona una fecha de pago válida.");
+  }
+  if (payload.paymentDate > getCurrentIsoDateInBogota()) {
+    throw httpError(400, "La fecha del pago no puede estar en el futuro.");
+  }
+  if (!payload.paymentMethod) {
+    throw httpError(400, "Selecciona la caja donde ingresó el pago.");
+  }
+  if (payload.notes.length > 500) {
+    throw httpError(400, "Las observaciones no pueden superar 500 caracteres.");
+  }
+}
+
 function normalizeMerchandiseOrderPayload(body) {
   const rawItems = Array.isArray(body.items) ? body.items : [];
   const items = rawItems.map((item) => ({
@@ -8525,6 +8823,54 @@ function mapClientRow(row) {
   };
 }
 
+function mapPromotionCampaignRow(row) {
+  const capacity = Number(row.capacity || 0);
+  const registeredCount = Number(row.registered_count || 0);
+  const activationStartDate = normalizeDateOnly(row.activation_start_date);
+
+  return {
+    id: Number(row.id),
+    code: row.code,
+    name: row.name,
+    targetMonth: normalizeDateOnly(row.target_month),
+    activationStartDate,
+    unitPrice: Number(row.unit_price || 0),
+    capacity,
+    registeredCount,
+    availableSlots: Math.max(capacity - registeredCount, 0),
+    pendingCount: Number(row.pending_count || 0),
+    activatedCount: Number(row.activated_count || 0),
+    totalCollected: Number(row.total_collected || 0),
+    isActive: Boolean(row.is_active),
+    activationOpen: getCurrentIsoDateInBogota() >= activationStartDate,
+  };
+}
+
+function mapPromotionRegistrationRow(row) {
+  return {
+    id: Number(row.id),
+    campaignId: Number(row.campaign_id),
+    clientId: Number(row.client_id),
+    movementId: Number(row.movement_id || 0),
+    clientName: row.client_name || "",
+    clientAlias: row.client_alias || "",
+    documentNumber: row.document_number || "",
+    phone: row.phone || "",
+    paymentDate: normalizeDateOnly(row.payment_date),
+    paymentMethod: row.current_payment_method || row.payment_method || "",
+    amountPaid: Number(row.amount_paid || 0),
+    status: row.status,
+    activationDate: normalizeDateOnly(row.activation_date),
+    notes: row.notes || "",
+    registeredBy:
+      row.registered_by_name || row.registered_by_username || "Sistema",
+    activatedBy:
+      row.activated_by_name || row.activated_by_username || "",
+    createdAt: row.created_at || null,
+    updatedAt: row.updated_at || null,
+  };
+}
+
 function normalizeDateOnly(value) {
   if (!value) {
     return "";
@@ -9376,6 +9722,69 @@ async function listClients() {
   );
 
   return result.rows.map(mapClientRow);
+}
+
+async function readDecemberPromotion() {
+  const campaignResult = await query(
+    `
+      select
+        pc.*,
+        count(pr.id)::integer as registered_count,
+        count(pr.id) filter (
+          where pr.status = 'pending_activation'
+        )::integer as pending_count,
+        count(pr.id) filter (
+          where pr.status = 'activated'
+        )::integer as activated_count,
+        coalesce(sum(pr.amount_paid), 0) as total_collected
+      from promotion_campaigns pc
+      left join promotion_registrations pr
+        on pr.campaign_id = pc.id
+      where pc.code = $1
+      group by pc.id
+      limit 1
+    `,
+    [DECEMBER_PROMOTION_CODE]
+  );
+
+  if (!campaignResult.rows.length) {
+    throw httpError(404, "La promoción de diciembre no está configurada.");
+  }
+
+  const registrationsResult = await query(
+    `
+      select
+        pr.*,
+        c.full_name as client_name,
+        c.alias as client_alias,
+        c.document_number,
+        c.phone,
+        coalesce(m.payment_method, pr.payment_method) as current_payment_method,
+        coalesce(nullif(ru.full_name, ''), ru.username) as registered_by_name,
+        ru.username as registered_by_username,
+        coalesce(nullif(au.full_name, ''), au.username) as activated_by_name,
+        au.username as activated_by_username
+      from promotion_registrations pr
+      join promotion_campaigns pc
+        on pc.id = pr.campaign_id
+      join clients c
+        on c.id = pr.client_id
+      left join movements m
+        on m.id = pr.movement_id
+      left join app_users ru
+        on ru.id = pr.registered_by_user_id
+      left join app_users au
+        on au.id = pr.activated_by_user_id
+      where pc.code = $1
+      order by pr.payment_date desc, pr.created_at desc, pr.id desc
+    `,
+    [DECEMBER_PROMOTION_CODE]
+  );
+
+  return {
+    campaign: mapPromotionCampaignRow(campaignResult.rows[0]),
+    registrations: registrationsResult.rows.map(mapPromotionRegistrationRow),
+  };
 }
 
 async function findClientByName(fullName, options = {}) {

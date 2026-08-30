@@ -1777,6 +1777,374 @@ textarea {
   }
 }
 
+/* December promotion registry */
+.promotion-hero {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 28px;
+  overflow: hidden;
+  padding: 30px 34px;
+  border: 1px solid rgba(159, 239, 1, 0.38);
+  border-radius: var(--radius-xl);
+  color: #fff;
+  background:
+    radial-gradient(circle at 88% 50%, rgba(159, 239, 1, 0.22), transparent 28%),
+    linear-gradient(120deg, #050705 0%, #10150d 62%, #17210e 100%);
+  box-shadow: 0 20px 48px rgba(14, 23, 8, 0.16);
+}
+
+.promotion-hero::after {
+  position: absolute;
+  right: -54px;
+  bottom: -90px;
+  width: 230px;
+  height: 230px;
+  border: 1px solid rgba(159, 239, 1, 0.28);
+  border-radius: 50%;
+  content: "";
+}
+
+.promotion-hero-copy,
+.promotion-hero-price {
+  position: relative;
+  z-index: 1;
+}
+
+.promotion-hero-copy {
+  max-width: 720px;
+}
+
+.promotion-hero h3 {
+  margin: 5px 0 8px;
+  font-family: var(--font-display);
+  font-size: clamp(1.65rem, 3vw, 2.8rem);
+  line-height: 1;
+}
+
+.promotion-hero p {
+  max-width: 650px;
+  margin: 0;
+  color: rgba(255, 255, 255, 0.72);
+  line-height: 1.55;
+}
+
+.promotion-hero .eyebrow {
+  color: var(--accent);
+}
+
+.promotion-hero-price {
+  flex: 0 0 auto;
+  min-width: 200px;
+  padding: 20px 24px;
+  border: 1px solid rgba(159, 239, 1, 0.54);
+  border-radius: 22px;
+  text-align: right;
+  background: rgba(0, 0, 0, 0.42);
+}
+
+.promotion-hero-price strong,
+.promotion-hero-price span {
+  display: block;
+}
+
+.promotion-hero-price strong {
+  color: var(--accent);
+  font-family: var(--font-display);
+  font-size: clamp(2rem, 4vw, 3.4rem);
+  line-height: 1;
+}
+
+.promotion-hero-price span {
+  margin-top: 6px;
+  color: rgba(255, 255, 255, 0.76);
+  font-size: 0.88rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.promotion-guide {
+  background: linear-gradient(145deg, rgba(159, 239, 1, 0.1), rgba(255, 255, 255, 0.94));
+}
+
+.promotion-timeline {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 18px;
+}
+
+.promotion-timeline > article {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+  padding: 15px;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.76);
+}
+
+.promotion-timeline > article > span {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  place-items: center;
+  border-radius: 50%;
+  color: #0a0a0a;
+  font-weight: 900;
+  background: var(--accent);
+}
+
+.promotion-timeline strong,
+.promotion-timeline p {
+  display: block;
+}
+
+.promotion-timeline p {
+  margin-top: 4px;
+  margin-bottom: 0;
+  color: var(--muted);
+  line-height: 1.4;
+}
+
+.promotion-list-head {
+  align-items: flex-end;
+}
+
+.promotion-filters {
+  display: flex;
+  gap: 12px;
+  align-items: flex-end;
+}
+
+.promotion-filters label {
+  min-width: 190px;
+}
+
+.promotion-filters label:last-child {
+  min-width: min(300px, 32vw);
+}
+
+.promotion-registration-list {
+  display: grid;
+  gap: 10px;
+}
+
+.promotion-registration-card {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 15px;
+  align-items: center;
+  padding: 17px;
+  border: 1px solid rgba(0, 0, 0, 0.1);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.9);
+  box-shadow: 0 10px 24px rgba(15, 23, 12, 0.04);
+}
+
+.promotion-registration-card.is-activated {
+  border-color: rgba(77, 189, 0, 0.3);
+  background: linear-gradient(110deg, rgba(159, 239, 1, 0.08), rgba(255, 255, 255, 0.96));
+}
+
+.promotion-registration-index {
+  display: grid;
+  width: 38px;
+  height: 38px;
+  place-items: center;
+  border-radius: 12px;
+  color: #0b0b0b;
+  font-weight: 900;
+  background: var(--accent);
+}
+
+.promotion-registration-main {
+  min-width: 0;
+}
+
+.promotion-registration-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.promotion-registration-head strong,
+.promotion-registration-head small {
+  display: block;
+}
+
+.promotion-registration-head > div > strong {
+  font-size: 1.05rem;
+}
+
+.promotion-registration-head small {
+  margin-top: 3px;
+  overflow: hidden;
+  color: var(--muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.promotion-status {
+  flex: 0 0 auto;
+  padding: 6px 10px;
+  border-radius: 999px;
+  font-size: 0.76rem;
+  font-weight: 800;
+}
+
+.promotion-status.is-pending {
+  color: #8a5b00;
+  background: rgba(255, 183, 0, 0.15);
+}
+
+.promotion-status.is-activated {
+  color: #277d00;
+  background: rgba(77, 189, 0, 0.13);
+}
+
+.promotion-registration-meta {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(110px, 1fr));
+  gap: 8px;
+  margin-top: 13px;
+}
+
+.promotion-registration-meta > span {
+  min-width: 0;
+  padding: 9px 10px;
+  border-radius: 11px;
+  background: rgba(0, 0, 0, 0.035);
+}
+
+.promotion-registration-meta small,
+.promotion-registration-meta strong {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.promotion-registration-meta small {
+  color: var(--muted);
+  font-size: 0.7rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.promotion-registration-meta strong {
+  margin-top: 2px;
+  font-size: 0.88rem;
+}
+
+.promotion-registration-notes {
+  margin: 10px 0 0;
+  padding-left: 10px;
+  border-left: 3px solid var(--accent);
+  color: var(--muted);
+  font-size: 0.86rem;
+}
+
+.promotion-registration-action {
+  min-width: 154px;
+}
+
+.promotion-activate-button {
+  width: 100%;
+}
+
+.promotion-activation-copy {
+  display: grid;
+  gap: 3px;
+  text-align: right;
+}
+
+.promotion-activation-copy strong {
+  color: #277d00;
+}
+
+.promotion-activation-copy small {
+  color: var(--muted);
+}
+
+@media (max-width: 980px) {
+  .promotion-registration-card {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .promotion-registration-action {
+    grid-column: 2;
+    min-width: 0;
+  }
+
+  .promotion-activation-copy {
+    text-align: left;
+  }
+}
+
+@media (max-width: 760px) {
+  .promotion-hero {
+    align-items: stretch;
+    flex-direction: column;
+    padding: 24px;
+  }
+
+  .promotion-hero-price {
+    min-width: 0;
+    text-align: left;
+  }
+
+  .promotion-timeline {
+    grid-template-columns: 1fr;
+  }
+
+  .promotion-list-head,
+  .promotion-filters {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .promotion-filters,
+  .promotion-filters label,
+  .promotion-filters label:last-child {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .promotion-registration-meta {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 520px) {
+  .promotion-registration-card {
+    grid-template-columns: 1fr;
+    padding: 14px;
+  }
+
+  .promotion-registration-index {
+    width: 32px;
+    height: 32px;
+  }
+
+  .promotion-registration-main,
+  .promotion-registration-action {
+    grid-column: 1;
+  }
+
+  .promotion-registration-head {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .promotion-status {
+    align-self: flex-start;
+  }
+}
+
 .order-item-builder {
   display: grid;
   gap: 14px;

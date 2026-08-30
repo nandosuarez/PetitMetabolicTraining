@@ -11,6 +11,7 @@
     "test:box-payment-sync": "node scripts/test-box-payment-method-sync.js",
     "test:movement-client": "node scripts/test-movement-client-required.js",
     "test:movement-delete-access": "node scripts/test-movement-delete-access.js",
+    "test:december-promotion": "node scripts/test-december-promotion.js",
     "test:wodbuster-review": "node scripts/test-wodbuster-review.js",
     "user:create": "node scripts/create-app-user.js"
   },

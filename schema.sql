@@ -175,6 +175,66 @@ alter table movements
 create index if not exists movements_registered_by_user_idx
   on movements (registered_by_user_id);
 
+create table if not exists promotion_campaigns (
+  id bigserial primary key,
+  code text not null unique,
+  name text not null,
+  target_month date not null,
+  activation_start_date date not null,
+  unit_price numeric(14, 2) not null check (unit_price > 0),
+  capacity integer not null check (capacity > 0),
+  is_active boolean not null default true,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+insert into promotion_campaigns (
+  code,
+  name,
+  target_month,
+  activation_start_date,
+  unit_price,
+  capacity,
+  is_active
+)
+values (
+  'diciembre-2026-66000',
+  'Mensualidad diciembre 2026',
+  date '2026-12-01',
+  date '2026-11-15',
+  66000,
+  100,
+  true
+)
+on conflict (code) do nothing;
+
+create table if not exists promotion_registrations (
+  id bigserial primary key,
+  campaign_id bigint not null references promotion_campaigns(id) on delete restrict,
+  client_id bigint not null references clients(id) on delete restrict,
+  movement_id bigint unique references movements(id) on delete set null,
+  payment_date date not null,
+  payment_method text not null,
+  amount_paid numeric(14, 2) not null check (amount_paid > 0),
+  status text not null default 'pending_activation' check (
+    status in ('pending_activation', 'activated')
+  ),
+  activation_date date,
+  notes text not null default '',
+  registered_by_user_id bigint not null references app_users(id) on delete restrict,
+  activated_by_user_id bigint references app_users(id) on delete set null,
+  activated_at timestamptz,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique (campaign_id, client_id)
+);
+
+create index if not exists promotion_registrations_campaign_status_idx
+  on promotion_registrations (campaign_id, status, payment_date desc);
+
+create index if not exists promotion_registrations_client_idx
+  on promotion_registrations (client_id, created_at desc);
+
 alter table app_users
   add column if not exists role text not null default 'administrador';
 
