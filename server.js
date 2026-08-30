@@ -31,6 +31,11 @@ const {
   upsertAppUser,
   verifyPassword,
 } = require("./server/auth");
+const {
+  createFinancialAnalysisWorkbook,
+  normalizeFinancialAnalysisFilters,
+  readFinancialAnalysis,
+} = require("./server/financial-analysis");
 
 const app = express();
 const port = Number(process.env.PORT || 3000);
@@ -1965,6 +1970,46 @@ app.get(
       `inline; filename="${safeName}"; filename*=UTF-8''${encodeURIComponent(safeName)}`
     );
     res.send(row.file_content);
+  })
+);
+
+app.get(
+  "/api/analysis",
+  requireAccountingAccess,
+  asyncHandler(async (req, res) => {
+    const filters = normalizeFinancialAnalysisFilters(
+      req.query,
+      getCurrentIsoDateInBogota()
+    );
+    const analysis = await readFinancialAnalysis(query, filters);
+    res.json(analysis.report);
+  })
+);
+
+app.get(
+  "/api/analysis/export",
+  requireAccountingAccess,
+  asyncHandler(async (req, res) => {
+    const filters = normalizeFinancialAnalysisFilters(
+      req.query,
+      getCurrentIsoDateInBogota()
+    );
+    const analysis = await readFinancialAnalysis(query, filters);
+    const workbook = createFinancialAnalysisWorkbook(analysis);
+    const lineSuffix = filters.line
+      ? `-${filters.line.toLowerCase()}`
+      : "-todas-lineas";
+    const fileName = `analisis-petit-${filters.from}-a-${filters.to}${lineSuffix}.xlsx`;
+
+    res.setHeader(
+      "Content-Type",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    );
+    res.setHeader(
+      "Content-Disposition",
+      `attachment; filename="${fileName}"; filename*=UTF-8''${encodeURIComponent(fileName)}`
+    );
+    res.send(workbook);
   })
 );
 

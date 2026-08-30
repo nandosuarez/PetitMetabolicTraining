@@ -125,6 +125,7 @@ const elements = {
     diario: document.getElementById("diario-view"),
     semanal: document.getElementById("semanal-view"),
     mensual: document.getElementById("mensual-view"),
+    analisis: document.getElementById("analisis-view"),
     contabilidad: document.getElementById("contabilidad-view"),
     cartera: document.getElementById("cartera-view"),
     pedidos: document.getElementById("pedidos-view"),
@@ -1620,6 +1621,7 @@ function getAllowedViews() {
       "diario",
       "semanal",
       "mensual",
+      "analisis",
       "contabilidad",
       "cartera",
       "pedidos",
@@ -1645,7 +1647,15 @@ function getAllowedViews() {
   }
 
   if (isAccountantUser()) {
-    return ["dashboard", "actividades", "diario", "semanal", "mensual", "contabilidad"];
+    return [
+      "dashboard",
+      "actividades",
+      "diario",
+      "semanal",
+      "mensual",
+      "analisis",
+      "contabilidad",
+    ];
   }
 
   return [];
@@ -1951,6 +1961,7 @@ function switchView(view, options = {}) {
     diario: "Informe diario",
     semanal: "Informe semanal",
     mensual: "Resumen mensual",
+    analisis: "Análisis financiero",
     contabilidad: "Contabilidad",
     cartera: "Clientes",
     pedidos: "Pedidos",

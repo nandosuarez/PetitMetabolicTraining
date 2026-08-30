@@ -12,6 +12,7 @@
     "test:movement-client": "node scripts/test-movement-client-required.js",
     "test:movement-delete-access": "node scripts/test-movement-delete-access.js",
     "test:december-promotion": "node scripts/test-december-promotion.js",
+    "test:financial-analysis": "node scripts/test-financial-analysis.js",
     "test:wodbuster-review": "node scripts/test-wodbuster-review.js",
     "user:create": "node scripts/create-app-user.js"
   },

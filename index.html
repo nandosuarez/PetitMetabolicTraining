@@ -157,6 +157,7 @@
           <button class="nav-link" data-view="diario">Informe diario</button>
           <button class="nav-link" data-view="semanal">Informe semanal</button>
           <button class="nav-link" data-view="mensual">Resumen mensual</button>
+          <button class="nav-link" data-view="analisis">Análisis financiero</button>
           <button class="nav-link" data-view="contabilidad">Contabilidad</button>
           <button class="nav-link" data-view="cartera">Clientes</button>
           <button class="nav-link" data-view="pedidos">Pedidos</button>
@@ -970,6 +971,124 @@
                   </tr>
                 </thead>
                 <tbody id="monthly-table"></tbody>
+              </table>
+            </div>
+          </section>
+        </section>
+
+        <section id="analisis-view" class="view">
+          <section class="analysis-hero">
+            <div>
+              <p class="section-kicker">Lectura financiera</p>
+              <h3>Entiende qué entra, qué sale y dónde se pierde margen</h3>
+              <p>
+                Compara ventas, cobros, costos y gastos por línea de negocio sin
+                duplicar los abonos posteriores. Exporta el detalle completo a Excel.
+              </p>
+            </div>
+            <div class="analysis-hero-mark">
+              <span>Resultado</span>
+              <strong id="analysis-hero-result">$0</strong>
+              <small id="analysis-hero-period">Selecciona un período</small>
+            </div>
+          </section>
+
+          <section class="panel analysis-filter-panel">
+            <form id="analysis-form" class="analysis-filter-grid">
+              <label>
+                Desde
+                <input id="analysis-date-from" type="date" required />
+              </label>
+              <label>
+                Hasta
+                <input id="analysis-date-to" type="date" required />
+              </label>
+              <label>
+                Línea de negocio
+                <select id="analysis-line">
+                  <option value="">Todas las líneas</option>
+                  <option value="Gimnasio">Gimnasio</option>
+                  <option value="Restaurante">Restaurante</option>
+                </select>
+              </label>
+              <div class="analysis-filter-actions">
+                <button class="primary-button" type="submit">Analizar período</button>
+                <button id="analysis-export" class="ghost-button" type="button">
+                  Exportar Excel
+                </button>
+              </div>
+            </form>
+            <div id="analysis-feedback" class="form-note">
+              El resultado operativo usa ventas menos costos y gastos; el flujo neto
+              usa únicamente el dinero efectivamente recibido o pagado.
+            </div>
+          </section>
+
+          <div id="analysis-summary" class="stats-grid"></div>
+
+          <div class="content-grid two-up align-start analysis-main-grid">
+            <section class="panel">
+              <div class="panel-head">
+                <div>
+                  <p class="section-kicker">Comparación</p>
+                  <h3>Resultado por línea de negocio</h3>
+                </div>
+              </div>
+              <div id="analysis-lines" class="analysis-line-list"></div>
+            </section>
+
+            <section class="panel analysis-insights-panel">
+              <div class="panel-head">
+                <div>
+                  <p class="section-kicker">Hallazgos</p>
+                  <h3>Señales para tomar decisiones</h3>
+                </div>
+              </div>
+              <div id="analysis-insights" class="analysis-insight-list"></div>
+            </section>
+          </div>
+
+          <section class="panel">
+            <div class="panel-head">
+              <div>
+                <p class="section-kicker">Evolución</p>
+                <h3>Comportamiento por mes</h3>
+              </div>
+            </div>
+            <div id="analysis-monthly" class="analysis-monthly-list"></div>
+          </section>
+
+          <section class="panel">
+            <div class="panel-head analysis-category-head">
+              <div>
+                <p class="section-kicker">Composición</p>
+                <h3>Detalle por categoría</h3>
+              </div>
+              <label class="inline-label">
+                Mostrar
+                <select id="analysis-category-type">
+                  <option value="">Todos los tipos</option>
+                  <option value="Ingreso">Ingresos</option>
+                  <option value="Costo">Costos</option>
+                  <option value="Gasto">Gastos</option>
+                </select>
+              </label>
+            </div>
+            <div class="table-wrap analysis-category-wrap">
+              <table class="adaptive-stack-table">
+                <thead>
+                  <tr>
+                    <th>Línea</th>
+                    <th>Tipo</th>
+                    <th>Categoría</th>
+                    <th>Movimientos</th>
+                    <th>Total</th>
+                    <th>Pagado</th>
+                    <th>Saldo</th>
+                    <th>Participación</th>
+                  </tr>
+                </thead>
+                <tbody id="analysis-categories"></tbody>
               </table>
             </div>
           </section>
@@ -4238,5 +4357,6 @@
     <script src="./app.overrides.js"></script>
     <script src="./app.orders.js"></script>
     <script src="./app.promotions.js"></script>
+    <script src="./app.analysis.js"></script>
   </body>
 </html>
