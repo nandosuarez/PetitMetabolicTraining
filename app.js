@@ -1643,6 +1643,7 @@ function getAllowedViews() {
       "cartera",
       "pedidos",
       "promocion",
+      "importar",
     ];
   }
 
@@ -4289,12 +4290,12 @@ function renderWodBusterIntegration() {
     return;
   }
 
-  if (!isAdminUser()) {
+  if (!canWriteOperations()) {
     elements.wodbusterFeedback.textContent =
-      "Solo el administrador puede descargar pagos de WodBuster.";
+      "Tu perfil no tiene acceso a los pagos de WodBuster.";
     elements.wodbusterSummary.innerHTML = `
       <div class="empty-state">
-        Solo el administrador puede consultar esta integración.
+        Tu perfil no puede consultar esta integración.
       </div>
     `;
     elements.wodbusterPaymentsList.innerHTML = "";
@@ -4357,7 +4358,7 @@ function renderWodBusterIntegration() {
     }
     <div class="mini-stats compact-mini-stats">
       <div class="mini-stat"><span>Por revisar</span><strong>${pendingCount}</strong></div>
-      <div class="mini-stat"><span>Registrados</span><strong>${importedCount}</strong></div>
+      <div class="mini-stat"><span>Gestionados</span><strong>${importedCount}</strong></div>
       <div class="mini-stat"><span>Descartados</span><strong>${dismissedCount}</strong></div>
       <div class="mini-stat"><span>Excepciones</span><strong>${exceptionCount}</strong></div>
     </div>
@@ -4370,7 +4371,7 @@ function renderWodBusterIntegration() {
 }
 
 function getFilteredWodBusterPayments(payments) {
-  const filter = elements.wodbusterPaymentFilter?.value || "pending_review";
+  const filter = elements.wodbusterPaymentFilter?.value || "all";
   const query = normalizeSearchValue(elements.wodbusterPaymentQuery?.value || "");
   return payments.filter((payment) => {
     const matchesStatus =
@@ -4394,6 +4395,10 @@ function getFilteredWodBusterPayments(payments) {
         payment.originalPaymentMethod,
         payment.paymentDate,
         payment.matchedClientName,
+        payment.movementId,
+        payment.movementClientName,
+        payment.movementDescription,
+        payment.movementPaymentMethod,
       ].join(" ")
     ).includes(query);
   });
@@ -4520,11 +4525,19 @@ function renderWodBusterPaymentManagement(payment) {
           Notas de revisión
           <textarea data-wodbuster-notes placeholder="Opcional para registrar; mínimo 4 caracteres para descartar"></textarea>
         </label>
+        ${renderWodBusterMovementMatchField(payment)}
         <div class="form-note span-2" data-wodbuster-calculated-status>
           Quedará Pagado y entrará ${formatCurrency(payment.amount || 0)} a caja.
         </div>
         <div class="form-actions span-2">
-          <button class="primary-button" type="submit">Registrar movimiento</button>
+          <button class="primary-button" type="submit">Gestionar pago</button>
+          ${
+            isAdminUser()
+              ? `<button class="ghost-button" type="button" data-wodbuster-confirm="${payment.id}">
+                  Marcar como gestionado
+                </button>`
+              : ""
+          }
           <button class="ghost-button danger" type="button" data-wodbuster-dismiss="${payment.id}">
             No registrar
           </button>
@@ -4546,15 +4559,42 @@ function renderWodBusterPaymentManagement(payment) {
   }
 
   if (payment.status === "imported") {
+    if (!Number(payment.movementId || 0)) {
+      return `
+        <div class="wodbuster-managed-note wodbuster-managed-note--stacked">
+          <div>
+            <strong>Gestionado sin movimiento vinculado</strong>
+            <span>El administrador confirmó este pago sin crear ni cruzar una transacción en la app.</span>
+          </div>
+          <small>Gestionado por ${escapeHtml(payment.reviewedBy || "Administrador")} · ${escapeHtml(
+            payment.adminNotes || "Confirmación administrativa"
+          )}</small>
+        </div>
+      `;
+    }
+    const resolutionText = payment.matchedExistingMovement
+      ? "Cruzado con una transacción que ya existía en la app."
+      : "Movimiento creado desde la revisión de WodBuster.";
     return `
-      <div class="wodbuster-managed-note">
-        <strong>Movimiento #${payment.movementId} · ${escapeHtml(
-          payment.movementPaymentStatus || "Registrado"
-        )}</strong>
-        <span>Abono ${formatCurrency(payment.movementPaidAmount || 0)} · Saldo ${formatCurrency(
-          payment.movementBalanceDue || 0
-        )} · ${escapeHtml(payment.movementPaymentMethod || "Sin caja")}</span>
-        <small>Gestionado por ${escapeHtml(payment.reviewedBy || "Administrador")}</small>
+      <div class="wodbuster-managed-note wodbuster-managed-note--stacked">
+        <div>
+          <strong>Gestionado · Movimiento #${payment.movementId}</strong>
+          <span>${escapeHtml(resolutionText)}</span>
+        </div>
+        <div class="detail-grid wodbuster-linked-movement">
+          ${createDetailItem("Fecha", escapeHtml(payment.movementDate || "Sin fecha"))}
+          ${createDetailItem("Cliente", escapeHtml(payment.movementClientName || "Sin cliente"))}
+          ${createDetailItem("Categoría", escapeHtml(payment.movementCategory || "Sin categoría"))}
+          ${createDetailItem("Estado", escapeHtml(payment.movementPaymentStatus || "Registrado"))}
+          ${createDetailItem("Total", formatCurrency(payment.movementTotalAmount || 0))}
+          ${createDetailItem("Abono", formatCurrency(payment.movementPaidAmount || 0))}
+          ${createDetailItem("Saldo", formatCurrency(payment.movementBalanceDue || 0))}
+          ${createDetailItem("Caja", escapeHtml(payment.movementPaymentMethod || "Sin caja"))}
+          ${createDetailItem("Descripción", escapeHtml(payment.movementDescription || "Sin descripción"), "detail-item--wide")}
+        </div>
+        <small>Registrado por ${escapeHtml(
+          payment.movementRegisteredBy || "Sistema / histórico"
+        )} · Gestionado por ${escapeHtml(payment.reviewedBy || "Usuario")}</small>
       </div>
     `;
   }
@@ -4570,7 +4610,7 @@ function renderWodBusterPaymentManagement(payment) {
 function getWodBusterStatusPresentation(payment) {
   if (payment.status === "imported") {
     return {
-      label: payment.movementPaymentStatus || "Registrado",
+      label: "Gestionado",
       className: statusClass(payment.movementPaymentStatus || "Pagado"),
     };
   }
@@ -4580,6 +4620,50 @@ function getWodBusterStatusPresentation(payment) {
     reversal: { label: "Reversión", className: "status-pendiente" },
     skipped: { label: "Omitido", className: "status-pendiente" },
   }[payment.status] || { label: "Por revisar", className: "status-parcial" };
+}
+
+function renderWodBusterMovementMatchField(payment) {
+  const matches = Array.isArray(payment.movementMatches)
+    ? payment.movementMatches
+    : [];
+  if (!matches.length) {
+    return `
+      <div class="form-note span-2">
+        No encontramos una transacción existente con el mismo valor y una fecha cercana. Al gestionar se creará un movimiento nuevo.
+      </div>
+    `;
+  }
+
+  const options = matches
+    .map((movement) => {
+      const recommended = Number(payment.recommendedMovementId || 0) === Number(movement.id);
+      const label = [
+        `#${movement.id}`,
+        movement.movementDate || "Sin fecha",
+        movement.clientName || "Sin cliente",
+        formatCurrency(movement.totalAmount || 0),
+        movement.paymentStatus || "Sin estado",
+        movement.paymentMethod || "Sin caja",
+        recommended ? "Coincidencia recomendada" : "",
+      ]
+        .filter(Boolean)
+        .join(" · ");
+      return `<option value="${Number(movement.id)}">${escapeHtml(label)}</option>`;
+    })
+    .join("");
+
+  return `
+    <label class="span-2">
+      Cruzar con una transacción existente
+      <select data-wodbuster-existing-movement>
+        <option value="">Crear un movimiento nuevo</option>
+        ${options}
+      </select>
+      <span class="inline-hint">
+        Si el pago ya fue registrado en la app, selecciónalo aquí para evitar duplicarlo. Solo mostramos coincidencias por valor y fecha cercana.
+      </span>
+    </label>
+  `;
 }
 
 function getDefaultWodBusterCategory() {
@@ -6381,9 +6465,9 @@ function readWodBusterFetchPayload() {
 async function handleWodBusterFetchSubmit(event) {
   event.preventDefault();
 
-  if (!isAdminUser()) {
+  if (!canWriteOperations()) {
     elements.wodbusterFeedback.textContent =
-      "Solo el administrador puede descargar pagos de WodBuster.";
+      "Tu perfil no tiene acceso a los pagos de WodBuster.";
     return;
   }
 
@@ -6406,10 +6490,13 @@ async function handleWodBusterFetchSubmit(event) {
       }
     );
     await loadBootstrap();
-    elements.wodbusterPaymentFilter.value = "pending_review";
+    elements.wodbusterPaymentFilter.value = "all";
+    renderWodBusterIntegration();
     elements.wodbusterFeedback.textContent = `${Number(
       lastWodBusterFetchReport.downloaded || 0
-    )} registro(s) descargados. Ninguno fue agregado a movimientos.`;
+    )} registro(s) descargados. ${Number(
+      lastWodBusterFetchReport.matchedExisting || 0
+    )} se cruzaron automáticamente con movimientos existentes.`;
     elements.wodbusterReviewFeedback.textContent = `${Number(
       lastWodBusterFetchReport.pendingReview || 0
     )} pago(s) están pendientes de revisión individual.`;
@@ -6456,6 +6543,43 @@ async function handleWodBusterPaymentClick(event) {
     return;
   }
 
+  const confirmOnly = event.target.closest("[data-wodbuster-confirm]");
+  if (confirmOnly) {
+    const paymentId = String(confirmOnly.dataset.wodbusterConfirm || "");
+    const form = confirmOnly.closest("[data-wodbuster-review-form]");
+    const notes = String(
+      form?.querySelector("[data-wodbuster-notes]")?.value || ""
+    ).trim();
+    const accepted = window.confirm(
+      "¿Confirmas que este pago ya fue gestionado? No se creará ni se vinculará ningún movimiento."
+    );
+    if (!accepted) {
+      return;
+    }
+
+    elements.wodbusterReviewFeedback.textContent =
+      "Marcando el pago como gestionado...";
+    try {
+      const result = await apiRequest(
+        `/api/integrations/wodbuster/payments/${paymentId}/confirm`,
+        {
+          method: "POST",
+          body: JSON.stringify({ notes }),
+        }
+      );
+      expandedWodBusterPaymentIds.delete(paymentId);
+      await loadBootstrap();
+      elements.wodbusterPaymentFilter.value = "all";
+      renderWodBusterIntegration();
+      elements.wodbusterReviewFeedback.textContent =
+        result.message || "El pago quedó gestionado.";
+    } catch (error) {
+      elements.wodbusterReviewFeedback.textContent =
+        error.message || "No se pudo gestionar el pago.";
+    }
+    return;
+  }
+
   const dismiss = event.target.closest("[data-wodbuster-dismiss]");
   if (dismiss) {
     const paymentId = String(dismiss.dataset.wodbusterDismiss || "");
@@ -6480,6 +6604,8 @@ async function handleWodBusterPaymentClick(event) {
       );
       expandedWodBusterPaymentIds.delete(paymentId);
       await loadBootstrap();
+      elements.wodbusterPaymentFilter.value = "all";
+      renderWodBusterIntegration();
       elements.wodbusterReviewFeedback.textContent =
         result.message || "El pago no se registrará.";
     } catch (error) {
@@ -6544,12 +6670,29 @@ async function handleWodBusterReviewSubmit(event) {
     return;
   }
 
-  elements.wodbusterReviewFeedback.textContent =
-    "Registrando el movimiento con el estado calculado...";
+  const existingMovementId = Number(
+    form.querySelector("[data-wodbuster-existing-movement]")?.value || 0
+  );
+  elements.wodbusterReviewFeedback.textContent = existingMovementId
+    ? `Cruzando con el movimiento #${existingMovementId}...`
+    : "Registrando el movimiento con el estado calculado...";
   try {
-    const result = await apiRequest(
-      `/api/integrations/wodbuster/payments/${paymentId}/register`,
-      {
+    const reviewNotes =
+      form.querySelector("[data-wodbuster-notes]")?.value?.trim() || "";
+    const result = existingMovementId
+      ? await apiRequest(
+          `/api/integrations/wodbuster/payments/${paymentId}/match`,
+          {
+            method: "POST",
+            body: JSON.stringify({
+              movementId: existingMovementId,
+              notes: reviewNotes,
+            }),
+          }
+        )
+      : await apiRequest(
+          `/api/integrations/wodbuster/payments/${paymentId}/register`,
+          {
         method: "POST",
         body: JSON.stringify({
           clientId: Number(selectedClient?.id || 0),
@@ -6560,14 +6703,16 @@ async function handleWodBusterReviewSubmit(event) {
             form.querySelector("[data-wodbuster-payment-method]")?.value || "",
           description:
             form.querySelector("[data-wodbuster-description]")?.value?.trim() || "",
-          notes: form.querySelector("[data-wodbuster-notes]")?.value?.trim() || "",
+          notes: reviewNotes,
         }),
-      }
-    );
+          }
+        );
     expandedWodBusterPaymentIds.delete(paymentId);
     await loadBootstrap();
+    elements.wodbusterPaymentFilter.value = "all";
+    renderWodBusterIntegration();
     elements.wodbusterReviewFeedback.textContent =
-      result.message || "El movimiento se registró correctamente.";
+      result.message || "El pago se gestionó correctamente.";
   } catch (error) {
     elements.wodbusterReviewFeedback.textContent =
       error.message || "No se pudo registrar el movimiento.";

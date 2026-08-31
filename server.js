@@ -1734,7 +1734,7 @@ app.get("/api/bootstrap", asyncHandler(async (req, res) => {
       ? listSalesComboRulesRows()
       : Promise.resolve({ rows: [] }),
     listUserActivities(req.authUser),
-    req.authUser?.role === "administrador"
+    userHasWodBusterAccess(req.authUser)
       ? query(
           `
             select
@@ -1744,12 +1744,81 @@ app.get("/api/bootstrap", asyncHandler(async (req, res) => {
               m.balance_due as movement_balance_due,
               m.payment_method as movement_payment_method,
               m.category as movement_category,
-              coalesce(nullif(ru.full_name, ''), ru.username) as reviewed_by_name
+              m.movement_date as linked_movement_date,
+              m.client_name as linked_movement_client_name,
+              m.description as linked_movement_description,
+              m.total_amount as linked_movement_total_amount,
+              m.source_system as linked_movement_source_system,
+              coalesce(nullif(mu.full_name, ''), mu.username) as movement_registered_by_name,
+              coalesce(nullif(ru.full_name, ''), ru.username) as reviewed_by_name,
+              coalesce(candidate_matches.items, '[]'::jsonb) as movement_matches
             from wodbuster_payment_imports wp
             left join movements m
               on m.id = wp.movement_id
+            left join app_users mu
+              on mu.id = m.registered_by_user_id
             left join app_users ru
               on ru.id = wp.reviewed_by_user_id
+            left join lateral (
+              select jsonb_agg(
+                jsonb_build_object(
+                  'id', candidate.id,
+                  'movementDate', candidate.movement_date,
+                  'clientName', candidate.client_name,
+                  'description', candidate.description,
+                  'paymentStatus', candidate.payment_status,
+                  'paymentMethod', candidate.payment_method,
+                  'totalAmount', candidate.total_amount,
+                  'paidAmount', candidate.paid_amount,
+                  'balanceDue', candidate.balance_due,
+                  'sourceSystem', candidate.source_system,
+                  'registeredBy', candidate.registered_by_name,
+                  'dateDistance', candidate.date_distance
+                )
+                order by candidate.date_distance, candidate.movement_date desc, candidate.id desc
+              ) as items
+              from (
+                select
+                  cm.*,
+                  coalesce(nullif(cmu.full_name, ''), cmu.username, 'Sistema / histórico')
+                    as registered_by_name,
+                  abs(
+                    cm.movement_date -
+                    (wp.paid_at at time zone 'America/Bogota')::date
+                  ) as date_distance
+                from movements cm
+                left join app_users cmu
+                  on cmu.id = cm.registered_by_user_id
+                where wp.status = 'pending_review'
+                  and wp.paid_at is not null
+                  and cm.business_line = 'Gimnasio'
+                  and cm.movement_type = 'Ingreso'
+                  and cm.movement_date between
+                    (wp.paid_at at time zone 'America/Bogota')::date - 7
+                    and (wp.paid_at at time zone 'America/Bogota')::date + 7
+                  and (
+                    abs(cm.paid_amount - wp.amount) <= 0.01
+                    or (
+                      cm.payment_status = 'Pagado'
+                      and abs(cm.total_amount - wp.amount) <= 0.01
+                    )
+                  )
+                  and not exists (
+                    select 1
+                    from wodbuster_payment_imports linked_wp
+                    where linked_wp.movement_id = cm.id
+                      and linked_wp.id <> wp.id
+                  )
+                order by
+                  abs(
+                    cm.movement_date -
+                    (wp.paid_at at time zone 'America/Bogota')::date
+                  ),
+                  cm.movement_date desc,
+                  cm.id desc
+                limit 12
+              ) candidate
+            ) candidate_matches on true
             order by wp.paid_at desc nulls last, wp.id desc
           `
         )
@@ -1783,10 +1852,9 @@ app.get("/api/bootstrap", asyncHandler(async (req, res) => {
     wodbusterPayments: wodbusterPaymentsResult.rows.map((row) =>
       mapWodBusterPaymentRow(row, wodbusterClientState)
     ),
-    wodbusterIntegration:
-      req.authUser?.role === "administrador"
-        ? getWodBusterConfigStatus()
-        : { configured: false },
+    wodbusterIntegration: userHasWodBusterAccess(req.authUser)
+      ? getWodBusterConfigStatus()
+      : { configured: false },
     notes: mapNotesRows(notesResult.rows),
   });
 }));
@@ -2023,7 +2091,7 @@ app.post("/api/import/excel", requireAdmin, asyncHandler(async (req, res) => {
 
 app.get(
   "/api/integrations/wodbuster/status",
-  requireAdmin,
+  requireWodBusterAccess,
   asyncHandler(async (_req, res) => {
     res.json(getWodBusterConfigStatus());
   })
@@ -2031,7 +2099,7 @@ app.get(
 
 app.post(
   "/api/integrations/wodbuster/fetch",
-  requireAdmin,
+  requireWodBusterAccess,
   asyncHandler(async (req, res) => {
     const payload = normalizeWodBusterFetchPayload(req.body);
     validateWodBusterFetchPayload(payload);
@@ -2055,7 +2123,7 @@ app.post(
 
 app.post(
   "/api/integrations/wodbuster/payments/:id/register",
-  requireAdmin,
+  requireWodBusterAccess,
   asyncHandler(async (req, res) => {
     const paymentId = Number(req.params.id);
     if (!Number.isInteger(paymentId) || paymentId <= 0) {
@@ -2076,8 +2144,60 @@ app.post(
 );
 
 app.post(
-  "/api/integrations/wodbuster/payments/:id/dismiss",
+  "/api/integrations/wodbuster/payments/:id/match",
+  requireWodBusterAccess,
+  asyncHandler(async (req, res) => {
+    const paymentId = Number(req.params.id);
+    const movementId = Number(req.body.movementId || 0);
+    const notes = String(req.body.notes || "").trim();
+    if (!Number.isInteger(paymentId) || paymentId <= 0) {
+      throw httpError(400, "El pago de WodBuster no es válido.");
+    }
+    if (!Number.isInteger(movementId) || movementId <= 0) {
+      throw httpError(400, "Selecciona la transacción existente que deseas cruzar.");
+    }
+
+    const movement = await matchWodBusterPaymentToMovement(
+      paymentId,
+      movementId,
+      notes,
+      Number(req.authUser.id)
+    );
+    res.json({
+      message: `El pago quedó gestionado y cruzado con el movimiento #${movement.id}.`,
+      movement,
+    });
+  })
+);
+
+app.post(
+  "/api/integrations/wodbuster/payments/:id/confirm",
   requireAdmin,
+  asyncHandler(async (req, res) => {
+    const paymentId = Number(req.params.id);
+    const notes = String(req.body.notes || "").trim();
+    if (!Number.isInteger(paymentId) || paymentId <= 0) {
+      throw httpError(400, "El pago de WodBuster no es válido.");
+    }
+
+    await setWodBusterPaymentReviewStatus(paymentId, {
+      fromStatus: "pending_review",
+      toStatus: "imported",
+      notes:
+        notes ||
+        "Confirmado por administración como gestionado sin movimiento vinculado.",
+      userId: Number(req.authUser.id),
+      clearMovement: true,
+    });
+    res.json({
+      message: "El pago quedó gestionado sin crear ni vincular un movimiento.",
+    });
+  })
+);
+
+app.post(
+  "/api/integrations/wodbuster/payments/:id/dismiss",
+  requireWodBusterAccess,
   asyncHandler(async (req, res) => {
     const paymentId = Number(req.params.id);
     const reason = String(req.body.reason || "").trim();
@@ -2100,7 +2220,7 @@ app.post(
 
 app.post(
   "/api/integrations/wodbuster/payments/:id/reopen",
-  requireAdmin,
+  requireWodBusterAccess,
   asyncHandler(async (req, res) => {
     const paymentId = Number(req.params.id);
     if (!Number.isInteger(paymentId) || paymentId <= 0) {
@@ -5158,6 +5278,7 @@ async function stageWodBusterPayments(payments, userId) {
         newRecords: 0,
         alreadyKnown: 0,
         pendingReview: 0,
+        matchedExisting: 0,
         reversals: 0,
         invalid: 0,
       };
@@ -5237,7 +5358,37 @@ async function stageWodBusterPayments(payments, userId) {
             userId,
           ]
         );
-        const currentStatus = upsertResult.rows[0]?.status || discoveredStatus;
+        let currentStatus = upsertResult.rows[0]?.status || discoveredStatus;
+
+        if (currentStatus === "pending_review") {
+          const automaticMatch = await findAutomaticWodBusterMovementMatch(
+            client,
+            payment
+          );
+          if (automaticMatch) {
+            await client.query(
+              `
+                update wodbuster_payment_imports
+                set
+                  status = 'imported',
+                  movement_id = $2,
+                  reviewed_by_user_id = $3,
+                  reviewed_at = now(),
+                  admin_notes = $4,
+                  updated_at = now()
+                where external_key = $1
+              `,
+              [
+                payment.externalKey,
+                automaticMatch.id,
+                userId,
+                `Cruce automático con movimiento #${automaticMatch.id}.`,
+              ]
+            );
+            currentStatus = "imported";
+            report.matchedExisting += 1;
+          }
+        }
 
         if (wasKnown) {
           report.alreadyKnown += 1;
@@ -5263,6 +5414,79 @@ async function stageWodBusterPayments(payments, userId) {
       throw error;
     }
   });
+}
+
+async function findAutomaticWodBusterMovementMatch(client, payment) {
+  const paymentDate =
+    payment.paidAt instanceof Date
+      ? formatDateInBogota(payment.paidAt)
+      : normalizeDateOnly(payment.paidAt);
+  const amount = Number(payment.amount || 0);
+  if (!paymentDate || !(amount > 0)) {
+    return null;
+  }
+
+  const documentNumber = normalizeWodBusterIdentifier(payment.documentNumber);
+  const email = String(payment.email || "").trim().toLowerCase();
+  const rawClientName = String(payment.clientName || "").trim();
+  const clientsResult = await client.query(
+    `
+      select full_name, alias
+      from clients
+      where is_active = true
+        and is_client = true
+        and (
+          ($1 <> '' and regexp_replace(coalesce(document_number, ''), '[^0-9]', '', 'g') = $1)
+          or ($2 <> '' and lower(trim(coalesce(email, ''))) = $2)
+          or ($3 <> '' and lower(trim(full_name)) = lower(trim($3)))
+          or ($3 <> '' and lower(trim(coalesce(alias, ''))) = lower(trim($3)))
+        )
+      limit 5
+    `,
+    [documentNumber, email, rawClientName]
+  );
+  const clientNameKeys = new Set(
+    [
+      rawClientName,
+      ...clientsResult.rows.flatMap((row) => [row.full_name, row.alias]),
+    ]
+      .map((value) => normalizeComparableText(value))
+      .filter(Boolean)
+  );
+  if (!clientNameKeys.size) {
+    return null;
+  }
+
+  const candidatesResult = await client.query(
+    `
+      select m.*
+      from movements m
+      where m.business_line = 'Gimnasio'
+        and m.movement_type = 'Ingreso'
+        and m.movement_date = $1
+        and coalesce(m.source_system, 'manual') <> 'wodbuster'
+        and (
+          abs(m.paid_amount - $2::numeric) <= 0.01
+          or (
+            m.payment_status = 'Pagado'
+            and abs(m.total_amount - $2::numeric) <= 0.01
+          )
+        )
+        and not exists (
+          select 1
+          from wodbuster_payment_imports linked_wp
+          where linked_wp.movement_id = m.id
+        )
+      order by m.updated_at desc, m.id desc
+      limit 20
+      for update of m skip locked
+    `,
+    [paymentDate, amount]
+  );
+  const exactMatches = candidatesResult.rows.filter((row) =>
+    clientNameKeys.has(normalizeComparableText(row.client_name))
+  );
+  return exactMatches.length === 1 ? exactMatches[0] : null;
 }
 
 async function registerWodBusterPayment(paymentId, reviewPayload, userId) {
@@ -5441,12 +5665,142 @@ async function registerWodBusterPayment(paymentId, reviewPayload, userId) {
   });
 }
 
+async function matchWodBusterPaymentToMovement(
+  paymentId,
+  movementId,
+  notes,
+  userId
+) {
+  return withClient(async (client) => {
+    await client.query("begin");
+
+    try {
+      const paymentResult = await client.query(
+        `
+          select *
+          from wodbuster_payment_imports
+          where id = $1
+          for update
+        `,
+        [paymentId]
+      );
+      const payment = paymentResult.rows[0];
+      if (!payment) {
+        throw httpError(404, "El pago de WodBuster ya no existe.");
+      }
+      if (payment.status !== "pending_review") {
+        throw httpError(409, "Este pago ya fue gestionado o no se puede cruzar.");
+      }
+
+      const movementResult = await client.query(
+        `
+          select
+            m.*,
+            coalesce(nullif(u.full_name, ''), u.username) as registered_by_name,
+            u.username as registered_by_username
+          from movements m
+          left join app_users u
+            on u.id = m.registered_by_user_id
+          where m.id = $1
+          for update of m
+        `,
+        [movementId]
+      );
+      const movement = movementResult.rows[0];
+      if (!movement) {
+        throw httpError(404, "La transacción seleccionada ya no existe.");
+      }
+      if (
+        movement.business_line !== "Gimnasio" ||
+        movement.movement_type !== "Ingreso"
+      ) {
+        throw httpError(
+          400,
+          "Solo puedes cruzar el pago con un ingreso de la línea Gimnasio."
+        );
+      }
+
+      const paymentAmount = Number(payment.amount || 0);
+      const amountMatches =
+        Math.abs(Number(movement.paid_amount || 0) - paymentAmount) <= 0.01 ||
+        (movement.payment_status === "Pagado" &&
+          Math.abs(Number(movement.total_amount || 0) - paymentAmount) <= 0.01);
+      if (!amountMatches) {
+        throw httpError(
+          400,
+          "El valor recibido en WodBuster no coincide con el pago de esa transacción."
+        );
+      }
+
+      const paymentDate =
+        payment.paid_at instanceof Date
+          ? formatDateInBogota(payment.paid_at)
+          : normalizeDateOnly(payment.paid_at);
+      const paymentTime = new Date(`${paymentDate}T12:00:00-05:00`).getTime();
+      const movementTime = new Date(
+        `${normalizeDateOnly(movement.movement_date)}T12:00:00-05:00`
+      ).getTime();
+      const dateDistance = Math.abs(paymentTime - movementTime) / 86400000;
+      if (!Number.isFinite(dateDistance) || dateDistance > 7) {
+        throw httpError(
+          400,
+          "La transacción seleccionada está a más de siete días del pago de WodBuster."
+        );
+      }
+
+      const linkedResult = await client.query(
+        `
+          select id
+          from wodbuster_payment_imports
+          where movement_id = $1
+            and id <> $2
+          limit 1
+        `,
+        [movementId, paymentId]
+      );
+      if (linkedResult.rows.length) {
+        throw httpError(
+          409,
+          "Esa transacción ya está cruzada con otro pago de WodBuster."
+        );
+      }
+
+      await client.query(
+        `
+          update wodbuster_payment_imports
+          set
+            status = 'imported',
+            movement_id = $2,
+            reviewed_by_user_id = $3,
+            reviewed_at = now(),
+            admin_notes = $4,
+            updated_at = now()
+          where id = $1
+        `,
+        [
+          paymentId,
+          movementId,
+          userId,
+          notes || `Cruce confirmado con movimiento #${movementId}.`,
+        ]
+      );
+
+      await client.query("commit");
+      return mapMovementRow(movement);
+    } catch (error) {
+      await client.query("rollback");
+      throw error;
+    }
+  });
+}
+
 async function setWodBusterPaymentReviewStatus(paymentId, options) {
   const result = await query(
     `
       update wodbuster_payment_imports
       set
         status = $3,
+        movement_id = case when $6::boolean then null else movement_id end,
         reviewed_by_user_id = $4,
         reviewed_at = case when $4::bigint is null then null else now() end,
         admin_notes = $5,
@@ -5461,6 +5815,7 @@ async function setWodBusterPaymentReviewStatus(paymentId, options) {
       options.toStatus,
       options.userId,
       options.notes || "",
+      Boolean(options.clearMovement),
     ]
   );
   if (!result.rows[0]) {
@@ -8982,6 +9337,48 @@ function mapWodBusterPaymentRow(row, clientState) {
     row.paid_at instanceof Date
       ? formatDateInBogota(row.paid_at)
       : normalizeDateOnly(row.paid_at);
+  const comparableClientNames = new Set(
+    [row.client_name_raw, matchedClient?.full_name, matchedClient?.alias]
+      .map((value) => normalizeComparableText(value))
+      .filter(Boolean)
+  );
+  let rawMovementMatches = row.movement_matches;
+  if (typeof rawMovementMatches === "string") {
+    try {
+      rawMovementMatches = JSON.parse(rawMovementMatches);
+    } catch (_error) {
+      rawMovementMatches = [];
+    }
+  }
+  const movementMatches = (Array.isArray(rawMovementMatches)
+    ? rawMovementMatches
+    : []
+  )
+    .map((item) => ({
+      id: Number(item.id || 0),
+      movementDate: normalizeDateOnly(item.movementDate),
+      clientName: item.clientName || "",
+      description: item.description || "",
+      paymentStatus: item.paymentStatus || "",
+      paymentMethod: item.paymentMethod || "",
+      totalAmount: Number(item.totalAmount || 0),
+      paidAmount: Number(item.paidAmount || 0),
+      balanceDue: Number(item.balanceDue || 0),
+      sourceSystem: item.sourceSystem || "",
+      registeredBy: item.registeredBy || "Sistema / histórico",
+      dateDistance: Number(item.dateDistance || 0),
+      clientMatch: comparableClientNames.has(
+        normalizeComparableText(item.clientName)
+      ),
+    }))
+    .filter((item) => item.id > 0)
+    .sort(
+      (left, right) =>
+        Number(right.clientMatch) - Number(left.clientMatch) ||
+        left.dateDistance - right.dateDistance ||
+        right.id - left.id
+    );
+  const strongMatches = movementMatches.filter((item) => item.clientMatch);
 
   return {
     id: Number(row.id),
@@ -9004,6 +9401,17 @@ function mapWodBusterPaymentRow(row, clientState) {
     movementBalanceDue: Number(row.movement_balance_due || 0),
     movementPaymentMethod: row.movement_payment_method || "",
     movementCategory: row.movement_category || "",
+    movementDate: normalizeDateOnly(row.linked_movement_date),
+    movementClientName: row.linked_movement_client_name || "",
+    movementDescription: row.linked_movement_description || "",
+    movementTotalAmount: Number(row.linked_movement_total_amount || 0),
+    movementSourceSystem: row.linked_movement_source_system || "",
+    movementRegisteredBy: row.movement_registered_by_name || "",
+    matchedExistingMovement:
+      Boolean(row.movement_id) && row.linked_movement_source_system !== "wodbuster",
+    movementMatches,
+    recommendedMovementId:
+      strongMatches.length === 1 ? Number(strongMatches[0].id) : 0,
     reviewedBy: row.reviewed_by_name || "",
     reviewedAt: row.reviewed_at || null,
     adminNotes: row.admin_notes || "",
@@ -9864,6 +10272,20 @@ function userHasAccountingAccess(user) {
 
 function userHasOperationalWriteAccess(user) {
   return ["administrador", "asistente_operativo"].includes(user?.role);
+}
+
+function userHasWodBusterAccess(user) {
+  return ["administrador", "asistente_operativo"].includes(user?.role);
+}
+
+function requireWodBusterAccess(req, res, next) {
+  if (!userHasWodBusterAccess(req.authUser)) {
+    return res.status(403).json({
+      error: "Tu perfil no tiene acceso a la integración de WodBuster.",
+    });
+  }
+
+  next();
 }
 
 function requireAccountingAccess(req, res, next) {

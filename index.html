@@ -166,7 +166,7 @@
           <button class="nav-link" data-view="inventario">Inventario</button>
           <button class="nav-link" data-view="listas">Listas maestras</button>
           <button class="nav-link admin-only is-hidden" data-view="usuarios">Usuarios</button>
-          <button class="nav-link admin-only is-hidden" data-view="importar">Importaciones</button>
+          <button class="nav-link is-hidden" data-view="importar">Importaciones</button>
         </nav>
 
         <section class="sidebar-card">
@@ -4160,13 +4160,13 @@
               <div class="panel-head">
                 <div>
                   <p class="section-kicker">Control previo</p>
-                  <h3>Ningún pago entra automáticamente</h3>
+                  <h3>Sin duplicar movimientos</h3>
                 </div>
               </div>
 
               <div id="wodbuster-summary" class="stack-list">
                 <div class="empty-state">
-                  La descarga solo llena una bandeja. Después podrás revisar cada registro y decidir cuánto se recibió realmente.
+                  La descarga conserva todos los pagos en la bandeja. Solo cruza automáticamente una transacción existente cuando la coincidencia es inequívoca; los demás quedan para revisión.
                 </div>
               </div>
             </section>
@@ -4181,11 +4181,11 @@
                   <label>
                     Estado
                     <select id="wodbuster-payment-filter">
+                      <option value="all" selected>Todos</option>
                       <option value="pending_review">Por revisar</option>
-                      <option value="imported">Registrados</option>
+                      <option value="imported">Gestionados</option>
                       <option value="dismissed">Descartados</option>
                       <option value="exceptions">Reversiones y omitidos</option>
-                      <option value="all">Todos</option>
                     </select>
                   </label>
                   <label>
@@ -4205,7 +4205,7 @@
               <div id="wodbuster-payments-list" class="stack-list"></div>
             </section>
 
-            <section class="panel">
+            <section class="panel admin-only">
               <div class="panel-head">
                 <div>
                   <p class="section-kicker">Migración segura</p>
@@ -4276,7 +4276,7 @@
               </form>
             </section>
 
-            <section class="panel">
+            <section class="panel admin-only">
               <div class="panel-head">
                 <div>
                   <p class="section-kicker">Resultado</p>
@@ -4291,7 +4291,7 @@
               </div>
             </section>
 
-            <section class="panel">
+            <section class="panel admin-only">
               <div class="panel-head">
                 <div>
                   <p class="section-kicker">Clientes activos</p>
@@ -4334,7 +4334,7 @@
               </form>
             </section>
 
-            <section class="panel">
+            <section class="panel admin-only">
               <div class="panel-head">
                 <div>
                   <p class="section-kicker">Resultado</p>

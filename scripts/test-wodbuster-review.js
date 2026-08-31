@@ -5,9 +5,13 @@ const { query, closePool } = require("../server/db");
 
 const baseUrl = process.env.TEST_BASE_URL || "http://localhost:3000";
 const runId = `test:wodbuster-review:${Date.now()}`;
-const externalKeys = [1, 2, 3, 4].map((index) => `${runId}:${index}`);
+const externalKeys = [1, 2, 3, 4, 5, 6].map((index) => `${runId}:${index}`);
 let token = "";
+let adminToken = "";
+let assistantToken = "";
 let temporaryClientId = 0;
+let temporaryAssistantId = 0;
+let existingMovementId = 0;
 
 async function api(path, body, method = "POST") {
   const response = await fetch(`${baseUrl}${path}`, {
@@ -91,6 +95,36 @@ async function main() {
     throw new Error("La prueba requiere una categoría y una caja activas.");
   }
 
+  const assistantResult = await query(
+    `
+      insert into app_users (
+        username,
+        full_name,
+        role,
+        password_hash,
+        password_salt,
+        password_iterations,
+        must_change_password,
+        is_active
+      )
+      select
+        $2,
+        'Asistente temporal WodBuster',
+        'asistente_operativo',
+        password_hash,
+        password_salt,
+        password_iterations,
+        false,
+        true
+      from app_users
+      where id = $1
+      returning id
+    `,
+    [adminId, `assistant-wodbuster-${Date.now()}`]
+  );
+  temporaryAssistantId = Number(assistantResult.rows[0]?.id || 0);
+  assistantToken = (await createSession(temporaryAssistantId)).token;
+
   const inserted = await query(
     `
       insert into wodbuster_payment_imports (
@@ -114,7 +148,17 @@ async function main() {
         item.concept,
         '{}'::jsonb,
         $3
-      from unnest($1::text[], array['Pago total', 'Pago parcial', 'Pago pendiente', 'Pago descartado'])
+      from unnest(
+        $1::text[],
+        array[
+          'Pago total',
+          'Pago parcial',
+          'Pago pendiente',
+          'Pago descartado',
+          'Pago ya registrado',
+          'Pago confirmado sin movimiento'
+        ]
+      )
         as item(external_key, concept)
       returning id, external_key
     `,
@@ -123,7 +167,59 @@ async function main() {
   const paymentIdByKey = new Map(
     inserted.rows.map((row) => [row.external_key, Number(row.id)])
   );
-  token = (await createSession(adminId)).token;
+  const existingResult = await query(
+    `
+      insert into movements (
+        business_line,
+        movement_date,
+        movement_type,
+        category,
+        client_name,
+        description,
+        payment_status,
+        payment_method,
+        total_amount,
+        paid_amount,
+        balance_due,
+        cash_flow,
+        inventory_quantity,
+        inventory_effect,
+        year,
+        month_number,
+        month_name,
+        notes,
+        source_system,
+        registered_by_user_id
+      )
+      values (
+        'Gimnasio',
+        (now() at time zone 'America/Bogota')::date,
+        'Ingreso',
+        $1,
+        $2,
+        $3,
+        'Pagado',
+        $4,
+        10000,
+        10000,
+        0,
+        10000,
+        0,
+        'ninguno',
+        extract(year from (now() at time zone 'America/Bogota'))::int,
+        extract(month from (now() at time zone 'America/Bogota'))::int,
+        'Mes prueba',
+        $3,
+        'manual',
+        $5
+      )
+      returning id
+    `,
+    [category, selectedClient.full_name, `Movimiento existente ${runId}`, paymentMethod, adminId]
+  );
+  existingMovementId = Number(existingResult.rows[0]?.id || 0);
+  adminToken = (await createSession(adminId)).token;
+  token = adminToken;
   const bootstrap = await api("/api/bootstrap", null, "GET");
   const stagedIds = new Set(inserted.rows.map((row) => Number(row.id)));
   const stagedRows = (bootstrap.wodbusterPayments || []).filter((payment) =>
@@ -136,6 +232,16 @@ async function main() {
     )
   ) {
     throw new Error("La bandeja no mostró o no cruzó correctamente los pagos de prueba.");
+  }
+  const existingPayment = stagedRows.find(
+    (payment) => payment.id === paymentIdByKey.get(externalKeys[4])
+  );
+  if (
+    !existingPayment?.movementMatches?.some(
+      (movement) => Number(movement.id) === existingMovementId
+    )
+  ) {
+    throw new Error("La bandeja no sugirió la transacción existente para el cruce.");
   }
 
   let missingClientWasRejected = false;
@@ -177,6 +283,50 @@ async function main() {
       }
     );
   }
+
+  token = assistantToken;
+  const assistantBootstrap = await api("/api/bootstrap", null, "GET");
+  if (
+    !(assistantBootstrap.wodbusterPayments || []).some(
+      (payment) => Number(payment.id) === paymentIdByKey.get(externalKeys[4])
+    )
+  ) {
+    throw new Error("El asistente operativo no pudo consultar la bandeja de WodBuster.");
+  }
+  let assistantConfirmationWasRejected = false;
+  try {
+    await api(
+      `/api/integrations/wodbuster/payments/${paymentIdByKey.get(
+        externalKeys[5]
+      )}/confirm`,
+      { notes: "El asistente no debe poder confirmar este pago" }
+    );
+  } catch (error) {
+    assistantConfirmationWasRejected = String(error.message || "").startsWith(
+      "403:"
+    );
+  }
+  if (!assistantConfirmationWasRejected) {
+    throw new Error(
+      "El asistente operativo pudo confirmar un pago sin movimiento vinculado."
+    );
+  }
+  await api(
+    `/api/integrations/wodbuster/payments/${paymentIdByKey.get(
+      externalKeys[4]
+    )}/match`,
+    {
+      movementId: existingMovementId,
+      notes: "Cruce confirmado por asistente en prueba automática",
+    }
+  );
+  token = adminToken;
+  await api(
+    `/api/integrations/wodbuster/payments/${paymentIdByKey.get(
+      externalKeys[5]
+    )}/confirm`,
+    { notes: "Confirmación administrativa de prueba" }
+  );
 
   const dismissedId = paymentIdByKey.get(externalKeys[3]);
   await api(`/api/integrations/wodbuster/payments/${dismissedId}/dismiss`, {
@@ -232,12 +382,44 @@ async function main() {
     throw new Error("El pago descartado no volvió correctamente a revisión.");
   }
 
-  console.log("Prueba WodBuster OK: Pagado, Parcial, Pendiente y reapertura.");
+  const managedBootstrap = await api("/api/bootstrap", null, "GET");
+  const managedPayment = (managedBootstrap.wodbusterPayments || []).find(
+    (payment) => Number(payment.id) === paymentIdByKey.get(externalKeys[4])
+  );
+  if (
+    managedPayment?.status !== "imported" ||
+    Number(managedPayment.movementId) !== existingMovementId ||
+    !managedPayment.matchedExistingMovement ||
+    !String(managedPayment.movementDescription || "").includes(runId)
+  ) {
+    throw new Error("El pago gestionado no conservó la transacción cruzada en la bandeja.");
+  }
+  const confirmedWithoutMovement = (managedBootstrap.wodbusterPayments || []).find(
+    (payment) => Number(payment.id) === paymentIdByKey.get(externalKeys[5])
+  );
+  if (
+    confirmedWithoutMovement?.status !== "imported" ||
+    Number(confirmedWithoutMovement.movementId || 0) !== 0 ||
+    !String(confirmedWithoutMovement.adminNotes || "").includes(
+      "Confirmación administrativa"
+    )
+  ) {
+    throw new Error(
+      "La confirmación administrativa no permaneció visible sin movimiento vinculado."
+    );
+  }
+
+  console.log(
+    "Prueba WodBuster OK: gestión visible, cruce existente, confirmación administrativa y permisos."
+  );
 }
 
 async function cleanup() {
-  if (token) {
-    await deleteSession(token);
+  if (adminToken) {
+    await deleteSession(adminToken);
+  }
+  if (assistantToken) {
+    await deleteSession(assistantToken);
   }
   await query(
     "delete from wodbuster_payment_imports where external_key = any($1::text[])",
@@ -247,8 +429,14 @@ async function cleanup() {
     "delete from movements where source_system = 'wodbuster' and external_reference = any($1::text[])",
     [externalKeys]
   );
+  if (existingMovementId) {
+    await query("delete from movements where id = $1", [existingMovementId]);
+  }
   if (temporaryClientId) {
     await query("delete from clients where id = $1", [temporaryClientId]);
+  }
+  if (temporaryAssistantId) {
+    await query("delete from app_users where id = $1", [temporaryAssistantId]);
   }
 }
 

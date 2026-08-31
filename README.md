@@ -85,9 +85,11 @@ Luego abre:
 - El resumen mensual, cartera e informes se calculan con los movimientos almacenados en PostgreSQL.
 - Los usuarios creados desde la administracion quedan con contraseña temporal y deben cambiarla al primer ingreso.
 - El administrador puede reasignar una contraseña temporal a cualquier usuario activo si olvida su clave.
-- El administrador puede descargar pagos de WodBuster por fechas a una bandeja de revision desde `Importaciones`.
-- Descargar no crea movimientos: cada pago debe gestionarse individualmente como pagado, parcial, pendiente o descartado.
-- Los pagos de WodBuster se identifican de forma unica para evitar duplicados y conservan el enlace al movimiento confirmado.
+- El administrador y el asistente operativo pueden gestionar pagos de WodBuster desde `Importaciones`; las cargas masivas de Excel siguen siendo exclusivas del administrador.
+- Descargar no crea movimientos: cada pago puede cruzarse con un movimiento existente o registrarse individualmente como pagado, parcial, pendiente o descartado.
+- Los pagos gestionados permanecen visibles en la bandeja, muestran su estado y conservan el enlace a la transaccion con la que se cruzaron.
+- El administrador puede confirmar un pago como gestionado sin crear ni vincular movimientos; esta acción queda identificada en la bandeja.
+- Los pagos de WodBuster se identifican de forma unica para evitar duplicados y se cruzan automaticamente solo cuando fecha, cliente y valor producen una coincidencia inequívoca.
 - Las credenciales de WodBuster solo se leen desde variables de entorno; nunca deben guardarse en el repositorio.
 - En produccion, si la base esta vacia, el servidor exige `BOOTSTRAP_ADMIN_USERNAME` y `BOOTSTRAP_ADMIN_PASSWORD` para crear el primer administrador.
 

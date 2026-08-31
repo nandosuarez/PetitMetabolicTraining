@@ -3756,6 +3756,20 @@ table.adaptive-stack-table {
   color: var(--muted);
 }
 
+.wodbuster-managed-note--stacked {
+  align-items: stretch;
+  flex-direction: column;
+}
+
+.wodbuster-managed-note--stacked > div:first-child {
+  display: grid;
+  gap: 4px;
+}
+
+.wodbuster-linked-movement {
+  width: 100%;
+}
+
 @media (max-width: 980px) {
   .adaptive-stack-table th,
   .adaptive-stack-table td {
