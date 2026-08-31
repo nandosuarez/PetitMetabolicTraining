@@ -2363,7 +2363,7 @@ function renderMovementSummary(item, isExpanded) {
       <div class="compact-summary-head">
         <div class="compact-summary-copy">
           <strong>${escapeHtml(summaryTitle)}</strong>
-          <span class="compact-summary-date">${formatDate(item.fecha)}</span>
+          <span class="compact-summary-date">${formatMovementRegisteredAt(item)}</span>
         </div>
         ${createDetailToggleButton(
           "data-movement-detail-id",
@@ -15984,6 +15984,21 @@ function formatDateTime(value) {
     hour: "2-digit",
     minute: "2-digit",
   }).format(date);
+}
+
+function formatMovementRegisteredAt(item) {
+  const dateLabel = formatDate(item?.fecha);
+  const registeredAt = item?.creadoEn || item?.actualizadoEn;
+  if (!registeredAt) {
+    return dateLabel;
+  }
+
+  const timestamp = new Date(registeredAt);
+  if (Number.isNaN(timestamp.getTime())) {
+    return dateLabel;
+  }
+
+  return `${dateLabel} · ${formatClockTime(timestamp)}`;
 }
 
 function toIsoDate(date) {
