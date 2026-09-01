@@ -1996,7 +1996,7 @@
 
         return `
           <tr>
-            <td>${escapeHtml(formatDate(item.fecha))}</td>
+            <td>${escapeHtml(formatMovementRegisteredAt(item))}</td>
             <td>${escapeHtml(item.tipo)}</td>
             <td>
               <strong>${escapeHtml(summary || "Sin detalle")}</strong>
