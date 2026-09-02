@@ -21,6 +21,7 @@
   const promotionState = {
     campaign: null,
     registrations: [],
+    editingPaymentRegistrationId: 0,
   };
 
   function getActivePromotionClients() {
@@ -200,6 +201,51 @@
     return status === "activated" ? "Activada" : "Pendiente de activar";
   }
 
+  function renderPromotionPaymentEdit(registration) {
+    const paymentMethods = [
+      ...new Set(
+        [registration.paymentMethod, ...(state.lists.mediosPago || [])].filter(Boolean)
+      ),
+    ];
+    const options = paymentMethods
+      .map(
+        (method) => `
+          <option value="${escapeHtml(method)}" ${
+            method === registration.paymentMethod ? "selected" : ""
+          }>${escapeHtml(method)}</option>
+        `
+      )
+      .join("");
+
+    return `
+      <form
+        class="promotion-payment-edit-form"
+        data-promotion-payment-edit-form="${registration.id}"
+        data-promotion-movement-id="${registration.movementId}"
+      >
+        <label>
+          Caja correcta
+          <select data-promotion-payment-method required>${options}</select>
+        </label>
+        <label class="promotion-payment-edit-reason">
+          Justificación
+          <input
+            data-promotion-payment-justification
+            minlength="10"
+            placeholder="Explica por qué se corrige la caja"
+            required
+          />
+        </label>
+        <div class="form-actions">
+          <button class="primary-button" type="submit">Guardar corrección</button>
+          <button class="ghost-button" type="button" data-promotion-payment-cancel>
+            Cancelar
+          </button>
+        </div>
+      </form>
+    `;
+  }
+
   function renderPromotionRegistrations() {
     const campaign = promotionState.campaign;
     const registrations = getFilteredPromotionRegistrations();
@@ -222,7 +268,7 @@
     promotionElements.registrations.innerHTML = registrations
       .map((item, index) => {
         const activated = item.status === "activated";
-        const action = activated
+        const activationAction = activated
           ? `
               <div class="promotion-activation-copy">
                 <strong>Activada ${escapeHtml(formatDate(item.activationDate))}</strong>
@@ -244,6 +290,23 @@
                 ${campaign.activationOpen ? "Activar mensualidad" : "Disponible 15 nov"}
               </button>
             `;
+        const paymentEditAction =
+          isAdminUser() && item.movementId
+            ? `
+                <button
+                  class="ghost-button promotion-payment-edit-button"
+                  type="button"
+                  data-promotion-payment-edit="${item.id}"
+                >
+                  Corregir caja
+                </button>
+              `
+            : "";
+        const paymentEditForm =
+          isAdminUser() &&
+          Number(promotionState.editingPaymentRegistrationId) === Number(item.id)
+            ? renderPromotionPaymentEdit(item)
+            : "";
 
         return `
           <article class="promotion-registration-card ${activated ? "is-activated" : ""}">
@@ -277,8 +340,12 @@
                   ? `<p class="promotion-registration-notes">${escapeHtml(item.notes)}</p>`
                   : ""
               }
+              ${paymentEditForm}
             </div>
-            <div class="promotion-registration-action">${action}</div>
+            <div class="promotion-registration-action">
+              ${activationAction}
+              ${paymentEditAction}
+            </div>
           </article>
         `;
       })
@@ -376,6 +443,88 @@
     }
   }
 
+  function startPromotionPaymentEdit(registrationId) {
+    if (!isAdminUser()) {
+      promotionElements.feedback.textContent =
+        "Solo el administrador puede corregir la caja de una promoción.";
+      return;
+    }
+
+    promotionState.editingPaymentRegistrationId = Number(registrationId || 0);
+    promotionElements.feedback.textContent =
+      "Selecciona la caja correcta y explica el motivo del ajuste.";
+    renderPromotionRegistrations();
+    promotionElements.registrations
+      .querySelector("[data-promotion-payment-method]")
+      ?.focus();
+  }
+
+  async function handlePromotionPaymentEdit(event) {
+    const form = event.target.closest("[data-promotion-payment-edit-form]");
+    if (!form) {
+      return;
+    }
+    event.preventDefault();
+
+    if (!isAdminUser()) {
+      promotionElements.feedback.textContent =
+        "Solo el administrador puede corregir la caja de una promoción.";
+      return;
+    }
+
+    const registrationId = Number(form.dataset.promotionPaymentEditForm || 0);
+    const movementId = Number(form.dataset.promotionMovementId || 0);
+    const registration = promotionState.registrations.find(
+      (item) => Number(item.id) === registrationId
+    );
+    const paymentMethod = String(
+      form.querySelector("[data-promotion-payment-method]")?.value || ""
+    ).trim();
+    const justification = String(
+      form.querySelector("[data-promotion-payment-justification]")?.value || ""
+    ).trim();
+
+    if (!movementId || !registration) {
+      promotionElements.feedback.textContent =
+        "No se encontró el movimiento financiero de esta promoción.";
+      return;
+    }
+    if (!paymentMethod) {
+      promotionElements.feedback.textContent = "Selecciona la caja correcta.";
+      return;
+    }
+    if (paymentMethod === registration.paymentMethod) {
+      promotionElements.feedback.textContent =
+        "Selecciona una caja diferente a la registrada actualmente.";
+      return;
+    }
+    if (justification.length < 10) {
+      promotionElements.feedback.textContent =
+        "Escribe una justificación de al menos 10 caracteres.";
+      form.querySelector("[data-promotion-payment-justification]")?.focus();
+      return;
+    }
+
+    promotionElements.feedback.textContent =
+      "Actualizando la promoción y su movimiento de caja...";
+    try {
+      const result = await apiRequest(
+        `/api/box-entries/movement/${movementId}/payment-method`,
+        {
+          method: "PATCH",
+          body: JSON.stringify({ paymentMethod, justification }),
+        }
+      );
+      promotionState.editingPaymentRegistrationId = 0;
+      await loadBootstrap();
+      switchView("promocion");
+      promotionElements.feedback.textContent =
+        result.message || "La caja de la promoción quedó corregida.";
+    } catch (error) {
+      promotionElements.feedback.textContent = error.message;
+    }
+  }
+
   promotionElements.form.addEventListener("submit", handlePromotionSubmit);
   promotionElements.clientSearch.addEventListener("input", () => {
     if (
@@ -409,11 +558,30 @@
     renderPromotionRegistrations
   );
   promotionElements.registrations.addEventListener("click", (event) => {
-    const button = event.target.closest("[data-promotion-activate-id]");
-    if (button && !button.disabled) {
-      activatePromotionRegistration(button.dataset.promotionActivateId);
+    const cancelButton = event.target.closest("[data-promotion-payment-cancel]");
+    if (cancelButton) {
+      promotionState.editingPaymentRegistrationId = 0;
+      promotionElements.feedback.textContent =
+        "Corrección cancelada. No se modificó la caja.";
+      renderPromotionRegistrations();
+      return;
+    }
+
+    const editButton = event.target.closest("[data-promotion-payment-edit]");
+    if (editButton) {
+      startPromotionPaymentEdit(editButton.dataset.promotionPaymentEdit);
+      return;
+    }
+
+    const activateButton = event.target.closest("[data-promotion-activate-id]");
+    if (activateButton && !activateButton.disabled) {
+      activatePromotionRegistration(activateButton.dataset.promotionActivateId);
     }
   });
+  promotionElements.registrations.addEventListener(
+    "submit",
+    handlePromotionPaymentEdit
+  );
 
   const originalLoadBootstrap = window.loadBootstrap || loadBootstrap;
   window.loadBootstrap = async function promotionLoadBootstrap(...args) {

@@ -2049,11 +2049,37 @@ textarea {
 }
 
 .promotion-registration-action {
+  display: grid;
+  gap: 8px;
   min-width: 154px;
 }
 
 .promotion-activate-button {
   width: 100%;
+}
+
+.promotion-payment-edit-button {
+  width: 100%;
+}
+
+.promotion-payment-edit-form {
+  display: grid;
+  grid-template-columns: minmax(150px, 0.7fr) minmax(220px, 1.3fr) auto;
+  gap: 10px;
+  align-items: end;
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid rgba(159, 239, 1, 0.45);
+  border-radius: 14px;
+  background: rgba(159, 239, 1, 0.07);
+}
+
+.promotion-payment-edit-form label {
+  min-width: 0;
+}
+
+.promotion-payment-edit-form .form-actions {
+  margin: 0;
 }
 
 .promotion-activation-copy {
@@ -2082,6 +2108,14 @@ textarea {
 
   .promotion-activation-copy {
     text-align: left;
+  }
+
+  .promotion-payment-edit-form {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .promotion-payment-edit-form .form-actions {
+    grid-column: 1 / -1;
   }
 }
 
@@ -2116,6 +2150,14 @@ textarea {
 
   .promotion-registration-meta {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .promotion-payment-edit-form {
+    grid-template-columns: 1fr;
+  }
+
+  .promotion-payment-edit-form .form-actions {
+    grid-column: 1;
   }
 }
 

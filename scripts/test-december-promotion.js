@@ -29,14 +29,24 @@ async function main() {
       (select id from app_users
         where role = 'administrador' and is_active = true
         order by id limit 1) as admin_id,
-      (select value from catalog_items
-        where group_name = 'mediosPago' and is_active = true
-        order by sort_order, id limit 1) as payment_method,
+      (select json_agg(value order by sort_order, id)
+        from (
+          select value, sort_order, id
+          from catalog_items
+          where group_name = 'mediosPago' and is_active = true
+          order by sort_order, id
+          limit 2
+        ) active_methods) as payment_methods,
       to_char(current_date, 'YYYY-MM-DD') as payment_date
   `);
   const setup = setupResult.rows[0] || {};
-  if (!setup.admin_id || !setup.payment_method) {
-    throw new Error("Faltan un administrador o una caja activa para ejecutar la prueba.");
+  const paymentMethods = Array.isArray(setup.payment_methods)
+    ? setup.payment_methods
+    : [];
+  if (!setup.admin_id || paymentMethods.length < 2) {
+    throw new Error(
+      "Faltan un administrador o dos cajas activas para ejecutar la prueba."
+    );
   }
 
   const clientResult = await query(
@@ -63,7 +73,7 @@ async function main() {
     body: JSON.stringify({
       clientId,
       paymentDate: setup.payment_date,
-      paymentMethod: setup.payment_method,
+      paymentMethod: paymentMethods[0],
       notes: runId,
     }),
   });
@@ -94,7 +104,7 @@ async function main() {
     !movement ||
     movement.movement_type !== "Ingreso" ||
     movement.category !== "Promoción diciembre" ||
-    movement.payment_method !== setup.payment_method ||
+    movement.payment_method !== paymentMethods[0] ||
     Number(movement.total_amount) !== 66000 ||
     Number(movement.paid_amount) !== 66000 ||
     Number(movement.cash_flow) !== 66000 ||
@@ -103,14 +113,69 @@ async function main() {
     throw new Error("El movimiento financiero promocional quedó incompleto.");
   }
 
+  const correction = await api(
+    `/api/box-entries/movement/${movementId}/payment-method`,
+    {
+      method: "PATCH",
+      body: JSON.stringify({
+        paymentMethod: paymentMethods[1],
+        justification: "Corrección de caja en promoción de prueba",
+      }),
+    }
+  );
+  if (!correction.response.ok) {
+    throw new Error(
+      correction.payload.error || "No se pudo corregir la caja de la promoción."
+    );
+  }
+
+  const correctedResult = await query(
+    `
+      select
+        pr.payment_method as registration_payment_method,
+        m.payment_method as movement_payment_method,
+        audit.previous_payment_method,
+        audit.new_payment_method,
+        audit.justification
+      from promotion_registrations pr
+      join movements m on m.id = pr.movement_id
+      left join lateral (
+        select *
+        from box_payment_method_edit_audits
+        where movement_id = m.id
+        order by created_at desc, id desc
+        limit 1
+      ) audit on true
+      where pr.id = $1
+    `,
+    [registrationId]
+  );
+  const corrected = correctedResult.rows[0] || {};
+  if (
+    corrected.registration_payment_method !== paymentMethods[1] ||
+    corrected.movement_payment_method !== paymentMethods[1] ||
+    corrected.previous_payment_method !== paymentMethods[0] ||
+    corrected.new_payment_method !== paymentMethods[1] ||
+    !String(corrected.justification || "").includes("Corrección de caja")
+  ) {
+    throw new Error(
+      "La corrección no sincronizó la promoción, el movimiento y su auditoría."
+    );
+  }
+
   const after = await api("/api/promotions/december-2026");
   if (
     Number(after.payload.campaign?.registeredCount) !==
       Number(before.payload.campaign.registeredCount) + 1 ||
     Number(after.payload.campaign?.availableSlots) !==
-      Number(before.payload.campaign.availableSlots) - 1
+      Number(before.payload.campaign.availableSlots) - 1 ||
+    after.payload.registrations?.find(
+      (item) => Number(item.id) === registrationId
+    )?.paymentMethod !== paymentMethods[1]
   ) {
-    throw new Error("El contador de cupos no se actualizó correctamente.");
+    throw new Error(
+      "El contador de cupos o la caja corregida no se actualizó correctamente."
+    );
   }
 
   const duplicate = await api("/api/promotions/december-2026/registrations", {
@@ -118,7 +183,7 @@ async function main() {
     body: JSON.stringify({
       clientId,
       paymentDate: setup.payment_date,
-      paymentMethod: setup.payment_method,
+      paymentMethod: paymentMethods[0],
       notes: runId,
     }),
   });
@@ -139,7 +204,7 @@ async function main() {
   }
 
   console.log(
-    "Prueba de promoción OK: cupo único, ingreso en caja y activación controlada."
+    "Prueba de promoción OK: cupo único, corrección de caja auditada y activación controlada."
   );
 }
 

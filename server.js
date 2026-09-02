@@ -2844,6 +2844,15 @@ app.patch(
             [movementId, paymentMethod]
           );
           movementRow = updatedMovementResult.rows[0];
+
+          await client.query(
+            `
+              update promotion_registrations
+              set payment_method = $2, updated_at = now()
+              where movement_id = $1
+            `,
+            [movementId, paymentMethod]
+          );
         } else {
           const collectionResult = await client.query(
             `
