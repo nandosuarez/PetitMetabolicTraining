@@ -709,6 +709,35 @@
     lastAutoSalesDescription = singleName;
   }
 
+  function getEditingSalesMovement() {
+    const movementId = String(elements.movementId?.value || "");
+    if (!movementId) {
+      return null;
+    }
+
+    return (
+      state.movements.find((item) => String(item.id) === movementId) || null
+    );
+  }
+
+  function isMovementBusinessProductSelectable(product) {
+    if (
+      !product ||
+      product.businessLine !== (elements.linea?.value || "Gimnasio")
+    ) {
+      return false;
+    }
+
+    if (product.isActive) {
+      return true;
+    }
+
+    const editingMovement = getEditingSalesMovement();
+    return (
+      Number(editingMovement?.businessProductId || 0) === Number(product.id || 0)
+    );
+  }
+
   window.fillMovementBusinessProductOptions = function fillMovementOptionsOverride(
     selectedValue = ""
   ) {
@@ -716,25 +745,29 @@
       return;
     }
 
-    const selectedRecord = getBusinessProductById(selectedValue);
+    const normalizedSelectedValue = String(
+      selectedValue || elements.movementBusinessProductId.value || ""
+    );
+    const selectedRecord = getBusinessProductById(normalizedSelectedValue);
+    const selectableSelectedRecord = isMovementBusinessProductSelectable(
+      selectedRecord
+    )
+      ? selectedRecord
+      : null;
     fillSelectFromRecords(
       elements.movementBusinessProductId,
       getAvailableMovementBusinessProducts(),
       {
-        selectedValue: String(
-          selectedValue || elements.movementBusinessProductId.value || ""
-        ),
-        includeRecord:
-          selectedRecord &&
-          selectedRecord.businessLine === (elements.linea?.value || "Gimnasio")
-            ? selectedRecord
-            : null,
+        selectedValue: normalizedSelectedValue,
+        includeRecord: selectableSelectedRecord,
         placeholder: "Selecciona producto o servicio",
         labelBuilder: (item) => {
           const detailLabel = getBusinessProductDetailLabel(item);
           return `${item.name} - ${getBusinessProductCategoryLabel(item)}${
             detailLabel ? ` - ${detailLabel}` : ""
-          } - ${formatCurrency(item.defaultAmount)}`;
+          } - ${formatCurrency(item.defaultAmount)}${
+            item.isActive ? "" : " - Inactivo (historico)"
+          }`;
         },
       }
     );
@@ -761,7 +794,11 @@
       );
       const currentLine = elements.linea?.value || "Gimnasio";
 
-      if (!selectedProduct || selectedProduct.businessLine !== currentLine) {
+      if (
+        !selectedProduct ||
+        selectedProduct.businessLine !== currentLine ||
+        !isMovementBusinessProductSelectable(selectedProduct)
+      ) {
         if (!options.preserveValue) {
           elements.movementBusinessProductId.value = "";
         }
@@ -917,9 +954,13 @@
     const selectedProduct = getBusinessProductById(
       elements.movementBusinessProductId.value
     );
-    if (!selectedProduct) {
+    if (
+      !selectedProduct ||
+      !selectedProduct.isActive ||
+      selectedProduct.businessLine !== (elements.linea?.value || "Gimnasio")
+    ) {
       elements.movementFeedback.textContent =
-        "Selecciona el producto o servicio que quieres agregar a la venta.";
+        "Selecciona un producto o servicio activo para agregarlo a la venta.";
       elements.movementBusinessProductId?.focus();
       return;
     }
@@ -1074,6 +1115,17 @@
       item.quantity = quantity;
     }
 
+    for (const item of draftItems) {
+      const product = getBusinessProductById(item.productId);
+      if (!isMovementBusinessProductSelectable(product)) {
+        return {
+          valid: false,
+          message: `${item.name || "Uno de los productos"} esta inactivo o ya no esta disponible para esta venta.`,
+          focusNode: elements.movementBusinessProductId,
+        };
+      }
+    }
+
     return {
       valid: true,
       items: draftItems,
@@ -1212,9 +1264,13 @@
         let remainingPaid = paidAmount;
         for (const item of draftPricing.items) {
           const currentProduct = getBusinessProductById(item.productId);
-          if (!currentProduct) {
+          if (
+            !currentProduct ||
+            !currentProduct.isActive ||
+            currentProduct.businessLine !== (elements.linea?.value || "Gimnasio")
+          ) {
             elements.movementFeedback.textContent =
-              `No encontramos el producto ${item.name}. Actualiza el detalle de venta e intenta de nuevo.`;
+              `${item.name} esta inactivo o ya no esta disponible. Actualiza el detalle de venta e intenta de nuevo.`;
             return;
           }
 

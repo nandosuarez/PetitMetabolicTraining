@@ -2503,7 +2503,12 @@ app.put("/api/movements/:id", requireOperationalWriteAccess, asyncHandler(async 
         client,
         movementId,
         payload,
-        Number(req.authUser.id)
+        Number(req.authUser.id),
+        {
+          allowInactiveBusinessProductId: Number(
+            previousSnapshot.businessProductId || 0
+          ),
+        }
       );
 
       await client.query("commit");
@@ -8303,7 +8308,12 @@ async function lockInventoryProductForMovement(client, productId) {
   return result.rows[0];
 }
 
-async function getBusinessProductInventoryProfile(client, businessProductId, businessLine) {
+async function getBusinessProductInventoryProfile(
+  client,
+  businessProductId,
+  businessLine,
+  options = {}
+) {
   if (!(Number(businessProductId) > 0)) {
     return null;
   }
@@ -8331,6 +8341,19 @@ async function getBusinessProductInventoryProfile(client, businessProductId, bus
     throw httpError(
       400,
       "El producto o servicio seleccionado no corresponde a la línea del movimiento."
+    );
+  }
+
+  const allowInactiveBusinessProductId = Number(
+    options.allowInactiveBusinessProductId || 0
+  );
+  if (
+    !productRow.is_active &&
+    allowInactiveBusinessProductId !== Number(productRow.id)
+  ) {
+    throw httpError(
+      400,
+      "El producto o servicio seleccionado esta inactivo. Activalo antes de registrar la venta."
     );
   }
 
@@ -8652,12 +8675,19 @@ async function revertMovementInventoryLink(client, movementId) {
   return linkResult.rows;
 }
 
-async function applyMovementInventoryLink(client, movementId, payload, authUserId) {
+async function applyMovementInventoryLink(
+  client,
+  movementId,
+  payload,
+  authUserId,
+  options = {}
+) {
   const businessProductProfile = payload.businessProductId
     ? await getBusinessProductInventoryProfile(
         client,
         payload.businessProductId,
-        payload.linea
+        payload.linea,
+        options
       )
     : null;
   const links = buildInventoryLinksFromMovementPayload(payload, businessProductProfile);
