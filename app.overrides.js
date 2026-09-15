@@ -50,6 +50,10 @@
     table: document.getElementById("purchases-table"),
   };
   const salesElements = {
+    productSearch: document.getElementById("movement-business-product-search"),
+    productSuggestions: document.getElementById(
+      "movement-business-product-suggestions"
+    ),
     quantity: document.getElementById("movement-item-quantity"),
     addItemButton: document.getElementById("movement-add-item"),
     itemsList: document.getElementById("sales-items-list"),
@@ -738,6 +742,149 @@
     );
   }
 
+  function getMovementBusinessProductMatches(query = "") {
+    const normalizedQuery = normalizeSearchValue(String(query || "").trim());
+    const records = [...getAvailableMovementBusinessProducts()];
+    const selectedProduct = getBusinessProductById(
+      elements.movementBusinessProductId?.value || ""
+    );
+
+    if (
+      isMovementBusinessProductSelectable(selectedProduct) &&
+      !records.some((item) => Number(item.id) === Number(selectedProduct.id))
+    ) {
+      records.push(selectedProduct);
+    }
+
+    if (!normalizedQuery) {
+      return records;
+    }
+
+    return records.filter((item) =>
+      normalizeSearchValue(
+        [
+          item.name,
+          getBusinessProductCategoryLabel(item),
+          getBusinessProductDetailLabel(item),
+          item.businessLine,
+          item.defaultAmount,
+          formatCurrency(item.defaultAmount),
+        ]
+          .filter(Boolean)
+          .join(" ")
+      ).includes(normalizedQuery)
+    );
+  }
+
+  function hideMovementBusinessProductSuggestions() {
+    if (!salesElements.productSuggestions) {
+      return;
+    }
+
+    salesElements.productSuggestions.classList.add("is-hidden");
+    salesElements.productSearch?.setAttribute("aria-expanded", "false");
+  }
+
+  function renderMovementBusinessProductSuggestions(query = "") {
+    if (!salesElements.productSuggestions) {
+      return;
+    }
+
+    const matches = getMovementBusinessProductMatches(query);
+    salesElements.productSuggestions.innerHTML = matches.length
+      ? matches
+          .slice(0, 10)
+          .map((item) => {
+            const detailLabel = getBusinessProductDetailLabel(item);
+            return `
+              <button
+                class="search-suggestion-item"
+                type="button"
+                role="option"
+                data-movement-business-product-option="${escapeHtml(String(item.id))}"
+              >
+                <span class="search-suggestion-title">${escapeHtml(item.name || "")}</span>
+                <span class="search-suggestion-meta">${escapeHtml(
+                  [
+                    getBusinessProductCategoryLabel(item),
+                    detailLabel,
+                    formatCurrency(item.defaultAmount),
+                    item.isActive ? "Activo" : "Inactivo (histórico)",
+                  ]
+                    .filter(Boolean)
+                    .join(" · ")
+                )}</span>
+              </button>
+            `;
+          })
+          .join("")
+      : `
+          <div class="search-suggestion-empty">
+            No encontramos productos o servicios con ese filtro.
+          </div>
+        `;
+    salesElements.productSuggestions.classList.remove("is-hidden");
+    salesElements.productSearch?.setAttribute("aria-expanded", "true");
+  }
+
+  function syncMovementBusinessProductSearchFromSelection() {
+    if (!salesElements.productSearch) {
+      return;
+    }
+
+    const selectedProduct = getBusinessProductById(
+      elements.movementBusinessProductId?.value || ""
+    );
+    salesElements.productSearch.value = selectedProduct?.name || "";
+    salesElements.productSearch.placeholder = getAvailableMovementBusinessProducts().length
+      ? "Escribe para buscar un producto o servicio"
+      : "No hay productos o servicios activos en esta línea";
+  }
+
+  function applyMovementBusinessProductSelection(product) {
+    if (!isMovementBusinessProductSelectable(product)) {
+      return false;
+    }
+
+    elements.movementBusinessProductId.value = String(product.id);
+    if (salesElements.productSearch) {
+      salesElements.productSearch.value = product.name || "";
+    }
+    hideMovementBusinessProductSuggestions();
+    syncMovementBusinessProductSelection();
+    return true;
+  }
+
+  function syncMovementBusinessProductSelectionFromSearch(options = {}) {
+    if (!salesElements.productSearch || !elements.movementBusinessProductId) {
+      return false;
+    }
+
+    const rawValue = salesElements.productSearch.value.trim();
+    if (!rawValue) {
+      elements.movementBusinessProductId.value = "";
+      return true;
+    }
+
+    const matches = getMovementBusinessProductMatches(rawValue);
+    const normalizedQuery = normalizeSearchValue(rawValue);
+    let selectedProduct =
+      matches.find(
+        (item) => normalizeSearchValue(item.name || "") === normalizedQuery
+      ) || null;
+
+    if (!selectedProduct && options.allowSingleMatch && matches.length === 1) {
+      selectedProduct = matches[0];
+    }
+
+    if (!selectedProduct) {
+      elements.movementBusinessProductId.value = "";
+      return false;
+    }
+
+    return applyMovementBusinessProductSelection(selectedProduct);
+  }
+
   window.fillMovementBusinessProductOptions = function fillMovementOptionsOverride(
     selectedValue = ""
   ) {
@@ -771,6 +918,7 @@
         },
       }
     );
+    syncMovementBusinessProductSearchFromSelection();
   };
 
   window.syncMovementBusinessProductSelection =
@@ -802,6 +950,7 @@
         if (!options.preserveValue) {
           elements.movementBusinessProductId.value = "";
         }
+        syncMovementBusinessProductSearchFromSelection();
 
         syncCategoryOptions({
           includeValue:
@@ -872,6 +1021,8 @@
             selectedProduct.defaultAmount
           )}. Al registrar la venta, ${stockMessage}.`;
       }
+
+      syncMovementBusinessProductSearchFromSelection();
 
       return selectedProduct;
     };
@@ -3113,6 +3264,62 @@
   }
 
   function bindSalesDraftEvents() {
+    salesElements.productSearch?.addEventListener("input", () => {
+      const selectedProduct = getBusinessProductById(
+        elements.movementBusinessProductId?.value || ""
+      );
+      if (
+        !selectedProduct ||
+        normalizeSearchValue(salesElements.productSearch.value) !==
+          normalizeSearchValue(selectedProduct.name || "")
+      ) {
+        elements.movementBusinessProductId.value = "";
+      }
+      renderMovementBusinessProductSuggestions(salesElements.productSearch.value);
+    });
+    ["focus", "click"].forEach((eventName) => {
+      salesElements.productSearch?.addEventListener(eventName, () =>
+        renderMovementBusinessProductSuggestions(salesElements.productSearch.value)
+      );
+    });
+    salesElements.productSearch?.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") {
+        hideMovementBusinessProductSuggestions();
+        return;
+      }
+
+      if (event.key !== "Enter") {
+        return;
+      }
+
+      const firstMatch = getMovementBusinessProductMatches(
+        salesElements.productSearch.value
+      )[0];
+      if (!firstMatch) {
+        return;
+      }
+
+      event.preventDefault();
+      applyMovementBusinessProductSelection(firstMatch);
+    });
+    salesElements.productSearch?.addEventListener("change", () =>
+      syncMovementBusinessProductSelectionFromSearch({ allowSingleMatch: true })
+    );
+    salesElements.productSearch?.addEventListener("blur", () => {
+      window.setTimeout(hideMovementBusinessProductSuggestions, 120);
+    });
+    salesElements.productSuggestions?.addEventListener("click", (event) => {
+      const trigger = event.target.closest(
+        "[data-movement-business-product-option]"
+      );
+      if (!trigger) {
+        return;
+      }
+
+      applyMovementBusinessProductSelection(
+        getBusinessProductById(trigger.dataset.movementBusinessProductOption)
+      );
+    });
     salesElements.addItemButton?.addEventListener("click", addSalesDraftItem);
     salesElements.quantity?.addEventListener("keydown", (event) => {
       if (event.key !== "Enter") {

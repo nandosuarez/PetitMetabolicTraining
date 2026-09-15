@@ -325,9 +325,31 @@
                   <select id="categoria" name="categoria" required></select>
                 </label>
 
-                <label>
+                <label class="search-field">
                   Producto / servicio
-                  <select id="movement-business-product-id" name="businessProductId">
+                  <input
+                    id="movement-business-product-search"
+                    type="search"
+                    placeholder="Escribe para buscar un producto o servicio"
+                    autocomplete="off"
+                    role="combobox"
+                    aria-autocomplete="list"
+                    aria-controls="movement-business-product-suggestions"
+                    aria-expanded="false"
+                  />
+                  <div
+                    id="movement-business-product-suggestions"
+                    class="search-suggestions is-hidden"
+                    role="listbox"
+                    aria-label="Sugerencias de productos y servicios"
+                  ></div>
+                  <select
+                    id="movement-business-product-id"
+                    name="businessProductId"
+                    class="is-hidden"
+                    aria-hidden="true"
+                    tabindex="-1"
+                  >
                     <option value="">Sin producto o servicio</option>
                   </select>
                   <span id="movement-business-product-feedback" class="inline-hint">
